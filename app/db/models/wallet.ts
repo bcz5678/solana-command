@@ -1,0 +1,63 @@
+
+// Wallet Data Transfer Object for API calls
+
+export interface WalletModelDTO {
+    id?: number;
+    created_at?: string; 
+    public_key: string;
+    private_key: string;
+    funded: boolean;
+    wallet_type_id: number;
+    solana_balance: number;
+    owner_id: number;
+    group_id: number;
+    token_holdings: TokenDTO[];
+}
+
+export interface WalletTypeDTO {
+    id?: number;
+    created_at?: string;
+    name: string;
+}
+
+export interface WalletGroupDTO {
+    id?: number;
+    created_at?: string;
+    name: string;
+    owner_id: number;
+}
+
+export interface OwnerDTO {
+    id?: number;
+    created_at?: string;
+    name: string;
+}
+
+export interface TokenDTO {
+    id?: number;
+    created_at?: string;
+    name: string;
+    owner_id: number;
+    symbol: string;
+    description: string;
+    dev_wallet_id: number;
+    token_pair: string;
+}
+
+
+// Wallet entity f
+
+export class Wallet {
+    constructor(
+        public id: number,
+        public created_at: string, 
+        public public_key: string,
+        public private_key: string,
+        public funded: boolean,
+        public wallet_type: number,
+        public solana_balance: number,
+        public owner: number,
+        public group : number,
+        public token_holdings: TokenDTO[],
+    ){}
+}

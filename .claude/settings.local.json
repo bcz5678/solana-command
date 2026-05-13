@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"const pkg = require\\('@base-ui/react/package.json'\\); const keys = Object.keys\\(pkg.exports || {}\\); console.log\\(keys.filter\\(k=>k.includes\\('combobox'\\)\\)\\)\")",
+      "Bash(xargs grep -l \"wallet_type\\\\|wallet_groups\\\\|owners\")",
+      "Bash(npx shadcn@latest add checkbox --yes)",
+      "Bash(npx shadcn@latest add accordion --yes)",
+      "Bash(mkdir -p \"c:/Solana-Command/solana-node/components/tokens/create\")"
+    ],
+    "additionalDirectories": [
+      "c:\\Solana-Command\\solana-node\\components\\tokens"
+    ]
+  }
+}

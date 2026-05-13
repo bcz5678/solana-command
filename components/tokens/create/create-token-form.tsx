@@ -1,0 +1,433 @@
+'use client'
+
+import { useState, useRef, useEffect } from "react";
+import { useForm, Controller, SubmitHandler } from "react-hook-form";
+import { Button } from "@/components/ui/button";
+import { InputGroup, InputGroupInput } from '@/components/ui/input-group';
+import { FieldDescription, FieldLabel } from "@/components/ui/field";
+import {
+    Select,
+    SelectContent,
+    SelectGroup,
+    SelectItem,
+    SelectLabel,
+    SelectSeparator,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { createClient } from "@/lib/supabase/client";
+
+import { Keypair } from '@solana/web3.js';
+import {
+    estimateVanityMintAttempts,
+    generateVanityMint
+} from "@/modules/vanityMint";
+
+type WalletType = { id: number; name: string };
+type Wallet = { id: number; public_key: string; wallet_type_id: number };
+
+interface CreateTokenFormInput {
+    creatorWallet: string;
+    name: string;
+    symbol: string;
+    description: string;
+    websiteUrl?: string;
+    twitterUrl?: string;
+    telegramHandle?: string;
+}
+
+function truncate(key: string) {
+    return `${key.slice(0, 8)}...${key.slice(-8)}`;
+}
+
+const supabase = createClient();
+
+export default function CreateTokenForm() {
+    const [logoFile, setLogoFile] = useState<File | null>(null);
+    const [isDragging, setIsDragging] = useState(false);
+    const [logoError, setLogoError] = useState('');
+    const [submitStatus, setSubmitStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+    const [statusMessage, setStatusMessage] = useState('');
+    const [mintStatus, setMintStatus] = useState<'idle' | 'checking' | 'grinding' | 'found'>('idle');
+    const [mintAddress, setMintAddress] = useState('');
+    const [wallets, setWallets] = useState<Wallet[]>([]);
+    const [walletTypes, setWalletTypes] = useState<WalletType[]>([]);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const { register, handleSubmit, control, formState: { errors } } = useForm<CreateTokenFormInput>();
+
+    useEffect(() => {
+        Promise.all([
+            supabase.from('wallets').select('id, public_key, wallet_type_id'),
+            supabase.from('wallet_type').select('id, name'),
+        ]).then(([walletRes, typeRes]) => {
+            if (walletRes.data) setWallets(walletRes.data);
+            if (typeRes.data) setWalletTypes(typeRes.data);
+        });
+    }, []);
+
+    const onSubmit: SubmitHandler<CreateTokenFormInput> = async (data) => {
+        if (!logoFile) {
+            setLogoError('Logo image is required.');
+            return;
+        }
+        setLogoError('');
+        setSubmitStatus('loading');
+        setStatusMessage('');
+        setMintStatus('checking');
+        setMintAddress('');
+
+        // 1. Try to claim a prebuilt vanity keypair from the DB
+        let mintKeypair: unknown;
+        let contractAddress: string;
+        let vanityId: number | null = null;
+
+        const { data: available } = await supabase
+            .from('vanity_keypairs')
+            .select('id, mint_keypair, contract_address')
+            .eq('available', true)
+            .limit(1)
+            .single();
+
+        if (available) {
+            mintKeypair = available.mint_keypair;
+            contractAddress = available.contract_address;
+            vanityId = available.id;
+            setMintStatus('found');
+            setMintAddress(contractAddress);
+            setStatusMessage(`Using prebuilt address ${contractAddress}`);
+        } else {
+            // 2. None available — grind a fresh one
+            setMintStatus('grinding');
+            const expected = estimateVanityMintAttempts({ suffix: 'pump' });
+            setStatusMessage(`No prebuilt address available. Estimated attempts: ~${expected}`);
+
+            const { keypair: mint, durationMs } = await generateVanityMint({
+                suffix: 'pump',
+                onProgress: ({ attempts, elapsedMs }) => {
+                    if (attempts % 5_000 === 0) {
+                        setStatusMessage(`${attempts.toLocaleString()}/~${expected} attempts tried in ${(elapsedMs / 1000).toFixed(1)}s`);
+                    }
+                },
+            });
+
+            mintKeypair = mint.secretKey;
+            contractAddress = mint.publicKey.toBase58();
+            setMintStatus('found');
+            setMintAddress(contractAddress);
+            setStatusMessage(`Found ${contractAddress} in ${durationMs}ms`);
+        }
+
+        // 3. Upload logo
+        const ext = logoFile.name.split('.').pop();
+        const { data: imgData, error: uploadError } = await supabase.storage
+            .from('token-media')
+            .upload(`public/${data.symbol}_logo_img_${contractAddress.slice(0, 5)}.${ext}`, logoFile);
+
+        if (uploadError) {
+            setSubmitStatus('error');
+            setStatusMessage('Error uploading logo image: ' + uploadError.message);
+            return;
+        }
+
+        // 4. Insert token
+        const { error: insertError } = await supabase
+            .from('tokens')
+            .insert([{
+                dev_wallet_id: data.creatorWallet,
+                name: data.name,
+                symbol: data.symbol,
+                description: data.description,
+                mint_keypair: mintKeypair,
+                contract_address: contractAddress,
+                logo_image_path: imgData?.path,
+                website_url: data.websiteUrl,
+                twitter_url: data.twitterUrl,
+                telegram_handle: data.telegramHandle,
+            }])
+            .select();
+
+        if (insertError) {
+            setSubmitStatus('error');
+            setStatusMessage('Error creating token: ' + insertError.message);
+            return;
+        }
+
+        // 5. Mark the vanity row as consumed
+        if (vanityId !== null) {
+            await supabase
+                .from('vanity_keypairs')
+                .update({ available: false })
+                .eq('id', vanityId);
+        }
+
+        setSubmitStatus('success');
+        setStatusMessage('Token created successfully!');
+    };
+
+    const handleFileSelect = (file: File | null) => {
+        if (file) {
+            setLogoFile(file);
+            setLogoError('');
+        }
+    };
+
+    const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        setIsDragging(false);
+        handleFileSelect(e.dataTransfer.files[0] ?? null);
+    };
+
+    return (
+        <div className="grid grid-cols-3 gap-4">
+            <form onSubmit={handleSubmit(onSubmit)}>
+
+                <p className="mt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Token Info
+                </p>
+
+                <div className="mt-4">
+                    <FieldLabel htmlFor="input-creator-wallet" className="mb-2">Creator Wallet</FieldLabel>
+                    <Controller
+                        name="creatorWallet"
+                        control={control}
+                        rules={{ required: "Creator wallet is required" }}
+                        render={({ field }) => (
+                            <Select onValueChange={field.onChange} value={field.value ?? ""}>
+                                <SelectTrigger id="input-creator-wallet">
+                                    <SelectValue placeholder="Select creator wallet" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {walletTypes.map((type, i) => {
+                                        const group = wallets.filter((w) => w.wallet_type_id === type.id);
+                                        if (!group.length) return null;
+                                        return (
+                                            <SelectGroup key={type.id}>
+                                                {i > 0 && <SelectSeparator />}
+                                                <SelectLabel>{type.name}</SelectLabel>
+                                                {group.map((w) => (
+                                                    <SelectItem key={w.id} value={String(w.id)}>
+                                                        {truncate(w.public_key)}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectGroup>
+                                        );
+                                    })}
+                                </SelectContent>
+                            </Select>
+                        )}
+                    />
+                    {errors.creatorWallet && (
+                        <p className="mt-1 text-sm text-destructive">{errors.creatorWallet.message}</p>
+                    )}
+                </div>
+
+                <div className="mt-4">
+                    <FieldLabel htmlFor="input-token-name">Token Name</FieldLabel>
+                    <InputGroup className="mt-2 mb-1">
+                        <InputGroupInput
+                            {...register("name", { required: "Token name is required" })}
+                            id="input-token-name"
+                            name="name"
+                            type="text"
+                            placeholder="e.g. My Token"
+                        />
+                    </InputGroup>
+                    {errors.name && (
+                        <p className="mt-1 text-sm text-destructive">{errors.name.message}</p>
+                    )}
+                </div>
+
+                <div className="mt-4">
+                    <FieldLabel htmlFor="input-symbol">Symbol</FieldLabel>
+                    <InputGroup className="mt-2 mb-1">
+                        <InputGroupInput
+                            {...register("symbol", { required: "Symbol is required" })}
+                            id="input-symbol"
+                            name="symbol"
+                            type="text"
+                            placeholder="e.g. MTK"
+                        />
+                    </InputGroup>
+                    {errors.symbol && (
+                        <p className="mt-1 text-sm text-destructive">{errors.symbol.message}</p>
+                    )}
+                </div>
+
+                <div className="mt-4">
+                    <FieldLabel>Choose Logo Image</FieldLabel>
+                    <div
+                        className={[
+                            "mt-2 flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed px-4 py-6 text-sm transition-colors cursor-pointer",
+                            isDragging
+                                ? "border-primary bg-primary/5 text-primary"
+                                : "border-border text-muted-foreground hover:border-primary/50 hover:bg-muted/30",
+                        ].join(" ")}
+                        onClick={() => fileInputRef.current?.click()}
+                        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                        onDragLeave={() => setIsDragging(false)}
+                        onDrop={handleDrop}
+                    >
+                        <svg className="size-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                        </svg>
+                        {logoFile ? (
+                            <span className="font-medium text-foreground">{logoFile.name}</span>
+                        ) : (
+                            <span>Drag & drop or <span className="text-primary underline">browse</span></span>
+                        )}
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => handleFileSelect(e.target.files?.[0] ?? null)}
+                        />
+                    </div>
+                    {logoError && (
+                        <p className="mt-1 text-sm text-destructive">{logoError}</p>
+                    )}
+                    <FieldDescription className="italic">
+                        PNG, JPG, GIF or SVG. Recommended 512×512.
+                    </FieldDescription>
+                </div>
+
+                <div className="mt-4">
+                    <FieldLabel htmlFor="input-description">Description</FieldLabel>
+                    <textarea
+                        {...register("description", { required: "Description is required" })}
+                        id="input-description"
+                        rows={4}
+                        placeholder="Describe your token..."
+                        className="mt-2 mb-1 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                    {errors.description && (
+                        <p className="mt-1 text-sm text-destructive">{errors.description.message}</p>
+                    )}
+                </div>
+
+                <p className="mt-6 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Socials
+                </p>
+
+                <div className="mt-4">
+                    <FieldLabel htmlFor="input-website">
+                        Website URL{' '}
+                        <span className="font-normal text-muted-foreground">(optional)</span>
+                    </FieldLabel>
+                    <InputGroup className="mt-2 mb-1">
+                        <InputGroupInput
+                            {...register("websiteUrl")}
+                            id="input-website"
+                            name="websiteUrl"
+                            type="url"
+                            placeholder="https://yourtoken.io"
+                        />
+                    </InputGroup>
+                </div>
+
+                <div className="mt-4">
+                    <FieldLabel htmlFor="input-twitter">
+                        Twitter URL{' '}
+                        <span className="font-normal text-muted-foreground">(optional)</span>
+                    </FieldLabel>
+                    <InputGroup className="mt-2 mb-1">
+                        <InputGroupInput
+                            {...register("twitterUrl")}
+                            id="input-twitter"
+                            name="twitterUrl"
+                            type="url"
+                            placeholder="https://twitter.com/yourtoken"
+                        />
+                    </InputGroup>
+                </div>
+
+                <div className="mt-4">
+                    <FieldLabel htmlFor="input-telegram">
+                        Telegram Handle{' '}
+                        <span className="font-normal text-muted-foreground">(optional)</span>
+                    </FieldLabel>
+                    <InputGroup className="mt-2 mb-1">
+                        <InputGroupInput
+                            {...register("telegramHandle")}
+                            id="input-telegram"
+                            name="telegramHandle"
+                            type="text"
+                            placeholder="@yourtoken"
+                        />
+                    </InputGroup>
+                </div>
+
+                {mintStatus !== 'idle' && (
+                    <div className={[
+                        "mt-6 rounded-md px-3 py-2.5 text-sm flex flex-col gap-1",
+                        mintStatus === 'found'
+                            ? "bg-green-500/10 text-green-700 dark:text-green-400"
+                            : "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+                    ].join(' ')}>
+                        <span className="flex items-center gap-2 font-medium">
+                            {mintStatus === 'checking' ? (
+                                <>
+                                    <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent shrink-0" />
+                                    Checking for available address…
+                                </>
+                            ) : mintStatus === 'grinding' ? (
+                                <>
+                                    <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent shrink-0" />
+                                    Grinding vanity address…
+                                </>
+                            ) : (
+                                <>
+                                    <svg className="size-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                    </svg>
+                                    Mint address found
+                                </>
+                            )}
+                        </span>
+                        {(mintStatus === 'checking' || mintStatus === 'grinding') && statusMessage && (
+                            <span className="font-mono text-xs opacity-80">{statusMessage}</span>
+                        )}
+                        {mintStatus === 'found' && mintAddress && (
+                            <span className="font-mono text-xs opacity-80 break-all">{mintAddress}</span>
+                        )}
+                    </div>
+                )}
+
+                <Button
+                    className="mt-3"
+                    size="lg"
+                    variant="default"
+                    type="submit"
+                    disabled={submitStatus === 'loading'}
+                >
+                    {submitStatus === 'loading' ? (
+                        <span className="flex items-center gap-2">
+                            <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                            Creating...
+                        </span>
+                    ) : 'Create Token'}
+                </Button>
+
+                {submitStatus === 'success' && (
+                    <div className="mt-3 flex items-center gap-2 rounded-md bg-green-500/10 px-3 py-2 text-sm text-green-600 dark:text-green-400">
+                        <svg className="size-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                        </svg>
+                        {statusMessage}
+                    </div>
+                )}
+
+                {submitStatus === 'error' && (
+                    <div className="mt-3 flex items-center gap-2 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                        <svg className="size-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                        </svg>
+                        {statusMessage}
+                    </div>
+                )}
+
+            </form>
+        </div>
+    );
+}
