@@ -6,6 +6,7 @@ import LaunchTypeSelect from '@/components/tokens/launch/launch-type-select';
 import LaunchCurrentConfiguration from '@/components/tokens/launch/launch-current-configuration'
 import { LaunchType } from './types'
 import LaunchBuyerConfig from './launch-buyer-config';
+import { BuyerConfig } from './buyer-config-class';
 
 const steps = [
     {
@@ -50,16 +51,36 @@ const steps = [
     },
 ]
 
+
 export default function LaunchWizard() {
     const [currentStep, setCurrentStep] = useState(0)
     const [selectedTokenId, setSelectedTokenId] = useState<number | null>(null)
-    const [selectedLaunchType, setSelectedLaunchType] = useState<LaunchType>(LaunchType.unselected)
-    const [selectedDevWalletId, setSelectedDevWalletId] = useState<number | null>(null);
+    const [launchBuyerConfig, setLaunchBuyerConfig] = useState<BuyerConfig>(
+        new BuyerConfig(
+            0,
+            LaunchType.unselected,
+            0,
+            0,
+            0,
+            0,
+            0,
+            [],
+        )
+    );
+
 
 
     function onTokenSelect(tokenID: number, devWalletID: number) {
-        setSelectedTokenId(tokenID);
-        setSelectedDevWalletId(devWalletID);
+        setSelectedTokenId(tokenID)
+        setLaunchBuyerConfig((prev) => prev.copyWith({ devWalletId: devWalletID }))
+    }
+
+    function onLaunchTypeSelect(selectedLaunchType: LaunchType) {
+        setLaunchBuyerConfig((prev) => prev.copyWith({ launchType: selectedLaunchType }))
+    }
+
+    function onBuyInput() {
+
     }
 
 
@@ -69,7 +90,9 @@ export default function LaunchWizard() {
                 <div className="flex-1">
                 </div>
                 <div className="flex-3">
-                    <LaunchCurrentConfiguration selectedType={selectedLaunchType} />
+                    <LaunchCurrentConfiguration
+                        buyConfig={launchBuyerConfig}
+                    />
                 </div>
             </div>
     
@@ -130,10 +153,10 @@ export default function LaunchWizard() {
                     <TokenSelect selectedId={selectedTokenId} onSelect={onTokenSelect} />
                 )}
                 {currentStep === 1 && (
-                    <LaunchTypeSelect selectedType={selectedLaunchType} onSelect={setSelectedLaunchType} />
+                    <LaunchTypeSelect selectedType={launchBuyerConfig.launchType} onSelect={onLaunchTypeSelect} />
                 )}
                 {currentStep === 2 && (
-                    <LaunchBuyerConfig selectedType={selectedLaunchType} devWalletID={selectedDevWalletId} onBuyEnter={() => {}}/>
+                    <LaunchBuyerConfig selectedType={launchBuyerConfig.launchType} devWalletID={launchBuyerConfig.devWalletId} onBuyEnter={() => {}}/>
                 )}
                 {currentStep === 3 && <p className="text-sm text-muted-foreground">Launch Token — content goes here.</p>}
             </div>
@@ -152,7 +175,7 @@ export default function LaunchWizard() {
                     disabled={
                         currentStep === steps.length - 1 ||
                         (currentStep === 0 && selectedTokenId === null) ||
-                        (currentStep === 1 && selectedLaunchType === null)
+                        (currentStep === 1 && launchBuyerConfig.launchType === null)
                     }
                     className="px-3 py-1.5 text-sm rounded border border-border disabled:opacity-40"
                 >

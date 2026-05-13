@@ -2,28 +2,14 @@
 
 import { useState } from 'react';
 import { WalletIcon, CoinsIcon, ChartColumnDecreasingIcon} from 'lucide-react';
-import { LaunchType, LaunchTypeParams } from '@/components/tokens/launch/types';
-
-
+import { LaunchType } from '@/components/tokens/launch/types';
+import { BuyerConfig } from './buyer-config-class';
 
 type Props = {
-    selectedType: LaunchType
-    walletCount: number
-    totalSOL: number
-    tokensTotal: number
-    percentOfSupply: number
-    marketCap: number
+    buyConfig: BuyerConfig
 }
 
-export default function LaunchCurrentConfiguration({ 
-    selectedType,
-    walletCount,
-    totalSOL,
-    tokensTotal,
-    percentOfSupply,
-    marketCap,
-}: Props) {
-    const [selectedLaunchType, setSelectedLaunchType] = useState<LaunchType>(selectedType);
+export default function LaunchCurrentConfiguration({buyConfig }: Props) {
 
     return (
         <div className="bg-black rounded-2xl flex flex-col p-3">
@@ -35,7 +21,7 @@ export default function LaunchCurrentConfiguration({
                             <div className="flex flex-row">
                                 <div className="flex-1 flex-col items-center">
                                     <div className="flex text-white text-center items-center justify-center">
-                                        0 Wallets    
+                                        {buyConfig.walletCount} Wallets    
                                     </div>
                                     <div className="flex items-center justify-center">
                                         <WalletIcon className="text-white"/>
@@ -43,7 +29,7 @@ export default function LaunchCurrentConfiguration({
                                 </div>
                                 <div className="flex-1 flex-col">
                                     <div className="flex text-white text-center justify-center">
-                                        0 Sol    
+                                        {buyConfig.totalSOL} Sol    
                                     </div>
                                     <div className="flex  text-center justify-center">
                                         <CoinsIcon className="text-white justify-center"/>
@@ -64,7 +50,7 @@ export default function LaunchCurrentConfiguration({
                             <div className="flex flex-row">
                                 <div className="flex-1 flex-col items-center">
                                     <div className="flex text-white text-center items-center justify-center">
-                                        0 {selectedType}
+                                        {buyConfig.tokensTotal} {buyConfig.launchType}
                                     </div>
                                     <div className="flex items-center justify-center">
                                         <ChartColumnDecreasingIcon className="text-white"/>
@@ -72,7 +58,7 @@ export default function LaunchCurrentConfiguration({
                                 </div>
                                  <div className="flex-1 flex-col items-center">
                                     <div className="flex text-white text-center items-center justify-center">
-                                        0%   
+                                        {buyConfig.percentOfSupply}%   
                                     </div>
                                     <div className="flex text-white items-center justify-center">
                                         of the Total Supply
@@ -80,7 +66,7 @@ export default function LaunchCurrentConfiguration({
                                 </div>
                                 <div className="flex-1 flex-col">
                                     <div className="flex text-white text-center justify-center">
-                                        $0    
+                                        ${buyConfig.marketCap}    
                                     </div>
                                     <div className="flex text-white text-center justify-center">
                                         MC
@@ -90,9 +76,8 @@ export default function LaunchCurrentConfiguration({
                             </div>
                         </div>
                         <div className="text-white justify-center">
-                            {selectedType}
+                            {buyConfig.launchType}
                         </div>                    
-                    
                     </div>
                  </div>
             </div>
