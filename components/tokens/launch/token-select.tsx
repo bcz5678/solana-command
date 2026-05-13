@@ -22,6 +22,7 @@ type Token = {
     name: string
     symbol: string
     description: string
+    dev_wallet_id: number
     contract_address: string | null
     logo_image_path: string | null
     logo_url: string | null
@@ -33,7 +34,7 @@ type Token = {
 
 type Props = {
     selectedId: number | null
-    onSelect: (id: number) => void
+    onSelect: (tokenID: number, devWalletID: number) => void
 }
 
 const supabase = createClient()
@@ -48,7 +49,7 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
     useEffect(() => {
         supabase
             .from('tokens')
-            .select('id, created_at, name, symbol, description, contract_address, logo_image_path, launched, website_url, twitter_url, telegram_handle')
+            .select('id, created_at, name, symbol, description, dev_wallet_id, contract_address, logo_image_path, launched, website_url, twitter_url, telegram_handle')
             .order('launched', { ascending: true })
             .order('created_at', { ascending: false })
             .then(({ data, error }) => {
@@ -146,7 +147,7 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
                                                     ].join(' ')}
                                                     onClick={(e) => {
                                                         e.stopPropagation()
-                                                        if (!isLaunched) onSelect(token.id)
+                                                        if (!isLaunched) onSelect(token.id, token.dev_wallet_id)
                                                     }}
                                                 >
                                                     <span className={[

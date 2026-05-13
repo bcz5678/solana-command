@@ -5,6 +5,7 @@ import TokenSelect from '@/components/tokens/launch/token-select'
 import LaunchTypeSelect from '@/components/tokens/launch/launch-type-select';
 import LaunchCurrentConfiguration from '@/components/tokens/launch/launch-current-configuration'
 import { LaunchType } from './types'
+import LaunchBuyerConfig from './launch-buyer-config';
 
 const steps = [
     {
@@ -53,6 +54,14 @@ export default function LaunchWizard() {
     const [currentStep, setCurrentStep] = useState(0)
     const [selectedTokenId, setSelectedTokenId] = useState<number | null>(null)
     const [selectedLaunchType, setSelectedLaunchType] = useState<LaunchType>(LaunchType.unselected)
+    const [selectedDevWalletId, setSelectedDevWalletId] = useState<number | null>(null);
+
+
+    function onTokenSelect(tokenID: number, devWalletID: number) {
+        setSelectedTokenId(tokenID);
+        setSelectedDevWalletId(devWalletID);
+    }
+
 
     return (
         <div className="w-full flex flex-col gap-8">
@@ -118,12 +127,14 @@ export default function LaunchWizard() {
             {/* Step content */}
             <div className="w-full">
                 {currentStep === 0 && (
-                    <TokenSelect selectedId={selectedTokenId} onSelect={setSelectedTokenId} />
+                    <TokenSelect selectedId={selectedTokenId} onSelect={onTokenSelect} />
                 )}
                 {currentStep === 1 && (
                     <LaunchTypeSelect selectedType={selectedLaunchType} onSelect={setSelectedLaunchType} />
                 )}
-                {currentStep === 2 && <p className="text-sm text-muted-foreground">Buyer Config — content goes here.</p>}
+                {currentStep === 2 && (
+                    <LaunchBuyerConfig selectedType={selectedLaunchType} devWalletID={selectedDevWalletId} onBuyEnter={() => {}}/>
+                )}
                 {currentStep === 3 && <p className="text-sm text-muted-foreground">Launch Token — content goes here.</p>}
             </div>
 
