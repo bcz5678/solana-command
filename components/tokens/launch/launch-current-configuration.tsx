@@ -8,9 +8,21 @@ import { LaunchType, LaunchTypeParams } from '@/components/tokens/launch/types';
 
 type Props = {
     selectedType: LaunchType
+    walletCount: number
+    totalSOL: number
+    tokensTotal: number
+    percentOfSupply: number
+    marketCap: number
 }
 
-export default function LaunchCurrentConfiguration({ selectedType  }: Props) {
+export default function LaunchCurrentConfiguration({ 
+    selectedType,
+    walletCount,
+    totalSOL,
+    tokensTotal,
+    percentOfSupply,
+    marketCap,
+}: Props) {
     const [selectedLaunchType, setSelectedLaunchType] = useState<LaunchType>(selectedType);
 
     return (
