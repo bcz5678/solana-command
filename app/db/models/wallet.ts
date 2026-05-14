@@ -1,5 +1,7 @@
 
 // Wallet Data Transfer Object for API calls
+import BN from 'bn.js';
+
 
 export interface WalletModelDTO {
     id?: number;
@@ -8,7 +10,7 @@ export interface WalletModelDTO {
     private_key: string;
     funded: boolean;
     wallet_type_id: number;
-    solana_balance: number;
+    solana_balance_in_lamports: BN;
     owner_id: number;
     group_id: number;
     token_holdings: TokenDTO[];
@@ -42,6 +44,7 @@ export interface TokenDTO {
     description: string;
     dev_wallet_id: number;
     token_pair: string;
+    token_amount_held: BN;
 }
 
 
@@ -55,7 +58,7 @@ export class Wallet {
         public private_key: string,
         public funded: boolean,
         public wallet_type: number,
-        public solana_balance: number,
+        public solana_balance_in_lamports: BN,
         public owner: number,
         public group : number,
         public token_holdings: TokenDTO[],

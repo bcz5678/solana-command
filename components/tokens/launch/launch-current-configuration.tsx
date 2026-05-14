@@ -5,9 +5,15 @@ import { WalletIcon, CoinsIcon, ChartColumnDecreasingIcon} from 'lucide-react';
 import { LaunchType } from '@/components/tokens/launch/types';
 import { BuyerConfig } from './buyer-config-class';
 
+import BN from 'bn.js';
+
+import { LAMPORTS_PER_SOL } from '@solana/web3.js'; 
+
 type Props = {
     buyConfig: BuyerConfig
 }
+
+const lamports_per_sol: BN = new BN(LAMPORTS_PER_SOL);
 
 export default function LaunchCurrentConfiguration({buyConfig }: Props) {
 
@@ -29,7 +35,7 @@ export default function LaunchCurrentConfiguration({buyConfig }: Props) {
                                 </div>
                                 <div className="flex-1 flex-col">
                                     <div className="flex text-white text-center justify-center">
-                                        {buyConfig.totalSOL} Sol    
+                                        {buyConfig.totalSOLInLamports.div(lamports_per_sol).toString()} Sol    
                                     </div>
                                     <div className="flex  text-center justify-center">
                                         <CoinsIcon className="text-white justify-center"/>
@@ -50,7 +56,7 @@ export default function LaunchCurrentConfiguration({buyConfig }: Props) {
                             <div className="flex flex-row">
                                 <div className="flex-1 flex-col items-center">
                                     <div className="flex text-white text-center items-center justify-center">
-                                        {buyConfig.tokensTotal} {buyConfig.launchType}
+                                        {buyConfig.tokensTotal.toString()} {buyConfig.launchType}
                                     </div>
                                     <div className="flex items-center justify-center">
                                         <ChartColumnDecreasingIcon className="text-white"/>
@@ -58,7 +64,7 @@ export default function LaunchCurrentConfiguration({buyConfig }: Props) {
                                 </div>
                                  <div className="flex-1 flex-col items-center">
                                     <div className="flex text-white text-center items-center justify-center">
-                                        {buyConfig.percentOfSupply}%   
+                                        {buyConfig.percentOfSupply.toString()}%   
                                     </div>
                                     <div className="flex text-white items-center justify-center">
                                         of the Total Supply
@@ -66,7 +72,7 @@ export default function LaunchCurrentConfiguration({buyConfig }: Props) {
                                 </div>
                                 <div className="flex-1 flex-col">
                                     <div className="flex text-white text-center justify-center">
-                                        ${buyConfig.marketCap}    
+                                        ${buyConfig.marketCap.toString()}    
                                     </div>
                                     <div className="flex text-white text-center justify-center">
                                         MC

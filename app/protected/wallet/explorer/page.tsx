@@ -12,7 +12,7 @@ export default async function Page() {
   ] = await Promise.all([
     supabase
       .from('wallets')
-      .select('id, created_at, public_key, funded, wallet_type_id, solana_balance, owner_id, group_id, token_holdings'),
+      .select('id, created_at, public_key, funded, wallet_type_id, solana_balance_in_lamports, owner_id, group_id, token_holdings'),
     supabase.from('wallet_type').select('id, name'),
     supabase.from('owners').select('id, name'),
     supabase.from('wallet_groups').select('id, name'),

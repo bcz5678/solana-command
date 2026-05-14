@@ -8,6 +8,13 @@ import { LaunchType } from './types'
 import LaunchBuyerConfig from './launch-buyer-config';
 import { BuyerConfig } from './buyer-config-class';
 
+import { LAMPORTS_PER_SOL } from '@solana/web3.js';
+
+
+import BN from 'bn.js';
+
+const lamports_per_sol = new BN(LAMPORTS_PER_SOL);
+
 const steps = [
     {
         label: 'Select Token',
@@ -60,10 +67,10 @@ export default function LaunchWizard() {
             0,
             LaunchType.unselected,
             0,
-            0,
-            0,
-            0,
-            0,
+            new BN(0),
+            new BN(0),
+            new BN(0),
+            new BN(0),
             [],
         )
     );
@@ -80,11 +87,21 @@ export default function LaunchWizard() {
     }
 
     function onBuyInputChange(walletId: number, newAmount: number) {
-        launchBuyerConfig.updateWalletList(walletId, newAmount, "buy")
+        
+
+
+        const newAmountBN = new BN(newAmount);
+        const newAmountInLamports = lamports_per_sol.mul(newAmountBN);
+
+
+
+
+        launchBuyerConfig.updateWalletList(walletId, newAmountInLamports, "buy")
 
         setLaunchBuyerConfig((prev) => prev.copyWith({
             walletCount: launchBuyerConfig.walletCount,
             walletTrades: launchBuyerConfig.walletTrades,
+            totalSOLInLamports: launchBuyerConfig.totalSOLInLamports,
         }));
     }
 
@@ -93,7 +110,7 @@ export default function LaunchWizard() {
 
          setLaunchBuyerConfig((prev) => prev.copyWith({
             walletCount: launchBuyerConfig.walletCount,
-            totalSOL: launchBuyerConfig.totalSOL,
+            totalSOLInLamports: launchBuyerConfig.totalSOLInLamports,
             tokensTotal: launchBuyerConfig.tokensTotal,
             percentOfSupply: launchBuyerConfig.percentOfSupply,
             marketCap: launchBuyerConfig.marketCap,   
