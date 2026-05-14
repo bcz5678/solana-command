@@ -22,7 +22,7 @@ type WalletType = {
 
 type Props = {
     launchBuyerConfig: BuyerConfig
-    onBuyInputChange: (walletId: number, newAmount: number) => void
+    onBuyInputChange: (walletId: number, newAmount: string) => void
     onBuyInputReset: () => void
 }
 
@@ -82,7 +82,7 @@ export default function LaunchBuyerConfig({ launchBuyerConfig, onBuyInputChange,
     }
 
     function setBuyAmount(walletId: number, newAmount: string) {
-        onBuyInputChange(walletId, +newAmount);
+        onBuyInputChange(walletId, newAmount);
         setBuyAmounts((prev) => ({ ...prev, [walletId]: newAmount }))
     }
 

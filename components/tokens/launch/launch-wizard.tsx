@@ -8,12 +8,8 @@ import { LaunchType } from './types'
 import LaunchBuyerConfig from './launch-buyer-config';
 import { BuyerConfig } from './buyer-config-class';
 
-import { LAMPORTS_PER_SOL } from '@solana/web3.js';
-
-
 import BN from 'bn.js';
-
-const lamports_per_sol = new BN(LAMPORTS_PER_SOL);
+import { solStringToLamports } from '@/lib/lamports';
 
 const steps = [
     {
@@ -86,14 +82,9 @@ export default function LaunchWizard() {
         setLaunchBuyerConfig((prev) => prev.copyWith({ launchType: selectedLaunchType }))
     }
 
-    function onBuyInputChange(walletId: number, newAmount: number) {
-        
+    function onBuyInputChange(walletId: number, newAmount: string) {
 
-
-        const newAmountBN = new BN(newAmount);
-        const newAmountInLamports = lamports_per_sol.mul(newAmountBN);
-
-
+        const newAmountInLamports = solStringToLamports(newAmount);
 
 
         launchBuyerConfig.updateWalletList(walletId, newAmountInLamports, "buy")
