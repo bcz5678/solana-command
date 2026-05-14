@@ -36,7 +36,7 @@ type Wallet = {
   public_key: string
   funded: boolean
   wallet_type_id: number
-  solana_balance_in_lamports: BN
+  solana_balance_in_lamports: string
   owner_id: number
   group_id: number
   token_holdings: Token[]
@@ -227,7 +227,7 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
                   {groupMap[wallet.group_id] ?? wallet.group_id}
                 </span>
                 <span className="w-28 text-sm font-normal shrink-0">
-                  {wallet.solana_balance_in_lamports.div(lamports_per_sol).toString()}
+                  {new BN(wallet.solana_balance_in_lamports).div(lamports_per_sol).toString()}
                 </span>
               </AccordionTrigger>
 
@@ -251,7 +251,7 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground mb-0.5">SOL Balance</p>
-                    <p>{wallet.solana_balance_in_lamports.div(lamports_per_sol).toString()}</p>
+                    <p>{new BN(wallet.solana_balance_in_lamports).div(lamports_per_sol).toString()}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground mb-0.5">Owner</p>

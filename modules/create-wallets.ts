@@ -4,6 +4,8 @@ import * as fs from 'fs';
 import path from 'path';
 import bs58 from 'bs58';
 
+import BN from 'bn.js';
+
 import { 
   WalletModelDTO,
  } from '@/app/db/models/wallet';
@@ -34,7 +36,7 @@ export async function generateWallets(
       private_key: bs58.encode(newKeyPair.secretKey),
       funded: false,
       wallet_type_id: params.walletTypeId,
-      solana_balance: 0,
+      solana_balance_in_lamports: new BN(0),
       owner_id: params.ownerID,
       group_id: params.groupID,
       token_holdings: [],

@@ -14,7 +14,7 @@ type Wallet = {
     id: number
     public_key: string
     wallet_type_id: number
-    solana_balance_in_lamports: BN
+    solana_balance_in_lamports: string
 }
 
 type WalletType = {
@@ -48,7 +48,7 @@ export default function LaunchBuyerConfig({ launchBuyerConfig, onBuyInputChange,
             supabase.from('wallets').select('id, public_key, wallet_type_id, solana_balance_in_lamports'),
             supabase.from('wallet_type').select('id, name'),
         ]).then(([walletRes, typeRes]) => {
-            if (walletRes.data) setWallets(walletRes.data)
+            if (walletRes.data) setWallets(walletRes.data.map((w) => ({ ...w, solana_balance_in_lamports: String(w.solana_balance_in_lamports ?? 0) })))
             if (typeRes.data) setWalletTypes(typeRes.data)
             setLoading(false)
         })
@@ -164,7 +164,7 @@ export default function LaunchBuyerConfig({ launchBuyerConfig, onBuyInputChange,
                                     {maskPubKey(devWallet.public_key)}
                                 </td>
                                 <td className="px-3 py-2.5 text-right text-muted-foreground tabular-nums">
-                                    {devWallet.solana_balance_in_lamports.div(lamports_per_sol).toString()}
+                                    {new BN(devWallet.solana_balance_in_lamports).div(lamports_per_sol).toString()}
                                 </td>
                                 <td className="px-3 py-2.5 text-right text-muted-foreground">—</td>
                                 <td className="px-3 py-2.5 text-right text-muted-foreground">—</td>
@@ -208,7 +208,7 @@ export default function LaunchBuyerConfig({ launchBuyerConfig, onBuyInputChange,
                                                 {maskPubKey(wallet.public_key)}
                                             </td>
                                             <td className="px-3 py-2.5 text-right text-muted-foreground tabular-nums text-xs">
-                                                {wallet.solana_balance_in_lamports.div(lamports_per_sol).toString()}
+                                                {new BN(wallet.solana_balance_in_lamports).div(lamports_per_sol).toString()}
                                             </td>
                                             <td className="px-3 py-2.5 text-right text-muted-foreground text-xs">—</td>
                                             <td className="px-3 py-2.5 text-right text-muted-foreground text-xs">—</td>

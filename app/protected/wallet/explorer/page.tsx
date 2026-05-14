@@ -27,7 +27,10 @@ export default async function Page() {
       )}
 
       <WalletTable
-        wallets={wallets ?? []}
+        wallets={(wallets ?? []).map((w) => ({
+          ...w,
+          solana_balance_in_lamports: String(w.solana_balance_in_lamports ?? 0),
+        }))}
         walletTypes={walletTypes ?? []}
         owners={owners ?? []}
         groups={groups ?? []}
