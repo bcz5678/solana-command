@@ -1,8 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import BN from 'bn.js';
-
+import { lamportsStringToBN, lamportsBNToSolDisplay } from '@/lib/lamports';
 
 import {
   Accordion,
@@ -26,7 +25,6 @@ import {
 } from '@/components/ui/tooltip'
 import { Copy } from 'lucide-react'
 
-import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 
 type Token = { symbol: string; name: string }
 
@@ -65,8 +63,6 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [openItem, setOpenItem] = useState<string>('')
   const [copiedId, setCopiedId] = useState<number | null>(null)
-
-  const lamports_per_sol = new BN(LAMPORTS_PER_SOL);
 
   const filtered = useMemo(() => wallets.filter((w) => {
     if (funded !== ALL && String(w.funded) !== funded) return false
@@ -227,7 +223,7 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
                   {groupMap[wallet.group_id] ?? wallet.group_id}
                 </span>
                 <span className="w-28 text-sm font-normal shrink-0">
-                  {new BN(wallet.solana_balance_in_lamports).div(lamports_per_sol).toString()}
+                  {lamportsBNToSolDisplay(lamportsStringToBN(wallet.solana_balance_in_lamports))}
                 </span>
               </AccordionTrigger>
 
@@ -251,7 +247,7 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground mb-0.5">SOL Balance</p>
-                    <p>{new BN(wallet.solana_balance_in_lamports).div(lamports_per_sol).toString()}</p>
+                    <p>{lamportsBNToSolDisplay(lamportsStringToBN(wallet.solana_balance_in_lamports))}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground mb-0.5">Owner</p>

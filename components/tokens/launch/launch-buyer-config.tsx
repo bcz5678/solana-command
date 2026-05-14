@@ -4,11 +4,9 @@ import { useState, useEffect, useMemo, Fragment } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { LaunchType } from '@/components/tokens/launch/types'
 import { BuyerConfig } from '@/components//tokens/launch/buyer-config-class';
+import { lamportsStringToBN, lamportsBNToSolDisplay, LAMPORTS_PER_SOL, SOL_DECIMALS } from '@/lib/lamports';
+
 import BN from 'bn.js';
-
-import { LAMPORTS_PER_SOL
-
- } from '@solana/web3.js';
 
 type Wallet = {
     id: number
@@ -30,7 +28,6 @@ type Props = {
 
 const supabase = createClient()
 
-const lamports_per_sol = new BN(LAMPORTS_PER_SOL);
 
 function maskPubKey(key: string) {
     return `${key.slice(0, 7)}....${key.slice(-7)}`
@@ -48,6 +45,7 @@ export default function LaunchBuyerConfig({ launchBuyerConfig, onBuyInputChange,
             supabase.from('wallets').select('id, public_key, wallet_type_id, solana_balance_in_lamports'),
             supabase.from('wallet_type').select('id, name'),
         ]).then(([walletRes, typeRes]) => {
+
             if (walletRes.data) setWallets(walletRes.data.map((w) => ({ ...w, solana_balance_in_lamports: String(w.solana_balance_in_lamports ?? 0) })))
             if (typeRes.data) setWalletTypes(typeRes.data)
             setLoading(false)
@@ -164,7 +162,7 @@ export default function LaunchBuyerConfig({ launchBuyerConfig, onBuyInputChange,
                                     {maskPubKey(devWallet.public_key)}
                                 </td>
                                 <td className="px-3 py-2.5 text-right text-muted-foreground tabular-nums">
-                                    {new BN(devWallet.solana_balance_in_lamports).div(lamports_per_sol).toString()}
+                                    {lamportsBNToSolDisplay(lamportsStringToBN(devWallet.solana_balance_in_lamports))}
                                 </td>
                                 <td className="px-3 py-2.5 text-right text-muted-foreground">—</td>
                                 <td className="px-3 py-2.5 text-right text-muted-foreground">—</td>
@@ -208,7 +206,7 @@ export default function LaunchBuyerConfig({ launchBuyerConfig, onBuyInputChange,
                                                 {maskPubKey(wallet.public_key)}
                                             </td>
                                             <td className="px-3 py-2.5 text-right text-muted-foreground tabular-nums text-xs">
-                                                {new BN(wallet.solana_balance_in_lamports).div(lamports_per_sol).toString()}
+                                                {new BN(wallet.solana_balance_in_lamports).div(LAMPORTS_PER_SOL).toString()}
                                             </td>
                                             <td className="px-3 py-2.5 text-right text-muted-foreground text-xs">—</td>
                                             <td className="px-3 py-2.5 text-right text-muted-foreground text-xs">—</td>

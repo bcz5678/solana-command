@@ -5,15 +5,12 @@ import { WalletIcon, CoinsIcon, ChartColumnDecreasingIcon} from 'lucide-react';
 import { LaunchType } from '@/components/tokens/launch/types';
 import { BuyerConfig } from './buyer-config-class';
 
-import BN from 'bn.js';
-
-import { LAMPORTS_PER_SOL } from '@solana/web3.js'; 
+import { lamportsBNToSolDisplay } from '@/lib/lamports';
 
 type Props = {
     buyConfig: BuyerConfig
 }
 
-const lamports_per_sol: BN = new BN(LAMPORTS_PER_SOL);
 
 export default function LaunchCurrentConfiguration({buyConfig }: Props) {
 
@@ -35,7 +32,7 @@ export default function LaunchCurrentConfiguration({buyConfig }: Props) {
                                 </div>
                                 <div className="flex-1 flex-col">
                                     <div className="flex text-white text-center justify-center">
-                                        {buyConfig.totalSOLInLamports.div(lamports_per_sol).toString()} Sol    
+                                        {lamportsBNToSolDisplay(buyConfig.totalSOLInLamports)} Sol    
                                     </div>
                                     <div className="flex  text-center justify-center">
                                         <CoinsIcon className="text-white justify-center"/>
