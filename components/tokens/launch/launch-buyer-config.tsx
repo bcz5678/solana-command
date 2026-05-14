@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, Fragment } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { LaunchType } from '@/components/tokens/launch/types'
+import { BuyerConfig } from '@/components//tokens/launch/buyer-config-class';
 
 type Wallet = {
     id: number
@@ -17,9 +18,9 @@ type WalletType = {
 }
 
 type Props = {
-    selectedType: LaunchType | null
-    devWalletID: number | null
-    onBuyEnter: (amount: number) => void
+    launchBuyerConfig: BuyerConfig
+    onBuyInputChange: (walletId: number, newAmount: number) => void
+    onBuyInputReset: () => void
 }
 
 const supabase = createClient()
@@ -28,7 +29,7 @@ function maskPubKey(key: string) {
     return `${key.slice(0, 7)}....${key.slice(-7)}`
 }
 
-export default function LaunchBuyerConfig({ selectedType: _selectedType, devWalletID, onBuyEnter: _onBuyEnter }: Props) {
+export default function LaunchBuyerConfig({ launchBuyerConfig, onBuyInputChange, onBuyInputReset }: Props) {
     const [wallets, setWallets] = useState<Wallet[]>([])
     const [walletTypes, setWalletTypes] = useState<WalletType[]>([])
     const [loading, setLoading] = useState(true)
@@ -47,13 +48,13 @@ export default function LaunchBuyerConfig({ selectedType: _selectedType, devWall
     }, [])
 
     const devWallet = useMemo(
-        () => wallets.find((w) => w.id === devWalletID) ?? null,
-        [wallets, devWalletID],
+        () => wallets.find((w) => w.id === launchBuyerConfig.devWalletId) ?? null,
+        [wallets, launchBuyerConfig.devWalletId],
     )
 
     const otherWallets = useMemo(
-        () => wallets.filter((w) => w.id !== devWalletID),
-        [wallets, devWalletID],
+        () => wallets.filter((w) => w.id !== launchBuyerConfig.devWalletId),
+        [wallets, launchBuyerConfig.devWalletId],
     )
 
     const groups = useMemo(() => {
@@ -75,12 +76,14 @@ export default function LaunchBuyerConfig({ selectedType: _selectedType, devWall
         )
     }
 
-    function setBuyAmount(walletId: number, value: string) {
-        setBuyAmounts((prev) => ({ ...prev, [walletId]: value }))
+    function setBuyAmount(walletId: number, newAmount: string) {
+        onBuyInputChange(walletId, +newAmount);
+        setBuyAmounts((prev) => ({ ...prev, [walletId]: newAmount }))
     }
 
     function clearAll() {
-        setBuyAmounts({})
+        setBuyAmounts({});
+        onBuyInputReset()
     }
 
     if (loading) return <p className="text-sm text-muted-foreground py-4">Loading wallets…</p>
@@ -162,7 +165,7 @@ export default function LaunchBuyerConfig({ selectedType: _selectedType, devWall
                                     <input
                                         type="number"
                                         min={0}
-                                        step={0.01}
+                                        step={0.000000001}
                                         placeholder="0.00"
                                         value={buyAmounts[devWallet.id] ?? ''}
                                         onChange={(e) => setBuyAmount(devWallet.id, e.target.value)}
@@ -206,7 +209,7 @@ export default function LaunchBuyerConfig({ selectedType: _selectedType, devWall
                                                 <input
                                                     type="number"
                                                     min={0}
-                                                    step={0.01}
+                                                    step={0.000000001}
                                                     placeholder="0.00"
                                                     value={buyAmounts[wallet.id] ?? ''}
                                                     onChange={(e) => setBuyAmount(wallet.id, e.target.value)}

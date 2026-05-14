@@ -13,7 +13,7 @@ export default function LaunchCurrentConfiguration({buyConfig }: Props) {
 
     return (
         <div className="bg-black rounded-2xl flex flex-col p-3">
-            <h1 className="text-white text-1xl">Current Configuration</h1>
+            <h1 className="text-white text-1xl">Current Configuration | {buyConfig.launchType.toString()} Launch</h1>
             <div className="flex flex-row gap-4">
                 <div className="flex flex-1">
                     <div className="flex flex-col w-full items-center" id="walletsDisplay">
@@ -76,7 +76,7 @@ export default function LaunchCurrentConfiguration({buyConfig }: Props) {
                             </div>
                         </div>
                         <div className="text-white justify-center">
-                            {buyConfig.launchType}
+                            {buyConfig.launchType} Launch
                         </div>                    
                     </div>
                  </div>

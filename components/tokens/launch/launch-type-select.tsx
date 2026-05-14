@@ -10,14 +10,14 @@ type Props = {
 
 const cards = [
     {
-        type: LaunchType.basic,
-        title: 'Basic Launch',
-        description: 'No dev buy, no Jito bundling in block 0. Simple launch for testing.',
-    },
-    {
         type: LaunchType.block0,
         title: 'Block0 Launch',
-        description: 'Allows a dev buy into block 0. Option to bundle up to additional wallet addresses in the Jito bundle for block 0.',
+        description: 'Allows a basic non-funded buy, a dev buy into block 0 and an option to bundle up to additional wallet addresses in the Jito bundle for block 0.',
+    },
+    {
+        type: LaunchType.swarm,
+        title: 'Swarm  Launch',
+        description: 'TBD Post Block 0 swarm ',
     },
     {
         type: LaunchType.staggered,

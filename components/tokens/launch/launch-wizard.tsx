@@ -79,8 +79,26 @@ export default function LaunchWizard() {
         setLaunchBuyerConfig((prev) => prev.copyWith({ launchType: selectedLaunchType }))
     }
 
-    function onBuyInput() {
+    function onBuyInputChange(walletId: number, newAmount: number) {
+        launchBuyerConfig.updateWalletList(walletId, newAmount, "buy")
 
+        setLaunchBuyerConfig((prev) => prev.copyWith({
+            walletCount: launchBuyerConfig.walletCount,
+            walletTrades: launchBuyerConfig.walletTrades,
+        }));
+    }
+
+    function onBuyInputReset(){
+        launchBuyerConfig.clearWalletList();
+
+         setLaunchBuyerConfig((prev) => prev.copyWith({
+            walletCount: launchBuyerConfig.walletCount,
+            totalSOL: launchBuyerConfig.totalSOL,
+            tokensTotal: launchBuyerConfig.tokensTotal,
+            percentOfSupply: launchBuyerConfig.percentOfSupply,
+            marketCap: launchBuyerConfig.marketCap,   
+            walletTrades: launchBuyerConfig.walletTrades,
+        }));
     }
 
 
@@ -156,7 +174,7 @@ export default function LaunchWizard() {
                     <LaunchTypeSelect selectedType={launchBuyerConfig.launchType} onSelect={onLaunchTypeSelect} />
                 )}
                 {currentStep === 2 && (
-                    <LaunchBuyerConfig selectedType={launchBuyerConfig.launchType} devWalletID={launchBuyerConfig.devWalletId} onBuyEnter={() => {}}/>
+                    <LaunchBuyerConfig launchBuyerConfig ={launchBuyerConfig} onBuyInputChange={onBuyInputChange}onBuyInputReset={onBuyInputReset}/>
                 )}
                 {currentStep === 3 && <p className="text-sm text-muted-foreground">Launch Token — content goes here.</p>}
             </div>
