@@ -12,6 +12,13 @@ import BN from 'bn.js';
 import { solStringToLamports } from '@/lib/lamports';
 import LaunchToken from './launch-token';
 
+const nextButtonLabels: Record<number, string> = {
+    0: 'Select Launch Type',
+    1: 'Configure Buyers',
+    2: 'Review & Launch',
+    3: 'Done',
+}
+
 const steps = [
     {
         label: 'Select Token',
@@ -209,11 +216,11 @@ export default function LaunchWizard() {
                     disabled={
                         currentStep === steps.length - 1 ||
                         (currentStep === 0 && selectedTokenId === null) ||
-                        (currentStep === 1 && launchBuyerConfig.launchType === null)
+                        (currentStep === 1 && launchBuyerConfig.launchType === LaunchType.unselected)
                     }
                     className="px-3 py-1.5 text-sm rounded border border-border disabled:opacity-40"
                 >
-                    Next
+                    {nextButtonLabels[currentStep] ?? 'Next'}
                 </button>
             </div>
         </div>

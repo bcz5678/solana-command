@@ -2,7 +2,7 @@
 
 import { BuyerConfig } from './buyer-config-class'
 import { lamportsBNToSolDisplay } from '@/lib/lamports'
-import { TokenDTO } from '@/app/db/models/wallet'
+import { TokenDTO } from './types'
 
 type Props = {
     token: TokenDTO | null
@@ -49,8 +49,11 @@ export default function LaunchTokenPreview({ token, buyerConfig }: Props) {
                         <Field label="Description" value={token?.description ?? '—'} />
                     </div>
                     <div className="flex items-center justify-center">
-                        <div className="size-24 rounded-xl bg-muted border border-border flex items-center justify-center text-2xl font-bold text-muted-foreground">
-                            {token?.symbol?.slice(0, 1) ?? '?'}
+                        <div className="size-24 rounded-xl bg-muted border border-border overflow-hidden flex items-center justify-center text-2xl font-bold text-muted-foreground">
+                            {token?.logo_url
+                                ? <img src={token.logo_url} alt={token.symbol} className="size-full object-cover" />
+                                : (token?.symbol?.slice(0, 1) ?? '?')
+                            }
                         </div>
                     </div>
                 </div>

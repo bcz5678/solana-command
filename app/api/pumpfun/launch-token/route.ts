@@ -61,24 +61,22 @@ export async function POST(request: Request) {
             return Response.json({ error: 'Dev wallet not found' }, { status: 404 });
         }
 
-
         switch(launchType) {
             case LaunchType.block0:
-                processLaunchBlock0(token, devWallet, buyerConfig);
+                processLaunchBlock0(token, buyerConfig);
                 break;
             case LaunchType.swarm:
-                processLaunchSwarm(token, devWallet, buyerConfig);
+                processLaunchSwarm(token, buyerConfig);
                 break;
             case LaunchType.staggered:
-                processLaunchStaggered(token, devWallet, buyerConfig);
+                processLaunchStaggered(token, buyerConfig);
                 break;
             case LaunchType.unselected:
                 console.log('Unselected launchType');
                 break;
             default: 
                 console.log('Default launchType');
-                break;
-             
+                break;             
         }
     }
 }
@@ -86,31 +84,39 @@ export async function POST(request: Request) {
 
 async function processLaunchBlock0(
     token: TokenDTO, 
-    devWallet: WalletModelDTO, 
     buyerConfig: BuyerConfig
 ) {
     console.log('Block0 launchType');
 
-    const createIx = await PUMP_SDK.createV2Instruction({
-        mint: Keypair.fromSecretKey(bs58.decode(devWallet.private_key)).publicKey,
-        name: token.name,
-        symbol: token.symbol,
-        uri: "https://example.com/metadata.json", // Your token metadata URI
-        creator: Keypair.fromSecretKey(bs58.decode(devWallet.private_key)).publicKey,
-        user: Keypair.fromSecretKey(bs58.decode(devWallet.private_key)).publicKey,
-        mayhemMode: false,
-        cashback: false,
-    });
+    const { data: devWallet, error } = await supabase
+        .from('wallets')
+        .select('private_key')
+        .eq('id', token.dev_wallet_id)
+        .single<WalletModelDTO>();
+
+    if (devWallet != null) {
+        if(buyerConfig.walletTrades.length == 0) {
+            const createIx = await PUMP_SDK.createV2Instruction({
+                mint: Keypair.fromSecretKey(bs58.decode(devWallet.private_key)).publicKey,
+                name: token.name,
+                symbol: token.symbol,
+                uri: "https://example.com/metadata.json", // Your token metadata URI
+                creator: Keypair.fromSecretKey(bs58.decode(devWallet.private_key)).publicKey,
+                user: Keypair.fromSecretKey(bs58.decode(devWallet.private_key)).publicKey,
+                mayhemMode: false,
+                cashback: false,
+            });
+        } else {
 
 
 
-
+        }
+    }
 }
 
 
 function processLaunchSwarm(
     token: TokenDTO, 
-    devWallet: WalletModelDTO, 
     buyerConfig: BuyerConfig
 ) {
     console.log('Swarm launchType');
@@ -120,7 +126,6 @@ function processLaunchSwarm(
 
 function processLaunchStaggered(
     token: TokenDTO, 
-    devWallet: WalletModelDTO, 
     buyerConfig: BuyerConfig
 ) {
     console.log('Staggered launchType');
