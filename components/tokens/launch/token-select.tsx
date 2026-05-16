@@ -17,11 +17,6 @@ import { Copy } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { CreatedTokenDTO } from '@/app/db/models/token'
 
-// Extends CreatedTokenDTO with display-only fields fetched for this view
-interface TokenSelectDTO extends CreatedTokenDTO {
-    logo_image_path: string | null
-}
-
 type Props = {
     selectedId: number | null
     onSelect: (token: CreatedTokenDTO) => void
@@ -30,7 +25,7 @@ type Props = {
 const supabase = createClient()
 
 export default function TokenSelect({ selectedId, onSelect }: Props) {
-    const [tokens, setTokens] = useState<TokenSelectDTO[]>([])
+    const [tokens, setTokens] = useState<CreatedTokenDTO[]>([])
     const [loading, setLoading] = useState(true)
     const [openItem, setOpenItem] = useState<string>('')
     const [copiedId, setCopiedId] = useState<number | null>(null)
@@ -39,7 +34,7 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
     useEffect(() => {
         supabase
             .from('tokens')
-            .select('id, created_at, name, symbol, description, owner_id, dev_wallet_id, contract_address, mint_secret_key, logo_image_path, token_meta_url, launched, website_url, twitter_url, telegram_handle')
+            .select('id, created_at, name, symbol, description, owner_id, dev_wallet_id, contract_address, mint_secret_key, logo_url, token_meta_url, launched, website_url, twitter_url, telegram_handle')
             .order('launched', { ascending: true })
             .order('created_at', { ascending: false })
             .then(({ data, error }) => {
@@ -51,15 +46,14 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
                         name: t.name,
                         symbol: t.symbol,
                         description: t.description,
-                        logo_url: t.logo_image_path
-                            ? supabase.storage.from('token-media').getPublicUrl(t.logo_image_path).data.publicUrl
+                        logo_url: t.logo_url
+                            ? supabase.storage.from('token-media').getPublicUrl(t.logo_url).data.publicUrl
                             : '',
                         token_meta_url: t.token_meta_url,
                         contract_address: t.contract_address,
                         owner_id: t.owner_id,
                         dev_wallet_id: t.dev_wallet_id,
                         mint_secret_key: t.mint_secret_key,
-                        logo_image_path: t.logo_image_path,
                         launched: t.launched,
                         website_url: t.website_url,
                         twitter_url: t.twitter_url,
