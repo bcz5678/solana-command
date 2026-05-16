@@ -6,9 +6,10 @@ import { Keypair, PublicKey } from "@solana/web3.js";
 import { PUMP_SDK, OnlinePumpSdk } from '@nirholas/pump-sdk';
 import { createClient } from '@/lib/supabase/client';
 
-import { BuyerConfig } from '@/components/tokens/launch/launch-config-class';
+import { LaunchConfig } from '@/components/tokens/launch/launch-config-class';
 import { LaunchType } from '@/components/tokens/launch/types';
-import { TokenDTO, WalletModelDTO } from '@/app/db/models/wallet';
+import { WalletModelDTO } from '@/app/db/models/wallet';
+import { TokenDTO } from '@/components/tokens/launch/types';
 
 import bs58 from 'bs58';
 
@@ -31,7 +32,7 @@ export async function POST(request: Request) {
         buyerConfigRaw != null
     ) {
 
-        const buyerConfig = BuyerConfig.fromJSON(
+        const buyerConfig = LaunchConfig.fromJSON(
             typeof buyerConfigRaw === 'string' ? JSON.parse(buyerConfigRaw) : buyerConfigRaw
         );
 
@@ -84,7 +85,7 @@ export async function POST(request: Request) {
 
 async function processLaunchBlock0(
     token: TokenDTO, 
-    buyerConfig: BuyerConfig
+    buyerConfig: LaunchConfig
 ) {
     console.log('Block0 launchType');
 
@@ -117,7 +118,7 @@ async function processLaunchBlock0(
 
 function processLaunchSwarm(
     token: TokenDTO, 
-    buyerConfig: BuyerConfig
+    buyerConfig: LaunchConfig
 ) {
     console.log('Swarm launchType');
 }
@@ -126,7 +127,7 @@ function processLaunchSwarm(
 
 function processLaunchStaggered(
     token: TokenDTO, 
-    buyerConfig: BuyerConfig
+    buyerConfig: LaunchConfig
 ) {
     console.log('Staggered launchType');
 }

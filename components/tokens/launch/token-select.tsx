@@ -20,10 +20,6 @@ import { CreatedTokenDTO } from '@/app/db/models/token'
 // Extends CreatedTokenDTO with display-only fields fetched for this view
 interface TokenSelectDTO extends CreatedTokenDTO {
     logo_image_path: string | null
-    launched: boolean | null
-    website_url: string | null
-    twitter_url: string | null
-    telegram_handle: string | null
 }
 
 type Props = {
@@ -43,7 +39,7 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
     useEffect(() => {
         supabase
             .from('tokens')
-            .select('id, created_at, name, symbol, description, owner_id, dev_wallet_id, contract_address, mint_keypair, logo_image_path, launched, website_url, twitter_url, telegram_handle')
+            .select('id, created_at, name, symbol, description, owner_id, dev_wallet_id, contract_address, mint_secret_key, logo_image_path, token_meta_url, launched, website_url, twitter_url, telegram_handle')
             .order('launched', { ascending: true })
             .order('created_at', { ascending: false })
             .then(({ data, error }) => {
@@ -52,18 +48,17 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
                     setTokens(data.map((t) => ({
                         id: t.id,
                         created_at: t.created_at,
-                        token_meta: {
-                            name: t.name,
-                            symbol: t.symbol,
-                            description: t.description,
-                            logo_url: t.logo_image_path
-                                ? supabase.storage.from('token-media').getPublicUrl(t.logo_image_path).data.publicUrl
-                                : undefined,
-                        },
+                        name: t.name,
+                        symbol: t.symbol,
+                        description: t.description,
+                        logo_url: t.logo_image_path
+                            ? supabase.storage.from('token-media').getPublicUrl(t.logo_image_path).data.publicUrl
+                            : '',
+                        token_meta_url: t.token_meta_url,
                         contract_address: t.contract_address,
                         owner_id: t.owner_id,
                         dev_wallet_id: t.dev_wallet_id,
-                        mint_secret_key: t.mint_keypair,
+                        mint_secret_key: t.mint_secret_key,
                         logo_image_path: t.logo_image_path,
                         launched: t.launched,
                         website_url: t.website_url,
@@ -80,8 +75,8 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
         if (!q) return tokens
         return tokens.filter(
             (t) =>
-                t.token_meta.name.toLowerCase().includes(q) ||
-                t.token_meta.symbol.toLowerCase().includes(q),
+                t.name.toLowerCase().includes(q) ||
+                t.symbol.toLowerCase().includes(q),
         )
     }, [tokens, search])
 
@@ -182,30 +177,30 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
 
                                         {/* Logo */}
                                         <span className="w-7 shrink-0 flex items-center justify-center">
-                                            {token.token_meta.logo_url ? (
+                                            {token.logo_url ? (
                                                 // eslint-disable-next-line @next/next/no-img-element
                                                 <img
-                                                    src={token.token_meta.logo_url}
-                                                    alt={token.token_meta.symbol}
+                                                    src={token.logo_url}
+                                                    alt={token.symbol}
                                                     width={28}
                                                     height={28}
                                                     className="rounded-full object-cover size-7 border border-border"
                                                 />
                                             ) : (
                                                 <span className="size-7 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold text-muted-foreground">
-                                                    {token.token_meta.symbol.slice(0, 1)}
+                                                    {token.symbol.slice(0, 1)}
                                                 </span>
                                             )}
                                         </span>
 
                                         <span className="w-20 shrink-0">
                                             <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs font-medium font-mono">
-                                                {token.token_meta.symbol}
+                                                {token.symbol}
                                             </span>
                                         </span>
 
                                         <span className="w-36 text-sm font-normal truncate shrink-0">
-                                            {token.token_meta.name}
+                                            {token.name}
                                         </span>
 
                                         <span className="flex-1 flex items-center gap-1 min-w-0">
@@ -248,17 +243,17 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
 
                                     <AccordionContent className="px-1">
                                         <div className="rounded-lg border bg-muted/40 p-4 grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:grid-cols-3">
-                                            {token.token_meta.logo_url && (
+                                            {token.logo_url && (
                                                 <div className="col-span-2 sm:col-span-3 flex items-start gap-4">
                                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                                     <img
-                                                        src={token.token_meta.logo_url}
-                                                        alt={`${token.token_meta.symbol} logo`}
+                                                        src={token.logo_url}
+                                                        alt={`${token.symbol} logo`}
                                                         className="size-20 rounded-lg object-cover border border-border shrink-0"
                                                     />
                                                     <div className="flex flex-col gap-1">
                                                         <p className="text-xs text-muted-foreground">Logo</p>
-                                                        <a href={token.token_meta.logo_url} target="_blank" rel="noreferrer" className="text-xs text-primary underline underline-offset-2 hover:opacity-80">
+                                                        <a href={token.logo_url} target="_blank" rel="noreferrer" className="text-xs text-primary underline underline-offset-2 hover:opacity-80">
                                                             View full size ↗
                                                         </a>
                                                     </div>
@@ -270,15 +265,15 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
                                             </div>
                                             <div>
                                                 <p className="text-xs text-muted-foreground mb-0.5">Symbol</p>
-                                                <p className="font-mono">{token.token_meta.symbol}</p>
+                                                <p className="font-mono">{token.symbol}</p>
                                             </div>
                                             <div>
                                                 <p className="text-xs text-muted-foreground mb-0.5">Name</p>
-                                                <p>{token.token_meta.name}</p>
+                                                <p>{token.name}</p>
                                             </div>
                                             <div className="col-span-2 sm:col-span-3">
                                                 <p className="text-xs text-muted-foreground mb-0.5">Description</p>
-                                                <p>{token.token_meta.description}</p>
+                                                <p>{token.description}</p>
                                             </div>
                                             {token.website_url && (
                                                 <div>

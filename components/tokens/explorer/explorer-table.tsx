@@ -17,16 +17,15 @@ import {
 } from '@/components/ui/tooltip'
 import { Copy } from 'lucide-react'
 
-type Token = {
+interface ExplorerTokenRow {
   id: number
   created_at: string
   dev_wallet_id: number
   name: string
   symbol: string
   description: string
-  mint_keypair: string | null
+  mint_secret_key: string | null
   contract_address: string | null
-  logo_image_path: string | null
   logo_url: string | null
   launched: boolean | null
   website_url: string | null
@@ -35,7 +34,7 @@ type Token = {
 }
 
 type Props = {
-  tokens: Token[]
+  tokens: ExplorerTokenRow[]
   walletMap: Record<number, string>
 }
 
@@ -67,15 +66,15 @@ export default function TokenTable({ tokens, walletMap }: Props) {
   }, [tokens, search])
 
   const allFilteredSelected =
-    filtered.length > 0 && filtered.every((t) => selected.has(t.id))
+    filtered.length > 0 && filtered.every((t) => selected.has(t.id!))
 
   function toggleAll() {
     setSelected((prev) => {
       const next = new Set(prev)
       if (allFilteredSelected) {
-        filtered.forEach((t) => next.delete(t.id))
+        filtered.forEach((t) => next.delete(t.id!))
       } else {
-        filtered.forEach((t) => next.add(t.id))
+        filtered.forEach((t) => next.add(t.id!))
       }
       return next
     })

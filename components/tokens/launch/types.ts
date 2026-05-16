@@ -20,7 +20,7 @@ export interface TokenDTO {
     description: string
     dev_wallet_id: number
     contract_address: string | null
-    mint_keypair: string | null
+    mint_secret_key: string | null
     logo_image_path: string | null
     logo_url: string | null
     launched: boolean | null

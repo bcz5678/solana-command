@@ -42,15 +42,15 @@ export default function LaunchTokenPreview({launchConfig }: Props) {
             <SubCard title="launchConfig.token Meta">
                 <div className="grid grid-cols-2 gap-6">
                     <div className="flex flex-col gap-3">
-                        <Field label="launchConfig.token Name" value={launchConfig.token?.token_meta.name ?? '—'} />
-                        <Field label="launchConfig.token Symbol" value={launchConfig.token?.token_meta.symbol ?? '—'} />
-                        <Field label="Description" value={launchConfig.token?.token_meta.description ?? '—'} />
+                        <Field label="launchConfig.token Name" value={launchConfig.token?.name ?? '—'} />
+                        <Field label="launchConfig.token Symbol" value={launchConfig.token?.symbol ?? '—'} />
+                        <Field label="Description" value={launchConfig.token?.description ?? '—'} />
                     </div>
                     <div className="flex items-center justify-center">
                         <div className="size-24 rounded-xl bg-muted border border-border overflow-hidden flex items-center justify-center text-2xl font-bold text-muted-foreground">
-                            {launchConfig.token?.token_meta.logo_url
-                                ? <img src={launchConfig.token.token_meta.logo_url} alt={launchConfig.token.token_meta.symbol} className="size-full object-cover" />
-                                : (launchConfig.token?.token_meta.symbol?.slice(0, 1) ?? '?')
+                            {launchConfig.token?.logo_url
+                                ? <img src={launchConfig.token.logo_url} alt={launchConfig.token.symbol} className="size-full object-cover" />
+                                : (launchConfig.token?.symbol?.slice(0, 1) ?? '?')
                             }
                         </div>
                     </div>
@@ -73,7 +73,7 @@ export default function LaunchTokenPreview({launchConfig }: Props) {
                     />
                     <Field
                         label="Purchasing a Total of"
-                        value={`${totalSOL} SOL of ${launchConfig.token?.token_meta.name ?? '—'}`}
+                        value={`${totalSOL} SOL of ${launchConfig.token?.name ?? '—'}`}
                     />
                     <Field label="launchConfig.token Amount" value="Not implemented" dim />
                     <Field label="Percentage of Total Supply" value="Not implemented" dim />
