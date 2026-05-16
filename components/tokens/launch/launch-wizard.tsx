@@ -4,12 +4,13 @@ import { useState } from 'react'
 import TokenSelect from '@/components/tokens/launch/token-select'
 import LaunchTypeSelect from '@/components/tokens/launch/launch-type-select';
 import LaunchCurrentConfiguration from '@/components/tokens/launch/launch-current-configuration'
-import { LaunchType } from './types'
+import { LaunchType, TokenDTO } from './types'
 import LaunchBuyerConfig from './launch-buyer-config';
 import { BuyerConfig } from './buyer-config-class';
 
 import BN from 'bn.js';
 import { solStringToLamports } from '@/lib/lamports';
+import LaunchToken from './launch-token';
 
 const steps = [
     {
@@ -58,6 +59,7 @@ const steps = [
 export default function LaunchWizard() {
     const [currentStep, setCurrentStep] = useState(0)
     const [selectedTokenId, setSelectedTokenId] = useState<number | null>(null)
+    const [selectedToken, setSelectedToken] = useState<TokenDTO | null>(null)
     const [launchBuyerConfig, setLaunchBuyerConfig] = useState<BuyerConfig>(
         new BuyerConfig(
             0,
@@ -73,8 +75,9 @@ export default function LaunchWizard() {
 
 
 
-    function onTokenSelect(tokenID: number, devWalletID: number) {
+    function onTokenSelect(tokenID: number, devWalletID: number, token: TokenDTO) {
         setSelectedTokenId(tokenID)
+        setSelectedToken(token)
         setLaunchBuyerConfig((prev) => prev.copyWith({ devWalletId: devWalletID }))
     }
 
@@ -184,7 +187,12 @@ export default function LaunchWizard() {
                 {currentStep === 2 && (
                     <LaunchBuyerConfig launchBuyerConfig ={launchBuyerConfig} onBuyInputChange={onBuyInputChange}onBuyInputReset={onBuyInputReset}/>
                 )}
-                {currentStep === 3 && <p className="text-sm text-muted-foreground">Launch Token — content goes here.</p>}
+                {currentStep === 3 && (
+                    <LaunchToken launchBuyerConfig = {launchBuyerConfig} token={selectedToken} />
+                )
+                
+                
+                }
             </div>
 
             {/* Navigation */}

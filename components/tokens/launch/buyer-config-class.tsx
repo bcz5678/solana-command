@@ -41,6 +41,78 @@ export class BuyerConfig {
         this.walletTrades = walletTrades;
     }
 
+    toJSON(): {
+        devWalletId: number;
+        launchType: LaunchType;
+        walletCount: number;
+        totalSOLInLamports: string;
+        tokensTotal: string;
+        percentOfSupply: string;
+        marketCap: string;
+        walletTrades: {
+            walletId: number;
+            tradeType: string;
+            buyAmountInSOL: string;
+            tokensAmountHeld: string | null;
+            percentOfSupplyHeld: string | null;
+            marketCapAtBuy: string | null;
+        }[];
+    } {
+        return {
+            devWalletId: this.devWalletId,
+            launchType: this.launchType,
+            walletCount: this.walletCount,
+            totalSOLInLamports: this.totalSOLInLamports.toString(),
+            tokensTotal: this.tokensTotal.toString(),
+            percentOfSupply: this.percentOfSupply.toString(),
+            marketCap: this.marketCap.toString(),
+            walletTrades: this.walletTrades.map(t => ({
+                walletId: t.walletId,
+                tradeType: t.tradeType,
+                buyAmountInSOL: t.buyAmountInSOL.toString(),
+                tokensAmountHeld: t.tokensAmountHeld != null ? t.tokensAmountHeld.toString() : null,
+                percentOfSupplyHeld: t.percentOfSupplyHeld != null ? t.percentOfSupplyHeld.toString() : null,
+                marketCapAtBuy: t.marketCapAtBuy != null ? t.marketCapAtBuy.toString() : null,
+            })),
+        };
+    }
+
+    static fromJSON(json: {
+        devWalletId: number;
+        launchType: LaunchType;
+        walletCount: number;
+        totalSOLInLamports: string;
+        tokensTotal: string;
+        percentOfSupply: string;
+        marketCap: string;
+        walletTrades: {
+            walletId: number;
+            tradeType: string;
+            buyAmountInSOL: string;
+            tokensAmountHeld: string | null;
+            percentOfSupplyHeld: string | null;
+            marketCapAtBuy: string | null;
+        }[];
+    }): BuyerConfig {
+        return new BuyerConfig(
+            json.devWalletId,
+            json.launchType,
+            json.walletCount,
+            new BN(json.totalSOLInLamports),
+            new BN(json.tokensTotal),
+            new BN(json.percentOfSupply),
+            new BN(json.marketCap),
+            json.walletTrades.map(t => ({
+                walletId: t.walletId,
+                tradeType: t.tradeType,
+                buyAmountInSOL: new BN(t.buyAmountInSOL),
+                tokensAmountHeld: t.tokensAmountHeld != null ? new BN(t.tokensAmountHeld) : null,
+                percentOfSupplyHeld: t.percentOfSupplyHeld != null ? new BN(t.percentOfSupplyHeld) : null,
+                marketCapAtBuy: t.marketCapAtBuy != null ? new BN(t.marketCapAtBuy) : null,
+            }))
+        );
+    }
+
     copyWith(overrides: Partial<Omit<BuyerConfig, 'copyWith'>>): BuyerConfig {
         return new BuyerConfig(
             overrides.devWalletId      ?? this.devWalletId,

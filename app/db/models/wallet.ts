@@ -45,6 +45,8 @@ export interface TokenDTO {
     dev_wallet_id: number;
     token_pair: string;
     token_amount_held: BN;
+    contract_address: string | null;
+    mint_keypair: string | null;
 }
 
 

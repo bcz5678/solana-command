@@ -15,32 +15,17 @@ import {
 } from '@/components/ui/tooltip'
 import { Copy } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-
-type Token = {
-    id: number
-    created_at: string
-    name: string
-    symbol: string
-    description: string
-    dev_wallet_id: number
-    contract_address: string | null
-    logo_image_path: string | null
-    logo_url: string | null
-    launched: boolean | null
-    website_url: string | null
-    twitter_url: string | null
-    telegram_handle: string | null
-}
+import { TokenDTO } from '@/components/tokens/launch/types'
 
 type Props = {
     selectedId: number | null
-    onSelect: (tokenID: number, devWalletID: number) => void
+    onSelect: (tokenID: number, devWalletID: number, token: TokenDTO) => void
 }
 
 const supabase = createClient()
 
 export default function TokenSelect({ selectedId, onSelect }: Props) {
-    const [tokens, setTokens] = useState<Token[]>([])
+    const [tokens, setTokens] = useState<TokenDTO[]>([])
     const [loading, setLoading] = useState(true)
     const [openItem, setOpenItem] = useState<string>('')
     const [copiedId, setCopiedId] = useState<number | null>(null)
@@ -49,7 +34,7 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
     useEffect(() => {
         supabase
             .from('tokens')
-            .select('id, created_at, name, symbol, description, dev_wallet_id, contract_address, logo_image_path, launched, website_url, twitter_url, telegram_handle')
+            .select('id, created_at, name, symbol, description, dev_wallet_id, contract_address, mint_keypair, logo_image_path, launched, website_url, twitter_url, telegram_handle')
             .order('launched', { ascending: true })
             .order('created_at', { ascending: false })
             .then(({ data, error }) => {
@@ -147,7 +132,7 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
                                                     ].join(' ')}
                                                     onClick={(e) => {
                                                         e.stopPropagation()
-                                                        if (!isLaunched) onSelect(token.id, token.dev_wallet_id)
+                                                        if (!isLaunched) onSelect(token.id, token.dev_wallet_id, token)
                                                     }}
                                                 >
                                                     <span className={[
