@@ -4,9 +4,10 @@ import { useState } from 'react'
 import TokenSelect from '@/components/tokens/launch/token-select'
 import LaunchTypeSelect from '@/components/tokens/launch/launch-type-select';
 import LaunchCurrentConfiguration from '@/components/tokens/launch/launch-current-configuration'
-import { LaunchType, TokenDTO } from './types'
+import { LaunchType } from './types'
+import { CreatedTokenDTO } from '@/app/db/models/token';
 import LaunchBuyerConfig from './launch-buyer-config';
-import { BuyerConfig } from './buyer-config-class';
+import { LaunchConfig } from './launch-config-class';
 
 import BN from 'bn.js';
 import { solStringToLamports } from '@/lib/lamports';
@@ -66,12 +67,10 @@ const steps = [
 export default function LaunchWizard() {
     const [currentStep, setCurrentStep] = useState(0)
     const [selectedTokenId, setSelectedTokenId] = useState<number | null>(null)
-    const [selectedToken, setSelectedToken] = useState<TokenDTO | null>(null)
-    const [launchBuyerConfig, setLaunchBuyerConfig] = useState<BuyerConfig>(
-        new BuyerConfig(
-            0,
+    const [launchConfig, setLaunchConfig] = useState<LaunchConfig>(
+        new LaunchConfig(
             LaunchType.unselected,
-            0,
+            null,
             new BN(0),
             new BN(0),
             new BN(0),
@@ -80,42 +79,32 @@ export default function LaunchWizard() {
         )
     );
 
-
-
-    function onTokenSelect(tokenID: number, devWalletID: number, token: TokenDTO) {
-        setSelectedTokenId(tokenID)
-        setSelectedToken(token)
-        setLaunchBuyerConfig((prev) => prev.copyWith({ devWalletId: devWalletID }))
+    function onTokenSelect(token: CreatedTokenDTO) {
+        setSelectedTokenId(token.id ?? null)
+        setLaunchConfig((prev) => prev.copyWith({ token }))
     }
 
     function onLaunchTypeSelect(selectedLaunchType: LaunchType) {
-        setLaunchBuyerConfig((prev) => prev.copyWith({ launchType: selectedLaunchType }))
+        setLaunchConfig((prev) => prev.copyWith({ launchType: selectedLaunchType }))
     }
 
     function onBuyInputChange(walletId: number, newAmount: string) {
-
         const newAmountInLamports = solStringToLamports(newAmount);
-
-
-        launchBuyerConfig.updateWalletList(walletId, newAmountInLamports, "buy")
-
-        setLaunchBuyerConfig((prev) => prev.copyWith({
-            walletCount: launchBuyerConfig.walletCount,
-            walletTrades: launchBuyerConfig.walletTrades,
-            totalSOLInLamports: launchBuyerConfig.totalSOLInLamports,
+        launchConfig.updateWalletList(walletId, newAmountInLamports, "buy")
+        setLaunchConfig((prev) => prev.copyWith({
+            walletTrades: launchConfig.walletTrades,
+            totalSOLInLamports: launchConfig.totalSOLInLamports,
         }));
     }
 
-    function onBuyInputReset(){
-        launchBuyerConfig.clearWalletList();
-
-         setLaunchBuyerConfig((prev) => prev.copyWith({
-            walletCount: launchBuyerConfig.walletCount,
-            totalSOLInLamports: launchBuyerConfig.totalSOLInLamports,
-            tokensTotal: launchBuyerConfig.tokensTotal,
-            percentOfSupply: launchBuyerConfig.percentOfSupply,
-            marketCap: launchBuyerConfig.marketCap,   
-            walletTrades: launchBuyerConfig.walletTrades,
+    function onBuyInputReset() {
+        launchConfig.clearWalletList();
+        setLaunchConfig((prev) => prev.copyWith({
+            totalSOLInLamports: launchConfig.totalSOLInLamports,
+            tokensTotal: launchConfig.tokensTotal,
+            percentOfSupply: launchConfig.percentOfSupply,
+            marketCap: launchConfig.marketCap,
+            walletTrades: launchConfig.walletTrades,
         }));
     }
 
@@ -127,11 +116,11 @@ export default function LaunchWizard() {
                 </div>
                 <div className="flex-3">
                     <LaunchCurrentConfiguration
-                        buyConfig={launchBuyerConfig}
+                        launchConfig={launchConfig}
                     />
                 </div>
             </div>
-    
+
             {/* Progress bar */}
             <div className="w-full flex items-center">
                 {steps.map((step, i) => {
@@ -189,17 +178,14 @@ export default function LaunchWizard() {
                     <TokenSelect selectedId={selectedTokenId} onSelect={onTokenSelect} />
                 )}
                 {currentStep === 1 && (
-                    <LaunchTypeSelect selectedType={launchBuyerConfig.launchType} onSelect={onLaunchTypeSelect} />
+                    <LaunchTypeSelect selectedType={launchConfig.launchType} onSelect={onLaunchTypeSelect} />
                 )}
                 {currentStep === 2 && (
-                    <LaunchBuyerConfig launchBuyerConfig ={launchBuyerConfig} onBuyInputChange={onBuyInputChange}onBuyInputReset={onBuyInputReset}/>
+                    <LaunchBuyerConfig launchConfig={launchConfig} onBuyInputChange={onBuyInputChange} onBuyInputReset={onBuyInputReset} />
                 )}
                 {currentStep === 3 && (
-                    <LaunchToken launchBuyerConfig = {launchBuyerConfig} token={selectedToken} />
-                )
-                
-                
-                }
+                    <LaunchToken launchConfig={launchConfig} />
+                )}
             </div>
 
             {/* Navigation */}
@@ -216,7 +202,7 @@ export default function LaunchWizard() {
                     disabled={
                         currentStep === steps.length - 1 ||
                         (currentStep === 0 && selectedTokenId === null) ||
-                        (currentStep === 1 && launchBuyerConfig.launchType === LaunchType.unselected)
+                        (currentStep === 1 && launchConfig.launchType === LaunchType.unselected)
                     }
                     className="px-3 py-1.5 text-sm rounded border border-border disabled:opacity-40"
                 >

@@ -78,19 +78,19 @@ export default function CreateTokenForm() {
         setMintAddress('');
 
         // 1. Try to claim a prebuilt vanity keypair from the DB
-        let mintKeypair: unknown;
+        let mintSecretKey: unknown;
         let contractAddress: string;
         let vanityId: number | null = null;
 
         const { data: available } = await supabase
             .from('vanity_keypairs')
-            .select('id, mint_keypair, contract_address')
+            .select('id, mint_secret_key, contract_address')
             .eq('available', true)
             .limit(1)
             .single();
 
         if (available) {
-            mintKeypair = available.mint_keypair;
+            mintSecretKey = available.mint_secret_key;
             contractAddress = available.contract_address;
             vanityId = available.id;
             setMintStatus('found');
@@ -111,7 +111,7 @@ export default function CreateTokenForm() {
                 },
             });
 
-            mintKeypair = mint.secretKey;
+            mintSecretKey = mint.secretKey;
             contractAddress = mint.publicKey.toBase58();
             setMintStatus('found');
             setMintAddress(contractAddress);
@@ -138,7 +138,7 @@ export default function CreateTokenForm() {
                 name: data.name,
                 symbol: data.symbol,
                 description: data.description,
-                mint_keypair: mintKeypair,
+                mint_secret_key: mintSecretKey,
                 contract_address: contractAddress,
                 logo_image_path: imgData?.path,
                 website_url: data.websiteUrl,

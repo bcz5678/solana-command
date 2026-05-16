@@ -1,39 +1,29 @@
 import { LaunchType } from '@/components/tokens/launch/types';
+import { CreatedTokenDTO } from '@/app/db/models/token';
+import { WalletTradeDTO } from '@/app/db/models/wallet';
 import BN from 'bn.js';
 
 
-type WalletTrade= {
-    walletId: number
-    tradeType: string
-    buyAmountInSOL: BN
-    tokensAmountHeld: BN | null
-    percentOfSupplyHeld: BN | null
-    marketCapAtBuy: BN | null
-}
-
-export class BuyerConfig {
-    devWalletId: number;
+export class LaunchConfig {
     launchType: LaunchType;
-    walletCount: number;
+    token: CreatedTokenDTO | null;
     totalSOLInLamports: BN;
     tokensTotal: BN;
     percentOfSupply: BN;
     marketCap: BN;
-    walletTrades: WalletTrade[];
+    walletTrades: WalletTradeDTO[];
 
     constructor(
-        devWalletId: number,
         launchType: LaunchType,
-        walletCount: number,
+        token: CreatedTokenDTO | null,
         totalSOLInLamports: BN,
         tokensTotal: BN,
         percentOfSupply: BN,
         marketCap: BN,
-        walletTrades: WalletTrade[]
+        walletTrades: WalletTradeDTO[]
     ) {
-        this.devWalletId = devWalletId;
         this.launchType = launchType;
-        this.walletCount = walletCount;
+        this.token = token;
         this.totalSOLInLamports = totalSOLInLamports
         this.tokensTotal = tokensTotal;
         this.percentOfSupply = percentOfSupply;
@@ -42,9 +32,8 @@ export class BuyerConfig {
     }
 
     toJSON(): {
-        devWalletId: number;
         launchType: LaunchType;
-        walletCount: number;
+        token: CreatedTokenDTO | null;
         totalSOLInLamports: string;
         tokensTotal: string;
         percentOfSupply: string;
@@ -59,9 +48,8 @@ export class BuyerConfig {
         }[];
     } {
         return {
-            devWalletId: this.devWalletId,
             launchType: this.launchType,
-            walletCount: this.walletCount,
+            token: this.token,
             totalSOLInLamports: this.totalSOLInLamports.toString(),
             tokensTotal: this.tokensTotal.toString(),
             percentOfSupply: this.percentOfSupply.toString(),
@@ -78,9 +66,8 @@ export class BuyerConfig {
     }
 
     static fromJSON(json: {
-        devWalletId: number;
         launchType: LaunchType;
-        walletCount: number;
+        token: CreatedTokenDTO,
         totalSOLInLamports: string;
         tokensTotal: string;
         percentOfSupply: string;
@@ -93,11 +80,10 @@ export class BuyerConfig {
             percentOfSupplyHeld: string | null;
             marketCapAtBuy: string | null;
         }[];
-    }): BuyerConfig {
-        return new BuyerConfig(
-            json.devWalletId,
+    }): LaunchConfig {
+        return new LaunchConfig(
             json.launchType,
-            json.walletCount,
+            json.token,
             new BN(json.totalSOLInLamports),
             new BN(json.tokensTotal),
             new BN(json.percentOfSupply),
@@ -113,11 +99,10 @@ export class BuyerConfig {
         );
     }
 
-    copyWith(overrides: Partial<Omit<BuyerConfig, 'copyWith'>>): BuyerConfig {
-        return new BuyerConfig(
-            overrides.devWalletId      ?? this.devWalletId,
+    copyWith(overrides: Partial<Omit<LaunchConfig, 'copyWith'>>): LaunchConfig {
+        return new LaunchConfig(
             overrides.launchType       ?? this.launchType,
-            overrides.walletCount      ?? this.walletCount,
+            overrides.token            ?? this.token,
             overrides.totalSOLInLamports         ?? this.totalSOLInLamports,
             overrides.tokensTotal      ?? this.tokensTotal,
             overrides.percentOfSupply  ?? this.percentOfSupply,
@@ -128,7 +113,6 @@ export class BuyerConfig {
 
 
     clearWalletList(): void {
-        this.walletCount = 0;
         this.totalSOLInLamports = new BN(0);
         this.tokensTotal = new BN(0);
         this.percentOfSupply = new BN(0);
@@ -144,16 +128,11 @@ export class BuyerConfig {
             //Wallet in this.walletTrades and the amount has been cleared
             if(newAmount.isZero() || newAmount == null) {
 
-
                 //Remove wallet from list
                 this.walletTrades.splice(walletListIndex, 1);
 
                 //Loop through updated walletTrades list and recalculate Total SOL
                 this.totalSOLInLamports = this._calculateTotalSOLBuyAmount();
-
-                //
-                this.walletCount = this.walletTrades.length;
-
 
             }else {
                 //wallet in this.walletTrades, adusting SOL amount
@@ -165,11 +144,9 @@ export class BuyerConfig {
         } else {
             if (newAmount.isZero() || newAmount == null) return;
 
-            //wallet not in walletTrades, adding to walletCount
-            this.walletCount += 1;
 
             //building new WalletTrade and adding to this.walletTrades 
-            const newWalletTrade: WalletTrade = {
+            const newWalletTrade: WalletTradeDTO= {
                 walletId: walletID,
                 tradeType: tradeType,
                 buyAmountInSOL: newAmount,
@@ -178,7 +155,6 @@ export class BuyerConfig {
                 marketCapAtBuy: null
             } 
             this.walletTrades.push(newWalletTrade);
-
 
             //Loop through updated walletTrades list and recalculate Total SOL
             this.totalSOLInLamports = this._calculateTotalSOLBuyAmount();

@@ -1,12 +1,10 @@
 'use client'
 
-import { BuyerConfig } from './buyer-config-class'
+import { LaunchConfig } from './launch-config-class'
 import { lamportsBNToSolDisplay } from '@/lib/lamports'
-import { TokenDTO } from './types'
 
 type Props = {
-    token: TokenDTO | null
-    buyerConfig: BuyerConfig
+    launchConfig: LaunchConfig
 }
 
 
@@ -32,27 +30,27 @@ function SubCard({ title, children }: { title: string; children: React.ReactNode
     )
 }
 
-export default function LaunchTokenPreview({ token, buyerConfig }: Props) {
-    const totalSOL = lamportsBNToSolDisplay(buyerConfig.totalSOLInLamports)
-    const buyerWalletCount = buyerConfig.walletCount
-    const totalWallets = buyerWalletCount + 1
+export default function LaunchTokenPreview({launchConfig }: Props) {
+    const totalSOL = lamportsBNToSolDisplay(launchConfig.totalSOLInLamports)
+    const buyerWalletCount = launchConfig.walletTrades.length
+    const totalWallets = launchConfig.walletTrades.length + 1
 
     return (
         <div className="flex flex-col gap-4 w-full">
 
-            {/* Token Meta */}
-            <SubCard title="Token Meta">
+            {/* launchConfig.token Meta */}
+            <SubCard title="launchConfig.token Meta">
                 <div className="grid grid-cols-2 gap-6">
                     <div className="flex flex-col gap-3">
-                        <Field label="Token Name" value={token?.name ?? '—'} />
-                        <Field label="Token Symbol" value={token?.symbol ?? '—'} />
-                        <Field label="Description" value={token?.description ?? '—'} />
+                        <Field label="launchConfig.token Name" value={launchConfig.token?.token_meta.name ?? '—'} />
+                        <Field label="launchConfig.token Symbol" value={launchConfig.token?.token_meta.symbol ?? '—'} />
+                        <Field label="Description" value={launchConfig.token?.token_meta.description ?? '—'} />
                     </div>
                     <div className="flex items-center justify-center">
                         <div className="size-24 rounded-xl bg-muted border border-border overflow-hidden flex items-center justify-center text-2xl font-bold text-muted-foreground">
-                            {token?.logo_url
-                                ? <img src={token.logo_url} alt={token.symbol} className="size-full object-cover" />
-                                : (token?.symbol?.slice(0, 1) ?? '?')
+                            {launchConfig.token?.token_meta.logo_url
+                                ? <img src={launchConfig.token.token_meta.logo_url} alt={launchConfig.token.token_meta.symbol} className="size-full object-cover" />
+                                : (launchConfig.token?.token_meta.symbol?.slice(0, 1) ?? '?')
                             }
                         </div>
                     </div>
@@ -61,13 +59,13 @@ export default function LaunchTokenPreview({ token, buyerConfig }: Props) {
 
             {/* CA Configuration */}
             <SubCard title="CA Configuration">
-                <Field label="Contract Address" value={`${token?.contract_address ?? '-'}`} dim />
+                <Field label="Contract Address" value={`${launchConfig.token?.contract_address ?? '-'}`} dim />
             </SubCard>
 
             {/* Buyer Configuration */}
             <SubCard title="Buyer Configuration">
                 <div className="flex flex-col gap-3">
-                    <Field label="Launch Type" value={buyerConfig.launchType.toString()} />
+                    <Field label="Launch Type" value={launchConfig.launchType.toString()} />
                     <Field label="Jito Tip" value="Not implemented" dim />
                     <Field
                         label="Number of Wallets"
@@ -75,9 +73,9 @@ export default function LaunchTokenPreview({ token, buyerConfig }: Props) {
                     />
                     <Field
                         label="Purchasing a Total of"
-                        value={`${totalSOL} SOL of ${token?.name ?? '—'}`}
+                        value={`${totalSOL} SOL of ${launchConfig.token?.token_meta.name ?? '—'}`}
                     />
-                    <Field label="Token Amount" value="Not implemented" dim />
+                    <Field label="launchConfig.token Amount" value="Not implemented" dim />
                     <Field label="Percentage of Total Supply" value="Not implemented" dim />
                 </div>
             </SubCard>

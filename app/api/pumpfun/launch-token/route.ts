@@ -6,7 +6,7 @@ import { Keypair, PublicKey } from "@solana/web3.js";
 import { PUMP_SDK, OnlinePumpSdk } from '@nirholas/pump-sdk';
 import { createClient } from '@/lib/supabase/client';
 
-import { BuyerConfig } from '@/components/tokens/launch/buyer-config-class';
+import { BuyerConfig } from '@/components/tokens/launch/launch-config-class';
 import { LaunchType } from '@/components/tokens/launch/types';
 import { TokenDTO, WalletModelDTO } from '@/app/db/models/wallet';
 

@@ -1,7 +1,13 @@
 
 // Wallet Data Transfer Object for API calls
 import BN from 'bn.js';
+import { BaseTokenDTO, CreatedTokenDTO } from './token';
 
+
+export interface TokenHoldingsDTO {
+    held_tokens: BaseTokenDTO[],
+    created_tokens: CreatedTokenDTO[],
+} 
 
 export interface WalletModelDTO {
     id?: number;
@@ -13,7 +19,7 @@ export interface WalletModelDTO {
     solana_balance_in_lamports: BN;
     owner_id: number;
     group_id: number;
-    token_holdings: TokenDTO[];
+    token_holdings: TokenHoldingsDTO[];
 }
 
 export interface WalletTypeDTO {
@@ -35,19 +41,15 @@ export interface OwnerDTO {
     name: string;
 }
 
-export interface TokenDTO {
-    id?: number;
-    created_at?: string;
-    name: string;
-    owner_id: number;
-    symbol: string;
-    description: string;
-    dev_wallet_id: number;
-    token_pair: string;
-    token_amount_held: BN;
-    contract_address: string | null;
-    mint_keypair: string | null;
+export interface WalletTradeDTO  {
+    walletId: number
+    tradeType: string
+    buyAmountInSOL: BN
+    tokensAmountHeld: BN | null
+    percentOfSupplyHeld: BN | null
+    marketCapAtBuy: BN | null
 }
+
 
 
 // Wallet entity f
@@ -63,6 +65,6 @@ export class Wallet {
         public solana_balance_in_lamports: BN,
         public owner: number,
         public group : number,
-        public token_holdings: TokenDTO[],
+        public token_holdings: TokenHoldingsDTO[],
     ){}
 }

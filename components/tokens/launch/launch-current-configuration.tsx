@@ -3,20 +3,20 @@
 import { useState } from 'react';
 import { WalletIcon, CoinsIcon, ChartColumnDecreasingIcon} from 'lucide-react';
 import { LaunchType } from '@/components/tokens/launch/types';
-import { BuyerConfig } from './buyer-config-class';
+import {LaunchConfig } from './launch-config-class';
 
 import { lamportsBNToSolDisplay } from '@/lib/lamports';
 
 type Props = {
-    buyConfig: BuyerConfig
+    launchConfig: LaunchConfig
 }
 
 
-export default function LaunchCurrentConfiguration({buyConfig }: Props) {
+export default function LaunchCurrentConfiguration({launchConfig }: Props) {
 
     return (
         <div className="bg-black rounded-2xl flex flex-col p-3">
-            <h1 className="text-white text-1xl">Current Configuration | {buyConfig.launchType.toString()} Launch</h1>
+            <h1 className="text-white text-1xl">Current Configuration | {launchConfig.launchType.toString()} Launch</h1>
             <div className="flex flex-row gap-4">
                 <div className="flex flex-1">
                     <div className="flex flex-col w-full items-center" id="walletsDisplay">
@@ -24,7 +24,7 @@ export default function LaunchCurrentConfiguration({buyConfig }: Props) {
                             <div className="flex flex-row">
                                 <div className="flex-1 flex-col items-center">
                                     <div className="flex text-white text-center items-center justify-center">
-                                        {buyConfig.walletCount} Wallets    
+                                        {launchConfig.walletTrades.length} Wallets    
                                     </div>
                                     <div className="flex items-center justify-center">
                                         <WalletIcon className="text-white"/>
@@ -32,7 +32,7 @@ export default function LaunchCurrentConfiguration({buyConfig }: Props) {
                                 </div>
                                 <div className="flex-1 flex-col">
                                     <div className="flex text-white text-center justify-center">
-                                        {lamportsBNToSolDisplay(buyConfig.totalSOLInLamports)} Sol    
+                                        {lamportsBNToSolDisplay(launchConfig.totalSOLInLamports)} Sol    
                                     </div>
                                     <div className="flex  text-center justify-center">
                                         <CoinsIcon className="text-white justify-center"/>
@@ -53,7 +53,7 @@ export default function LaunchCurrentConfiguration({buyConfig }: Props) {
                             <div className="flex flex-row">
                                 <div className="flex-1 flex-col items-center">
                                     <div className="flex text-white text-center items-center justify-center">
-                                        {buyConfig.tokensTotal.toString()} {buyConfig.launchType}
+                                        {launchConfig.tokensTotal.toString()} {launchConfig.launchType}
                                     </div>
                                     <div className="flex items-center justify-center">
                                         <ChartColumnDecreasingIcon className="text-white"/>
@@ -61,7 +61,7 @@ export default function LaunchCurrentConfiguration({buyConfig }: Props) {
                                 </div>
                                  <div className="flex-1 flex-col items-center">
                                     <div className="flex text-white text-center items-center justify-center">
-                                        {buyConfig.percentOfSupply.toString()}%   
+                                        {launchConfig.percentOfSupply.toString()}%   
                                     </div>
                                     <div className="flex text-white items-center justify-center">
                                         of the Total Supply
@@ -69,7 +69,7 @@ export default function LaunchCurrentConfiguration({buyConfig }: Props) {
                                 </div>
                                 <div className="flex-1 flex-col">
                                     <div className="flex text-white text-center justify-center">
-                                        ${buyConfig.marketCap.toString()}    
+                                        ${launchConfig.marketCap.toString()}    
                                     </div>
                                     <div className="flex text-white text-center justify-center">
                                         MC
@@ -79,7 +79,7 @@ export default function LaunchCurrentConfiguration({buyConfig }: Props) {
                             </div>
                         </div>
                         <div className="text-white justify-center">
-                            {buyConfig.launchType} Launch
+                            {launchConfig.launchType} Launch
                         </div>                    
                     </div>
                  </div>

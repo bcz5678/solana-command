@@ -1,16 +1,14 @@
 'use client'
 
 import { useState } from 'react';
-import { BuyerConfig } from './buyer-config-class';
+import { LaunchConfig } from './launch-config-class';
 import LaunchTokenPreview from './launch-token-preview';
-import { TokenDTO } from '@/app/db/models/wallet';
 
 type Props = {
-    token: TokenDTO;
-    launchBuyerConfig: BuyerConfig;
+    launchConfig: LaunchConfig;
 }
 
-export default function LaunchToken({ token, launchBuyerConfig }: Props) {
+export default function LaunchToken({ launchConfig }: Props) {
     const [launchSubmitted, setLaunchSubmitted] = useState<boolean>(false);
 
     async function launchToken() {
@@ -19,9 +17,7 @@ export default function LaunchToken({ token, launchBuyerConfig }: Props) {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    tokenId: token.id,
-                    launchType: launchBuyerConfig.launchType,
-                    launchBuyerConfig,
+                    launchConfig,
                 }),
             });
             setLaunchSubmitted(true);
@@ -32,7 +28,7 @@ export default function LaunchToken({ token, launchBuyerConfig }: Props) {
 
     return (
         (launchSubmitted == false)
-            ? <LaunchTokenPreview token={token} buyerConfig={launchBuyerConfig} />
+            ? <LaunchTokenPreview launchConfig={launchConfig} />
             : <button onClick={launchToken}>Launch Token</button>
     );
 }
