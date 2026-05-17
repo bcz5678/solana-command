@@ -75,7 +75,7 @@ export default function LaunchTokenPreview({launchConfig }: Props) {
                         label="Purchasing a Total of"
                         value={`${totalSOL} SOL of ${launchConfig.token?.name ?? '—'}`}
                     />
-                    <Field label="launchConfig.token Amount" value="Not implemented" dim />
+                    <Field label="Total Token Amount" value="Not implemented" dim />
                     <Field label="Percentage of Total Supply" value="Not implemented" dim />
                 </div>
             </SubCard>

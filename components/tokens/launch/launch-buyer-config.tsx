@@ -48,6 +48,28 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
         })
     }, [])
 
+
+  useEffect(() => {
+    const fetchInitialBondingCurve = async () => {
+      try {
+        const response = await fetch(`/api/pumpfun/bonding-curve?request=t}`);
+        if (!response.ok) {
+          throw new Error('Network response was not ok');
+        }
+        const data = await response.json();
+       
+      } catch (error) {
+        console.error("Error fetching balance:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchInitialBondingCurve();
+  }, []);
+
+
+
     const devWallet = useMemo(
         () => wallets.find((w) => w.id === launchConfig.token?.dev_wallet_id) ?? null,
         [wallets, launchConfig.token?.dev_wallet_id],

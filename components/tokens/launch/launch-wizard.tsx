@@ -204,7 +204,7 @@ export default function LaunchWizard() {
                         (currentStep === 0 && selectedTokenId === null) ||
                         (currentStep === 1 && launchConfig.launchType === LaunchType.unselected)
                     }
-                    className="px-3 py-1.5 text-sm rounded border border-border disabled:opacity-40"
+                    className="px-3 py-1.5 text-sm rounded border border-blue-500 bg-blue-500 text-white hover:bg-blue-600 hover:border-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                     {nextButtonLabels[currentStep] ?? 'Next'}
                 </button>
