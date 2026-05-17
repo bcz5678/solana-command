@@ -1,68 +1,99 @@
 import { solStringToLamports } from '@/lib/lamports';
 
-import { handleError, initializeQuickNodeSolana, initializeConnection, parseAndValidateAddress } from '@/app/api/utils/helpers';
-import { Keypair, PublicKey } from "@solana/web3.js";
-import { 
-    PUMP_SDK, 
-    OnlinePumpSdk, 
+import { handleError, initializeQuickNodeSolana } from '@/app/api/utils/helpers';
+import {
+    OnlinePumpSdk,
     newBondingCurve,
     getBuyTokenAmountFromSolAmount,
     getSellSolAmountFromTokenAmount,
-    bondingCurveMarketCap 
+    bondingCurveMarketCap
 } from '@pump-fun/pump-sdk';
-import { LaunchConfig } from '@/components/tokens/launch/launch-config-class';
-
-import bs58 from 'bs58';
+import BN from 'bn.js';
 
 export const dynamic = 'force-dynamic';
 
 
-export enum BongCurveRequestType {
+export enum BondingCurveRequestType {
     initial             = "initial",
     getMarketCap        = "getMarketCap",
     getTokensFromSOL    = "getTokensFromSOL",
     getMarketCapFromSOL = "getMarketCapFromSOL",
 }
 
-
 export interface BondingCurveRequest {
-    type: BondingCurveRequest[],
+    type: string[];
+    solAmount?: string;
+    tokenAmount?: string;
+}
 
+function getBondingCurveRequestTypes(requestList: string[]): BondingCurveRequestType[] {
+    const validTypes = new Set(Object.values(BondingCurveRequestType));
+    return requestList.filter((s): s is BondingCurveRequestType =>
+        validTypes.has(s as BondingCurveRequestType)
+    );
 }
 
 
-
-
-
-    // initialize connection
 const quicknodeSolana = initializeQuickNodeSolana();
 const onlineSdk = new OnlinePumpSdk(quicknodeSolana.connection);
-
 const global = await onlineSdk.fetchGlobal();
 
-export async function GET(request: Request) {
-    console.log('api/pumpfun/bondingcurve/route -> GET -> entry ');
-
-    const url = new URL(request.url);
+export async function POST(request: Request) {
+    console.log('api/pumpfun/bondingcurve/route -> POST -> entry');
 
     try {
+        const body: BondingCurveRequest = await request.json();
+        const requestTypes = getBondingCurveRequestTypes(body.type);
 
-        console.log(`api/pumpfun/bondingcurve/route -> GET ->  global : ${ global } `);
+        const bondingCurve = newBondingCurve(global);
+        const result: Record<string, unknown> = {};
 
-        const initialBondingCurve = newBondingCurve(global);
+        for (const type of requestTypes) {
+            switch (type) {
+                case BondingCurveRequestType.initial:
+                    result.initial = bondingCurve;
+                    break;
 
-        console.log(`api/pumpfun/bondingcurve/route -> GET -> initialBondingCurve: ${ initialBondingCurve } `);
+                case BondingCurveRequestType.getMarketCap:
+                    result.marketCap = bondingCurveMarketCap({
+                        mintSupply: bondingCurve.tokenTotalSupply,
+                        virtualQuoteReserves: bondingCurve.virtualQuoteReserves,
+                        virtualTokenReserves: bondingCurve.virtualTokenReserves,
+                    });
+                    break;
 
-        // Calculate initial market cap
-        const marketCap = bondingCurveMarketCap({
-            mintSupply: initialBondingCurve.tokenTotalSupply,
-            virtualQuoteReserves: initialBondingCurve.virtualQuoteReserves,
-            virtualTokenReserves: initialBondingCurve.virtualTokenReserves,
-        });
+                case BondingCurveRequestType.getTokensFromSOL: {
+                    const solLamports = new BN(solStringToLamports(body.solAmount ?? '0'));
+                    result.tokensFromSOL = getBuyTokenAmountFromSolAmount({
+                        global,
+                        feeConfig: null,
+                        mintSupply: null,
+                        bondingCurve,
+                        amount: solLamports,
+                    });
+                    break;
+                }
 
-        console.log(`api/pumpfun/bondingcurve/route -> GET -> marketCap: ${ marketCap } `);
+                case BondingCurveRequestType.getMarketCapFromSOL: {
+                    const solLamports = new BN(solStringToLamports(body.solAmount ?? '0'));
+                    const tokensBought = getBuyTokenAmountFromSolAmount({
+                        global,
+                        feeConfig: null,
+                        mintSupply: null,
+                        bondingCurve,
+                        amount: solLamports,
+                    });
+                    result.marketCapFromSOL = bondingCurveMarketCap({
+                        mintSupply: bondingCurve.tokenTotalSupply.sub(tokensBought),
+                        virtualQuoteReserves: bondingCurve.virtualQuoteReserves.add(solLamports),
+                        virtualTokenReserves: bondingCurve.virtualTokenReserves.sub(tokensBought),
+                    });
+                    break;
+                }
+            }
+        }
 
-        return new Response(JSON.stringify({marketCap }), {
+        return new Response(JSON.stringify(result), {
             headers: { 'Content-Type': 'application/json' },
             status: 200,
         });

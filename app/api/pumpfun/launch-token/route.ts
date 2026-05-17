@@ -3,7 +3,7 @@ import { solStringToLamports } from '@/lib/lamports';
 import { handleError, initializeQuickNodeSolana, initializeConnection, parseAndValidateAddress } from '@/app/api/utils/helpers';
 
 import { Keypair, PublicKey } from "@solana/web3.js";
-import { PUMP_SDK, OnlinePumpSdk } from '@nirholas/pump-sdk';
+import { PUMP_SDK, OnlinePumpSdk } from '@pump-fun/pump-sdk';
 import { createClient } from '@/lib/supabase/client';
 
 import { LaunchConfig } from '@/components/tokens/launch/launch-config-class';
