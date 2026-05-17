@@ -64,6 +64,7 @@ const steps = [
 ]
 
 
+
 export default function LaunchWizard() {
     const [currentStep, setCurrentStep] = useState(0)
     const [selectedTokenId, setSelectedTokenId] = useState<number | null>(null)
@@ -89,7 +90,9 @@ export default function LaunchWizard() {
     }
 
     function onBuyInputChange(walletId: number, newAmount: string) {
-        const newAmountInLamports = solStringToLamports(newAmount);
+        const newAmountInLamports = (newAmount === '' || newAmount === '.')
+            ? new BN(0)
+            : solStringToLamports(newAmount);
         launchConfig.updateWalletList(walletId, newAmountInLamports, "buy")
         setLaunchConfig((prev) => prev.copyWith({
             walletTrades: launchConfig.walletTrades,

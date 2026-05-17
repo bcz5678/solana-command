@@ -122,7 +122,7 @@ export default function CreateTokenForm() {
         const ext = logoFile.name.split('.').pop();
         const { data: imgData, error: uploadError } = await supabase.storage
             .from('token-media')
-            .upload(`public/${data.symbol}_logo_img_${contractAddress.slice(0, 5)}.${ext}`, logoFile);
+            .upload(`public/${data.symbol}_${contractAddress.slice(0, 7)}_logo.${ext}`, logoFile);
 
         if (uploadError) {
             setSubmitStatus('error');

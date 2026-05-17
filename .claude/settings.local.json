@@ -5,7 +5,8 @@
       "Bash(xargs grep -l \"wallet_type\\\\|wallet_groups\\\\|owners\")",
       "Bash(npx shadcn@latest add checkbox --yes)",
       "Bash(npx shadcn@latest add accordion --yes)",
-      "Bash(mkdir -p \"c:/Solana-Command/solana-node/components/tokens/create\")"
+      "Bash(mkdir -p \"c:/Solana-Command/solana-node/components/tokens/create\")",
+      "Bash(npm ls *)"
     ],
     "additionalDirectories": [
       "c:\\Solana-Command\\solana-node\\components\\tokens"

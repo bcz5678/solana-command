@@ -63,7 +63,7 @@ export async function POST(request: Request) {
                     break;
 
                 case BondingCurveRequestType.getTokensFromSOL: {
-                    const solLamports = new BN(solStringToLamports(body.solAmount ?? '0'));
+                    const solLamports = solStringToLamports(body.solAmount ?? '0');
                     result.tokensFromSOL = getBuyTokenAmountFromSolAmount({
                         global,
                         feeConfig: null,
@@ -71,6 +71,8 @@ export async function POST(request: Request) {
                         bondingCurve,
                         amount: solLamports,
                     });
+
+                    console.log(`api/pumpfun/bondingcurve/route -> getTokensFromSOL: ${result.tokensFromSOL}`);
                     break;
                 }
 
@@ -88,6 +90,10 @@ export async function POST(request: Request) {
                         virtualQuoteReserves: bondingCurve.virtualQuoteReserves.add(solLamports),
                         virtualTokenReserves: bondingCurve.virtualTokenReserves.sub(tokensBought),
                     });
+
+                    
+                    console.log(`api/pumpfun/bondingcurve/route -> marketCapFromSOL: ${result.marketCapFromSOL}`);
+
                     break;
                 }
             }

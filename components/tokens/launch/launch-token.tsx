@@ -11,24 +11,34 @@ type Props = {
 export default function LaunchToken({ launchConfig }: Props) {
     const [launchSubmitted, setLaunchSubmitted] = useState<boolean>(false);
 
-    async function launchToken() {
+    async function handleLaunch() {
         try {
-            await fetch(`/api/pumpfun/launch-token`, {
+            const response = await fetch(`/api/pumpfun/launch-token`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    launchConfig,
-                }),
+                body: JSON.stringify({ launchConfig }),
             });
-            setLaunchSubmitted(true);
+           
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            const data = await response.json();
+            console.log(data);
+
         } catch (error) {
-            console.log(`components/tokens/launch/launch-token -> launchToken -> error: ${error}`);
+            console.log(`components/tokens/launch/launch-token -> handleLaunch -> error: ${error}`);
         }
+        setLaunchSubmitted(true);
     }
 
-    return (
-        (launchSubmitted == false)
-            ? <LaunchTokenPreview launchConfig={launchConfig} />
-            : <button onClick={launchToken}>Launch Token</button>
-    );
+    if (launchSubmitted) {
+        return (
+            <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+                <p className="text-lg font-semibold text-foreground">Launch submitted!</p>
+                <p className="text-sm text-muted-foreground">Your token is being launched.</p>
+            </div>
+        );
+    }
+
+    return <LaunchTokenPreview launchConfig={launchConfig} onLaunch={handleLaunch} />;
 }

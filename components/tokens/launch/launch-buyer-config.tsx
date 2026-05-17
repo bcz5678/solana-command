@@ -49,26 +49,6 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
     }, [])
 
 
-  useEffect(() => {
-    const fetchInitialBondingCurve = async () => {
-      try {
-        const response = await fetch(`/api/pumpfun/bonding-curve?request=t}`);
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        const data = await response.json();
-       
-      } catch (error) {
-        console.error("Error fetching balance:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchInitialBondingCurve();
-  }, []);
-
-
 
     const devWallet = useMemo(
         () => wallets.find((w) => w.id === launchConfig.token?.dev_wallet_id) ?? null,
@@ -108,6 +88,44 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
         setBuyAmounts({});
         onBuyInputReset()
     }
+
+    function getNewBondingCurve() {  
+        useEffect(() => {
+            const fetchInitialBondingCurve = async () => {
+
+            let bodyRequest: {} = {
+                type: ["getMarketCapFromSOL"],
+                solAmount:  "1.0",
+                tokenAmount: 10000000,
+            }
+
+
+            try {
+                const response = await fetch('/api/pumpfun/bonding-curve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(bodyRequest),
+                });
+
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                const data = await response.json();
+                console.log(data);
+            
+            } catch (error) {
+                console.error("Error fetching balance:", error);
+            } finally {
+                setLoading(false);
+            }
+            };
+
+            fetchInitialBondingCurve();
+        }, []); 
+    }
+
+
+
 
     if (loading) return <p className="text-sm text-muted-foreground py-4">Loading wallets…</p>
 

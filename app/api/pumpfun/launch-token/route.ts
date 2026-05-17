@@ -19,23 +19,16 @@ const supabase = createClient();
 
 export async function POST(request: Request) {
     const body = await request.json();
-    const tokenId: number | null = body.tokenId != null ? Number(body.tokenId) : null;
-    const launchTypeRequest: string | null = body.launchType ?? null;
 
-    const isLaunchType = Object.values(LaunchType).includes(launchTypeRequest as LaunchType);
-    const launchType: LaunchType | null = isLaunchType ? (launchTypeRequest as LaunchType) : null;
+    const launchConfigRaw = body.launchConfig ?? null;
+    if (!launchConfigRaw) {
+        return Response.json({ error: 'Missing launchConfig' }, { status: 400 });
+    }
 
-    const buyerConfigRaw = body.buyerConfig ?? null;
+    const launchConfig = LaunchConfig.fromJSON(launchConfigRaw);
+    const isValidLaunchType = Object.values(LaunchType).includes(launchConfig.launchType) && launchConfig.launchType !== LaunchType.unselected;
 
-    if (tokenId != null &&
-        launchType != null &&
-        buyerConfigRaw != null
-    ) {
-
-        const buyerConfig = LaunchConfig.fromJSON(
-            typeof buyerConfigRaw === 'string' ? JSON.parse(buyerConfigRaw) : buyerConfigRaw
-        );
-
+    if (launchConfig.token?.id != null && isValidLaunchType) {
         // initialize connection
         const quicknodeSolana = initializeQuickNodeSolana();
         const onlineSdk = new OnlinePumpSdk(quicknodeSolana.connection);
@@ -43,7 +36,7 @@ export async function POST(request: Request) {
         const { data: token, error: tokenError } = await supabase
             .from('tokens')
             .select('*')
-            .eq('id', tokenId)
+            .eq('id', launchConfig.token?.id)
             .single<TokenDTO>();
 
         if (tokenError || !token) {
@@ -62,63 +55,59 @@ export async function POST(request: Request) {
             return Response.json({ error: 'Dev wallet not found' }, { status: 404 });
         }
 
-        switch(launchType) {
+        switch (launchConfig.launchType) {
             case LaunchType.block0:
-                processLaunchBlock0(token, buyerConfig);
+                processLaunchBlock0(launchConfig);
                 break;
             case LaunchType.swarm:
-                processLaunchSwarm(token, buyerConfig);
+                processLaunchSwarm(launchConfig);
                 break;
             case LaunchType.staggered:
-                processLaunchStaggered(token, buyerConfig);
+                processLaunchStaggered(launchConfig);
                 break;
-            case LaunchType.unselected:
-                console.log('Unselected launchType');
-                break;
-            default: 
+            default:
                 console.log('Default launchType');
-                break;             
+                break;
         }
     }
 }
 
 
 async function processLaunchBlock0(
-    token: TokenDTO, 
-    buyerConfig: LaunchConfig
+    launchConfig: LaunchConfig
 ) {
     console.log('Block0 launchType');
 
     const { data: devWallet, error } = await supabase
         .from('wallets')
         .select('private_key')
-        .eq('id', token.dev_wallet_id)
+        .eq('id', launchConfig.token?.dev_wallet_id)
         .single<WalletModelDTO>();
 
-    if (devWallet != null) {
-        if(buyerConfig.walletTrades.length == 0) {
+    if (devWallet != null && launchConfig.token != null) {
+        if (launchConfig.walletTrades.length == 0) {
             const createIx = await PUMP_SDK.createV2Instruction({
                 mint: Keypair.fromSecretKey(bs58.decode(devWallet.private_key)).publicKey,
-                name: token.name,
-                symbol: token.symbol,
+                name: launchConfig.token?.name!,
+                symbol: launchConfig.token?.symbol!,
                 uri: "https://example.com/metadata.json", // Your token metadata URI
                 creator: Keypair.fromSecretKey(bs58.decode(devWallet.private_key)).publicKey,
                 user: Keypair.fromSecretKey(bs58.decode(devWallet.private_key)).publicKey,
                 mayhemMode: false,
                 cashback: false,
             });
+
+            console.log('');
+
         } else {
-
-
-
+            console.log('');
         }
     }
 }
 
 
 function processLaunchSwarm(
-    token: TokenDTO, 
-    buyerConfig: LaunchConfig
+    launchConfig: LaunchConfig
 ) {
     console.log('Swarm launchType');
 }
@@ -126,8 +115,7 @@ function processLaunchSwarm(
 
 
 function processLaunchStaggered(
-    token: TokenDTO, 
-    buyerConfig: LaunchConfig
+    launchConfig: LaunchConfig
 ) {
     console.log('Staggered launchType');
 }

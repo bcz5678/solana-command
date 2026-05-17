@@ -5,6 +5,7 @@ import { lamportsBNToSolDisplay } from '@/lib/lamports'
 
 type Props = {
     launchConfig: LaunchConfig
+    onLaunch?: () => void
 }
 
 
@@ -30,7 +31,7 @@ function SubCard({ title, children }: { title: string; children: React.ReactNode
     )
 }
 
-export default function LaunchTokenPreview({launchConfig }: Props) {
+export default function LaunchTokenPreview({ launchConfig, onLaunch }: Props) {
     const totalSOL = lamportsBNToSolDisplay(launchConfig.totalSOLInLamports)
     const buyerWalletCount = launchConfig.walletTrades.length
     const totalWallets = launchConfig.walletTrades.length + 1
@@ -80,6 +81,14 @@ export default function LaunchTokenPreview({launchConfig }: Props) {
                 </div>
             </SubCard>
 
+            {onLaunch && (
+                <button
+                    onClick={onLaunch}
+                    className="w-full px-4 py-2.5 text-sm font-semibold rounded-xl bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-700 transition-colors"
+                >
+                    Launch
+                </button>
+            )}
         </div>
     )
 }
