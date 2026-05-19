@@ -2,7 +2,12 @@ import { solStringToLamports } from '@/lib/lamports';
 
 import { handleError, initializeQuickNodeSolana, initializeConnection, parseAndValidateAddress } from '@/app/api/utils/helpers';
 
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { 
+    Keypair, 
+    PublicKey,  
+    TransactionMessage,
+    VersionedTransaction 
+} from "@solana/web3.js";
 import { PUMP_SDK, OnlinePumpSdk } from '@pump-fun/pump-sdk';
 import { createClient } from '@/lib/supabase/client';
 
@@ -17,8 +22,14 @@ export const dynamic = 'force-dynamic';
 
 const supabase = createClient();
 
+// initialize connection
+const quicknodeSolana = initializeQuickNodeSolana();
+const onlineSdk = new OnlinePumpSdk(quicknodeSolana.connection);
+
 export async function POST(request: Request) {
     const body = await request.json();
+
+
 
     const launchConfigRaw = body.launchConfig ?? null;
     if (!launchConfigRaw) {
@@ -29,9 +40,7 @@ export async function POST(request: Request) {
     const isValidLaunchType = Object.values(LaunchType).includes(launchConfig.launchType) && launchConfig.launchType !== LaunchType.unselected;
 
     if (launchConfig.token?.id != null && isValidLaunchType) {
-        // initialize connection
-        const quicknodeSolana = initializeQuickNodeSolana();
-        const onlineSdk = new OnlinePumpSdk(quicknodeSolana.connection);
+
 
         const { data: token, error: tokenError } = await supabase
             .from('tokens')
@@ -85,19 +94,37 @@ async function processLaunchBlock0(
         .single<WalletModelDTO>();
 
     if (devWallet != null && launchConfig.token != null) {
+
+        const creator = Keypair.fromSecretKey(bs58.decode(devWallet.private_key));
+        const mint =  Keypair.fromSecretKey(bs58.decode(launchConfig.token.mint_secret_key!));
+
+
         if (launchConfig.walletTrades.length == 0) {
             const createIx = await PUMP_SDK.createV2Instruction({
-                mint: Keypair.fromSecretKey(bs58.decode(devWallet.private_key)).publicKey,
+                mint: mint.publicKey,
                 name: launchConfig.token?.name!,
                 symbol: launchConfig.token?.symbol!,
-                uri: "https://example.com/metadata.json", // Your token metadata URI
-                creator: Keypair.fromSecretKey(bs58.decode(devWallet.private_key)).publicKey,
-                user: Keypair.fromSecretKey(bs58.decode(devWallet.private_key)).publicKey,
+                uri: launchConfig.token?.token_meta_url!, // Your token metadata URI
+                creator: creator.publicKey,
+                user: creator.publicKey,
                 mayhemMode: false,
                 cashback: false,
             });
 
-            console.log('');
+
+            const { blockhash } = await quicknodeSolana.connection.getLatestBlockhash("confirmed");
+
+            const message = new TransactionMessage({
+                payerKey: creator.publicKey,
+                recentBlockhash: blockhash,
+                instructions: [createIx],
+            }).compileToV0Message();
+
+            const tx = new VersionedTransaction(message);
+            tx.sign([creator, mint]); // Both creator AND mint must sign
+
+            const signature = await quicknodeSolana.connection.sendTransaction(tx);
+            console.log("Token created! Tx:", signature);
 
         } else {
             console.log('');
