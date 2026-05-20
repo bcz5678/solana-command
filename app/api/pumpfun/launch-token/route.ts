@@ -26,7 +26,7 @@ const supabase = createClient();
 const quicknodeSolana = initializeQuickNodeSolana();
 const onlineSdk = new OnlinePumpSdk(quicknodeSolana.connection);
 
-export async function POST(request: Request) {
+export async function PUT(request: Request) {
     const body = await request.json();
 
 
