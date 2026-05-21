@@ -16,27 +16,36 @@ const N8N_WEBHOOK = "http://n8n.abundancedigitalmedia.com:5678/webhook-test/d561
 const AWS_CREDENTIALS  ='';
 const AWS_ENDPOINT = '';
 
-export async function POST(request: Request) {
+export async function POST(request: Request): Promise<Response> {
     const body = await request.json();
+
+    
 
     try {
         const uploadTokenMetaResponse = uploadTokenMeta(body.token);
-        const uploadTokenIMageREsponse = 
+        const uploadTokenIMageREsponse = uploadTokenImage(body.token);
+
+
+        return new Response(JSON.stringify({message: "success", token_meta_url: uploadTokenMetaResponse}),
+            {
+                headers: { 'Content-Type': 'application/json' },
+                status: 200,
+            }  
+        );
     } catch (error) {
-        return new Response(), {
-            headers: { 'Content-Type': 'application/json' },
-            status: 00,
-        });
+       return new Response(JSON.stringify({message: "failed"}),
+            {
+                headers: { 'Content-Type': 'application/json' },
+                status: 200,
+            }  
+        );
     }
-
-
-
 }
 
 
 async function uploadTokenMeta(token: {}) {
     const response = await fetch(N8N_WEBHOOK, {
-        method: 'PUT',
+        method: 'POST',
         headers: {
         'Content-Type': 'application/json',
         // 'Authorization': `Bearer ${process.env.API_TOKEN}`, // Securely use env vars
@@ -50,7 +59,7 @@ async function uploadTokenMeta(token: {}) {
 
 async function uploadTokenImage() {
     const response = await fetch(AWS_ENDPOINT, {
-        method: 'PUT',
+        method: 'POST',
         headers: {
         'Content-Type': 'application/json',
         // 'Authorization': `Bearer ${process.env.API_TOKEN}`, // Securely use env vars
