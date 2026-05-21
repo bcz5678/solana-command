@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { LaunchConfig } from './launch-config-class';
 import LaunchTokenPreview from './launch-token-preview';
+import LaunchTokenFinal from './launch-token-final';
 
 type Props = {
     launchConfig: LaunchConfig;
@@ -32,12 +33,7 @@ export default function LaunchToken({ launchConfig }: Props) {
     }
 
     if (launchSubmitted) {
-        return (
-            <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-                <p className="text-lg font-semibold text-foreground">Launch submitted!</p>
-                <p className="text-sm text-muted-foreground">Your token is being launched.</p>
-            </div>
-        );
+        <LaunchTokenFinal />
     }
 
     return <LaunchTokenPreview launchConfig={launchConfig} onLaunch={handleLaunch} />;

@@ -2,11 +2,11 @@ import { solStringToLamports } from '@/lib/lamports';
 
 import { handleError, initializeQuickNodeSolana, initializeConnection, parseAndValidateAddress } from '@/app/api/utils/helpers';
 
-import { 
-    Keypair, 
-    PublicKey,  
+import {
+    Keypair,
     TransactionMessage,
-    VersionedTransaction 
+    TransactionSignature,
+    VersionedTransaction
 } from "@solana/web3.js";
 import { PUMP_SDK, OnlinePumpSdk } from '@pump-fun/pump-sdk';
 import { createClient } from '@/lib/supabase/client';
@@ -16,7 +16,6 @@ import { LaunchType } from '@/components/tokens/launch/types';
 import { WalletModelDTO } from '@/app/db/models/wallet';
 import { TokenDTO } from '@/components/tokens/launch/types';
 
-import bs58 from 'bs58';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,8 +27,6 @@ const onlineSdk = new OnlinePumpSdk(quicknodeSolana.connection);
 
 export async function POST(request: Request) {
     const body = await request.json();
-
-
 
     const launchConfigRaw = body.launchConfig ?? null;
     if (!launchConfigRaw) {
@@ -66,13 +63,13 @@ export async function POST(request: Request) {
 
         switch (launchConfig.launchType) {
             case LaunchType.block0:
-                processLaunchBlock0(launchConfig);
+                return processLaunchBlock0(launchConfig);
                 break;
             case LaunchType.swarm:
-                processLaunchSwarm(launchConfig);
+                return processLaunchSwarm(launchConfig);
                 break;
             case LaunchType.staggered:
-                processLaunchStaggered(launchConfig);
+                return processLaunchStaggered(launchConfig);
                 break;
             default:
                 console.log('Default launchType');
@@ -82,21 +79,23 @@ export async function POST(request: Request) {
 }
 
 
-async function processLaunchBlock0(
-    launchConfig: LaunchConfig
-) {
+async function processLaunchBlock0(launchConfig: LaunchConfig) : Promise<Response>{
     console.log('Block0 launchType');
+
+    console.log(`launchConfig: ${launchConfig.token?.dev_wallet_id}`);
 
     const { data: devWallet, error } = await supabase
         .from('wallets')
-        .select('private_key')
+        .select('*')
         .eq('id', launchConfig.token?.dev_wallet_id)
         .single<WalletModelDTO>();
 
+        console.log(`DevWallet:${devWallet?.public_key}`);
+
     if (devWallet != null && launchConfig.token != null) {
 
-        const creator = Keypair.fromSecretKey(bs58.decode(devWallet.private_key));
-        const mint =  Keypair.fromSecretKey(bs58.decode(launchConfig.token.mint_secret_key!));
+        const creator = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(devWallet.private_key)));
+        const mint = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(launchConfig.token.mint_secret_key!)));
 
 
         if (launchConfig.walletTrades.length == 0) {
@@ -111,8 +110,13 @@ async function processLaunchBlock0(
                 cashback: false,
             });
 
+            console.log(`api/pumpfun/launch-token/route.ts ->  createIx: ${createIx.data}`);
 
+            
             const { blockhash } = await quicknodeSolana.connection.getLatestBlockhash("confirmed");
+
+
+            console.log(`api/pumpfun/launch-token/route.ts ->  blockhash: ${blockhash}`);
 
             const message = new TransactionMessage({
                 payerKey: creator.publicKey,
@@ -120,15 +124,33 @@ async function processLaunchBlock0(
                 instructions: [createIx],
             }).compileToV0Message();
 
+            console.log(`api/pumpfun/launch-token/route.ts ->  message: ${message}`);
+
             const tx = new VersionedTransaction(message);
             tx.sign([creator, mint]); // Both creator AND mint must sign
 
+             console.log(`api/pumpfun/launch-token/route.ts ->  tx: ${tx}`);
+
+            /*
             const signature = await quicknodeSolana.connection.sendTransaction(tx);
             console.log("Token created! Tx:", signature);
+            */
 
+            return new Response(JSON.stringify({message: "Token Successfully created"}), {
+                headers: { 'Content-Type': 'application/json' },
+                status: 200,
+            });
         } else {
-            console.log('');
+            return new Response(JSON.stringify({message: "None Zero not implemented yet"}), {
+                headers: { 'Content-Type': 'application/json' },
+                status: 200,
+            });
         }
+    } else {
+            return new Response(JSON.stringify({message: "Token Failed"}), {
+                headers: { 'Content-Type': 'application/json' },
+                status: 200,
+            });
     }
 }
 

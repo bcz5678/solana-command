@@ -91,7 +91,6 @@ export async function POST(request: Request) {
                         virtualTokenReserves: bondingCurve.virtualTokenReserves.sub(tokensBought),
                     });
 
-                    
                     console.log(`api/pumpfun/bondingcurve/route -> marketCapFromSOL: ${result.marketCapFromSOL}`);
 
                     break;

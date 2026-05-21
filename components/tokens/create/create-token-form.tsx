@@ -140,7 +140,7 @@ export default function CreateTokenForm() {
                 description: data.description,
                 mint_secret_key: mintSecretKey,
                 contract_address: contractAddress,
-                logo_image_path: imgData?.path,
+                logo_url: imgData?.path,
                 website_url: data.websiteUrl,
                 twitter_url: data.twitterUrl,
                 telegram_handle: data.telegramHandle,

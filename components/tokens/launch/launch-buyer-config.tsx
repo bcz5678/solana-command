@@ -22,6 +22,7 @@ type Props = {
     onBuyInputReset: () => void
 }
 
+
 const supabase = createClient()
 
 
@@ -49,16 +50,17 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
     }, [])
 
 
-
     const devWallet = useMemo(
         () => wallets.find((w) => w.id === launchConfig.token?.dev_wallet_id) ?? null,
         [wallets, launchConfig.token?.dev_wallet_id],
     )
 
+
     const otherWallets = useMemo(
         () => wallets.filter((w) => w.id !== launchConfig.token?.dev_wallet_id),
         [wallets, launchConfig.token?.dev_wallet_id],
     )
+
 
     const groups = useMemo(() => {
         const filtered =
@@ -73,21 +75,25 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
             .filter((g) => g.wallets.length > 0)
     }, [otherWallets, walletTypes, activeFilters])
 
+
     function toggleFilter(typeId: number) {
         setActiveFilters((prev) =>
             prev.includes(typeId) ? prev.filter((id) => id !== typeId) : [...prev, typeId],
         )
     }
 
+
     function setBuyAmount(walletId: number, newAmount: string) {
         onBuyInputChange(walletId, newAmount);
         setBuyAmounts((prev) => ({ ...prev, [walletId]: newAmount }))
     }
 
+
     function clearAll() {
         setBuyAmounts({});
         onBuyInputReset()
     }
+
 
     function getNewBondingCurve() {  
         useEffect(() => {
@@ -123,8 +129,6 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
             fetchInitialBondingCurve();
         }, []); 
     }
-
-
 
 
     if (loading) return <p className="text-sm text-muted-foreground py-4">Loading wallets…</p>
