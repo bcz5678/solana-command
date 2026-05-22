@@ -13,7 +13,7 @@ export interface WalletModelDTO {
     id?: number;
     created_at?: string; 
     public_key: string;
-    private_key: string;
+    secret_key: string;
     funded: boolean;
     wallet_type_id: number;
     solana_balance_in_lamports: BN;

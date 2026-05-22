@@ -33,7 +33,7 @@ export async function generateWallets(
     const newKeyPair = Keypair.generate();
     wallets.push({
       public_key: newKeyPair.publicKey.toString(),
-      private_key: bs58.encode(newKeyPair.secretKey),
+      secret_key: bs58.encode(newKeyPair.secretKey),
       funded: false,
       wallet_type_id: params.walletTypeId,
       solana_balance_in_lamports: new BN(0),

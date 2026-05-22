@@ -94,7 +94,7 @@ async function processLaunchBlock0(launchConfig: LaunchConfig) : Promise<Respons
 
     if (devWallet != null && launchConfig.token != null) {
 
-        const creator = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(devWallet.private_key)));
+        const creator = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(devWallet.secret_key)));
         const mint = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(launchConfig.token.mint_secret_key!)));
 
 
