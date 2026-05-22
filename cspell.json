@@ -1,0 +1,25 @@
+{
+  "version": "0.2",
+  "words": [
+    "solana",
+    "keypair",
+    "pgsodium",
+    "bip39",
+    "bip44",
+    "mnemonic",
+    "mnemonics",
+    "bs58",
+    "supabase",
+    "pumpfun",
+    "lamports",
+    "pubkey",
+    "blockhash",
+    "versioned",
+    "borsh",
+    "raydium",
+    "serum",
+    "sysvar",
+    "metaplex",
+    "atautils"
+  ]
+}
