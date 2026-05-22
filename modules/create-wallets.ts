@@ -12,11 +12,6 @@ import {
 
 const supabase = createClient();
 
-interface IPoolInfo {
-  [key: string]: any;
-  numOfWallets?: number;
-}
-
 export interface CreateWalletParams {
   numOfWallets: number,
   walletTypeId: number,

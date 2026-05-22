@@ -16,16 +16,28 @@ import { LaunchType } from '@/components/tokens/launch/types';
 import { WalletModelDTO } from '@/app/db/models/wallet';
 import { TokenDTO } from '@/components/tokens/launch/types';
 
+import { requireSuperAdmin } from '@/app/api/require-super-admin';
+import { SupabaseClient } from '@supabase/supabase-js';
+
 
 export const dynamic = 'force-dynamic';
 
-const supabase = createClient();
+
 
 // initialize connection
 const quicknodeSolana = initializeQuickNodeSolana();
 const onlineSdk = new OnlinePumpSdk(quicknodeSolana.connection);
 
 export async function POST(request: Request) {
+    let admin, userId
+        try {
+            ({ admin, userId } = await requireSuperAdmin())
+        } catch (e) {
+            return e as Response   // the 401 or 403
+        }
+
+
+
     const body = await request.json();
 
     const launchConfigRaw = body.launchConfig ?? null;
@@ -39,7 +51,7 @@ export async function POST(request: Request) {
     if (launchConfig.token?.id != null && isValidLaunchType) {
 
 
-        const { data: token, error: tokenError } = await supabase
+        const { data: token, error: tokenError } = await admin
             .from('tokens')
             .select('*')
             .eq('id', launchConfig.token?.id)
@@ -50,7 +62,7 @@ export async function POST(request: Request) {
             return Response.json({ error: 'Token not found' }, { status: 404 });
         }
 
-        const { data: devWallet, error: walletError } = await supabase
+        const { data: devWallet, error: walletError } = await admin
             .from('wallets')
             .select('*')
             .eq('id', token.dev_wallet_id)
@@ -63,13 +75,13 @@ export async function POST(request: Request) {
 
         switch (launchConfig.launchType) {
             case LaunchType.block0:
-                return processLaunchBlock0(launchConfig);
+                return processLaunchBlock0(admin, launchConfig);
                 break;
             case LaunchType.swarm:
-                return processLaunchSwarm(launchConfig);
+                return processLaunchSwarm(admin, launchConfig);
                 break;
             case LaunchType.staggered:
-                return processLaunchStaggered(launchConfig);
+                return processLaunchStaggered(admin, launchConfig);
                 break;
             default:
                 console.log('Default launchType');
@@ -79,12 +91,12 @@ export async function POST(request: Request) {
 }
 
 
-async function processLaunchBlock0(launchConfig: LaunchConfig) : Promise<Response>{
+async function processLaunchBlock0(admin: SupabaseClient, launchConfig: LaunchConfig) : Promise<Response>{
     console.log('Block0 launchType');
 
     console.log(`launchConfig: ${launchConfig.token?.dev_wallet_id}`);
 
-    const { data: devWallet, error } = await supabase
+    const { data: devWallet, error } = await admin
         .from('wallets')
         .select('*')
         .eq('id', launchConfig.token?.dev_wallet_id)
@@ -156,6 +168,7 @@ async function processLaunchBlock0(launchConfig: LaunchConfig) : Promise<Respons
 
 
 function processLaunchSwarm(
+    admin: SupabaseClient, 
     launchConfig: LaunchConfig
 ) {
     console.log('Swarm launchType');
@@ -164,6 +177,7 @@ function processLaunchSwarm(
 
 
 function processLaunchStaggered(
+    admin: SupabaseClient, 
     launchConfig: LaunchConfig
 ) {
     console.log('Staggered launchType');

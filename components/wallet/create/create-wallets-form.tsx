@@ -34,11 +34,6 @@ import {
     ComboboxItem,
 } from "@/components/ui/combobox"
 import { OwnerDTO, WalletGroupDTO, WalletTypeDTO } from '@/app/db/models/wallet'
-import { createClient } from '@/lib/supabase/client';
-import { generateWallets } from "@/modules/create-wallets";
-import {getOwners, getWalletGroups, getWalletTypes } from '@/modules/wallets-db';
-
-const supabase = createClient();
 
 type GroupOption = { value: number; label: string };
 
@@ -70,59 +65,61 @@ export default function CreateWalletsForm(){
 
     const { register, handleSubmit, control } = useForm<CreateWalletsFormInput>();
     const onSubmit: SubmitHandler<CreateWalletsFormInput> = async (data) => {
-        let groupId: number | null = null;
+        let groupId: number | null = null
+        let groupName: string | null = null
 
         if (selectedGroup && selectedGroup.value !== 0) {
-            groupId = selectedGroup.value;
+            groupId = selectedGroup.value
         } else if (groupInputValue.trim()) {
-            const existingGroup = walletGroups.find(
+            const existing = walletGroups.find(
                 g => g.name.toLowerCase() === groupInputValue.trim().toLowerCase()
-            );
-            if (existingGroup) {
-                groupId = existingGroup.id!;
+            )
+            if (existing) {
+                groupId = existing.id!
             } else {
-                const { data: newGroup, error } = await supabase
-                    .from('wallet_groups')
-                    .insert({ name: groupInputValue.trim(), owner_id: data.ownerID })
-                    .select('id')
-                    .single();
-                if (error) {
-                    setSubmitStatus('error');
-                    setStatusMessage(`Failed to create wallet group: ${error.message}`);
-                    return;
-                }
-                groupId = newGroup.id;
+                groupName = groupInputValue.trim()
             }
         } else {
-            setSubmitStatus('error');
-            setStatusMessage('Please select or enter a wallet group.');
-            return;
+            setSubmitStatus('error')
+            setStatusMessage('Please select or enter a wallet group.')
+            return
         }
 
-        if (groupId != null) {
-            setSubmitStatus('loading');
-            setStatusMessage('');
-            const result = await generateWallets({
-                numOfWallets: data.numberOfWallets,
-                walletTypeId: data.walletType,
-                ownerID: data.ownerID,
-                groupID: groupId,
-            });
-            if ('error' in result) {
-                setSubmitStatus('error');
-                setStatusMessage(result.error);
-            } else {
-                setSubmitStatus('success');
-                setStatusMessage(`${result.count} wallet${result.count !== 1 ? 's' : ''} created successfully.`);
-            }
+        setSubmitStatus('loading')
+        setStatusMessage('')
+
+        const res = await fetch('/api/wallets/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                numberOfWallets: data.numberOfWallets,
+                walletType:      data.walletType,
+                ownerID:         data.ownerID,
+                groupId,
+                groupName,
+            }),
+        })
+
+        const json = await res.json()
+
+        if (!res.ok) {
+            setSubmitStatus('error')
+            setStatusMessage(json.error ?? 'Failed to create wallets')
+        } else {
+            setSubmitStatus('success')
+            setStatusMessage(`${json.count} wallet${json.count !== 1 ? 's' : ''} created successfully.`)
         }
     }
 
     useEffect(() => {
-        getOwners(supabase).then(setOwners);
-        getWalletTypes(supabase).then(setWalletTypes);
-        getWalletGroups(supabase).then(setWalletGroups);
-    },[]);
+        fetch('/api/wallet-setup')
+            .then((r) => r.json())
+            .then(({ owners, walletTypes, walletGroups }) => {
+                setOwners(owners ?? [])
+                setWalletTypes(walletTypes ?? [])
+                setWalletGroups(walletGroups ?? [])
+            })
+    }, [])
 
 
     return(

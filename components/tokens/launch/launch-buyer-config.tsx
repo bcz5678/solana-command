@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useMemo, Fragment } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { LaunchType } from '@/components/tokens/launch/types'
 import { LaunchConfig } from '@/components/tokens/launch/launch-config-class';
 import { lamportsBNToSolDisplay, LAMPORTS_PER_SOL } from '@/lib/lamports';
@@ -23,9 +22,6 @@ type Props = {
 }
 
 
-const supabase = createClient()
-
-
 function maskPubKey(key: string) {
     return `${key.slice(0, 7)}....${key.slice(-7)}`
 }
@@ -38,15 +34,16 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
     const [buyAmounts, setBuyAmounts] = useState<Record<number, string>>({})
 
     useEffect(() => {
-        Promise.all([
-            supabase.from('wallets').select('id, public_key, wallet_type_id, solana_balance_in_lamports'),
-            supabase.from('wallet_type').select('id, name'),
-        ]).then(([walletRes, typeRes]) => {
-
-            if (walletRes.data) setWallets(walletRes.data.map((w) => ({ ...w, solana_balance_in_lamports: new BN(String(w.solana_balance_in_lamports ?? 0)) })))
-            if (typeRes.data) setWalletTypes(typeRes.data)
-            setLoading(false)
-        })
+        fetch('/api/wallets')
+            .then((r) => r.json())
+            .then(({ wallets, walletTypes }) => {
+                setWallets((wallets ?? []).map((w: WalletRow & { solana_balance_in_lamports: string }) => ({
+                    ...w,
+                    solana_balance_in_lamports: new BN(String(w.solana_balance_in_lamports ?? 0)),
+                })))
+                setWalletTypes(walletTypes ?? [])
+                setLoading(false)
+            })
     }, [])
 
 

@@ -14,52 +14,32 @@ import {
     TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { Copy } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
 import { CreatedTokenDTO } from '@/app/db/models/token'
+
+// mint_secret_key is stripped server-side and never sent to the client
+type PublicTokenDTO = Omit<CreatedTokenDTO, 'mint_secret_key'>
 
 type Props = {
     selectedId: number | null
-    onSelect: (token: CreatedTokenDTO) => void
+    onSelect: (token: PublicTokenDTO) => void
 }
 
-const supabase = createClient()
-
 export default function TokenSelect({ selectedId, onSelect }: Props) {
-    const [tokens, setTokens] = useState<CreatedTokenDTO[]>([])
+    const [tokens, setTokens] = useState<PublicTokenDTO[]>([])
     const [loading, setLoading] = useState(true)
     const [openItem, setOpenItem] = useState<string>('')
     const [copiedId, setCopiedId] = useState<number | null>(null)
     const [search, setSearch] = useState('')
 
     useEffect(() => {
-        supabase
-            .from('tokens')
-            .select('id, created_at, name, symbol, description, owner_id, dev_wallet_id, contract_address, mint_secret_key, logo_url, token_meta_url, launched, website_url, twitter_url, telegram_handle')
-            .order('launched', { ascending: true })
-            .order('created_at', { ascending: false })
-            .then(({ data, error }) => {
-                if (error) console.error('TokenSelect fetch error:', error.message)
-                if (data) {
-                    setTokens(data.map((t) => ({
-                        id: t.id,
-                        created_at: t.created_at,
-                        name: t.name,
-                        symbol: t.symbol,
-                        description: t.description,
-                        logo_url: t.logo_url
-                            ? supabase.storage.from('token-media').getPublicUrl(t.logo_url).data.publicUrl
-                            : '',
-                        token_meta_url: t.token_meta_url,
-                        contract_address: t.contract_address,
-                        owner_id: t.owner_id,
-                        dev_wallet_id: t.dev_wallet_id,
-                        mint_secret_key: t.mint_secret_key,
-                        launched: t.launched,
-                        website_url: t.website_url,
-                        twitter_url: t.twitter_url,
-                        telegram_handle: t.telegram_handle,
-                    })))
-                }
+        fetch('/api/tokens')
+            .then((r) => r.json())
+            .then(({ tokens }) => {
+                setTokens(tokens ?? [])
+                setLoading(false)
+            })
+            .catch((err) => {
+                console.error('TokenSelect fetch error:', err)
                 setLoading(false)
             })
     }, [])

@@ -4,7 +4,6 @@ import { useState, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { FieldLabel } from '@/components/ui/field'
 import { InputGroup, InputGroupInput } from '@/components/ui/input-group'
-import { createClient } from '@/lib/supabase/client'
 import {
     estimateVanityMintAttempts,
     generateVanityMint,
@@ -16,7 +15,6 @@ type ImportStatus = 'idle' | 'importing' | 'done' | 'error'
 
 type ImportResult = { filename: string; ok: boolean; message?: string }
 
-const supabase = createClient()
 
 export default function VanityAddressCreatorForm() {
     const [targetCount, setTargetCount] = useState<string>('')
@@ -61,17 +59,17 @@ export default function VanityAddressCreatorForm() {
 
                 const address = mint.publicKey.toBase58()
 
-                const { error: insertError } = await supabase
-                    .from('vanity_keypairs')
-                    .insert([{
-                        mint_keypair: mint.secretKey,
-                        contract_address: mint.publicKey.toBase58(),
-                        available: true,
-                    }])
-                    .select()
-
-                if (insertError) {
-                    throw new Error(`DB insert failed: ${insertError.message}`)
+                const saveRes = await fetch('/api/vanity-keypairs/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        mintKeypair: Array.from(mint.secretKey),
+                        contractAddress: address,
+                    }),
+                })
+                if (!saveRes.ok) {
+                    const json = await saveRes.json()
+                    throw new Error(`DB insert failed: ${json.error ?? saveRes.statusText}`)
                 }
                 setFoundAddresses((prev) => [...prev, address])
                 setStatusMessage(
@@ -107,26 +105,15 @@ export default function VanityAddressCreatorForm() {
 
         const results: ImportResult[] = []
 
-        for (const file of Array.from(importFiles)) {
-            const contract_address = file.name.replace(/\.json$/i, '')
-            try {
-                const text = await file.text()
-                const mint_keypair = JSON.parse(text)
+        const body = new FormData()
+        for (const file of Array.from(importFiles)) body.append('files', file)
 
-                const { error } = await supabase
-                    .from('vanity_keypairs')
-                    .insert([{ mint_keypair, contract_address, available: true }])
-                    .select()
-
-                if (error) throw new Error(error.message)
-                results.push({ filename: file.name, ok: true })
-            } catch (err) {
-                results.push({
-                    filename: file.name,
-                    ok: false,
-                    message: err instanceof Error ? err.message : String(err),
-                })
-            }
+        try {
+            const res = await fetch('/api/vanity-keypairs/import', { method: 'POST', body })
+            const json = await res.json()
+            results.push(...(json.results ?? []))
+        } catch (err) {
+            results.push({ filename: '(all files)', ok: false, message: err instanceof Error ? err.message : String(err) })
         }
 
         setImportResults(results)

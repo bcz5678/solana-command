@@ -70,7 +70,7 @@ export async function createAndRegisterWallet(
 
   if (mnemonicVaultError) {
     // Rollback orphaned keypair secret before throwing
-    await supabase.rpc('vault_delete_secret', { secret_name: kpSecretName }).catch(() => {})
+    try { await supabase.rpc('vault_delete_secret', { secret_name: kpSecretName }) } catch { /* best-effort */ }
     throw new Error(`Vault mnemonic store failed: ${mnemonicVaultError.message}`)
   }
 
@@ -83,6 +83,7 @@ export async function createAndRegisterWallet(
       public_key:          publicKey,
       vault_secret_name:   kpSecretName,   // → used by loadKeypairFromVault()
       vault_mnemonic_name: mnSecretName,   // → used by recoverWalletMnemonic()
+      chain:               'solana',
       label,
       is_active:           true
     })
@@ -106,35 +107,4 @@ export async function createAndRegisterWallet(
     publicKey,
     mnemonic   // caller shows to user once — do not log, store, or return to client
   }
-}
-
-/**
- * Retrieves the BIP39 mnemonic from Vault for account recovery.
- * Only call this inside an authenticated server action after verifying
- * the requesting user owns the wallet.
- *
- * @param walletId - UUID from private.wallets
- */
-export async function recoverWalletMnemonic(walletId: string): Promise<string> {
-  const supabase = createAdminClient()
-
-  const { data: wallet, error: walletError } = await supabase
-    .from('private.wallets')
-    .select('user_id, vault_mnemonic_name')
-    .eq('id', walletId)
-    .eq('is_active', true)
-    .single()
-
-  if (walletError || !wallet) {
-    throw new Error(`Wallet not found: ${walletId}`)
-  }
-
-  const { data: mnemonic, error: vaultError } = await supabase
-    .rpc('vault_read_secret', { secret_name: wallet.vault_mnemonic_name })
-
-  if (vaultError || !mnemonic) {
-    throw new Error(`Vault mnemonic read failed for wallet: ${walletId}`)
-  }
-
-  return mnemonic as string
 }

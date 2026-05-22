@@ -59,6 +59,16 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // Guard /admin/* — must be super_admin in app_metadata (set via JWT, no DB round trip)
+  if (request.nextUrl.pathname.startsWith("/admin")) {
+    const isSuperAdmin = user?.app_metadata?.role === "super_admin";
+    if (!isSuperAdmin) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/";
+      return NextResponse.redirect(url);
+    }
+  }
+
   // IMPORTANT: You *must* return the supabaseResponse object as it is.
   // If you're creating a new response object with NextResponse.next() make sure to:
   // 1. Pass the request in it, like so:

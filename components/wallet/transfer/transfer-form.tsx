@@ -24,9 +24,6 @@ import {
     DialogFooter,
     DialogClose,
 } from "@/components/ui/dialog";
-import { createClient } from '@/lib/supabase/client';
-
-const supabase = createClient();
 
 type WalletType = { id: number; name: string };
 type Wallet = { id: number; public_key: string; wallet_type_id: number };
@@ -51,15 +48,12 @@ export default function TransferForm() {
     const { handleSubmit, control, register, watch, formState: { errors } } = useForm<TransferFormInput>();
 
     useEffect(() => {
-        Promise.all([
-            supabase.from('wallets').select('id, public_key, wallet_type_id'),
-            supabase.from('wallet_type').select('id, name'),
-        ]).then(([walletRes, typeRes]) => {
-            if (walletRes.data) setWallets(walletRes.data);
-            if (walletRes.error) console.error('getWallets error:', walletRes.error);
-            if (typeRes.data) setWalletTypes(typeRes.data);
-            if (typeRes.error) console.error('getWalletTypes error:', typeRes.error);
-        });
+        fetch('/api/wallets')
+            .then((r) => r.json())
+            .then(({ wallets, walletTypes }) => {
+                setWallets(wallets ?? []);
+                setWalletTypes(walletTypes ?? []);
+            });
     }, []);
 
     const senderValue = watch('senderWalletAddress');

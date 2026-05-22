@@ -32,10 +32,6 @@ import {
     ComboboxItem,
 } from "@/components/ui/combobox"
 import { OwnerDTO, WalletGroupDTO, WalletTypeDTO } from '@/app/db/models/wallet'
-import { createClient } from '@/lib/supabase/client';
-import { getOwners, getWalletGroups, getWalletTypes } from '@/modules/wallets-db';
-
-const supabase = createClient();
 
 function walletInsertErrorMessage(error: { code?: string; details?: string }): string {
     switch (error.code) {
@@ -87,66 +83,64 @@ export default function AddExistingWalletForm(){
 
     const { register, handleSubmit, control, formState: { errors } } = useForm<CreateWalletsFormInput>();
     const onSubmit: SubmitHandler<CreateWalletsFormInput> = async (data) => {
-        let groupId: number | null = null;
+        // Resolve group client-side so we can send a clean payload
+        let groupId: number | null = null
+        let groupName: string | null = null
 
         if (selectedGroup && selectedGroup.value !== 0) {
-            groupId = selectedGroup.value;
+            groupId = selectedGroup.value
         } else if (groupInputValue.trim()) {
-            const existingGroup = walletGroups.find(
+            const existing = walletGroups.find(
                 g => g.name.toLowerCase() === groupInputValue.trim().toLowerCase()
-            );
-            if (existingGroup) {
-                groupId = existingGroup.id!;
+            )
+            if (existing) {
+                groupId = existing.id!
             } else {
-                const { data: newGroup, error } = await supabase
-                    .from('wallet_groups')
-                    .insert({ name: groupInputValue.trim(), owner_id: data.ownerID })
-                    .select('id')
-                    .single();
-                if (error) {
-                    setSubmitStatus('error');
-                    setStatusMessage(`Failed to create wallet group: ${error.message}`);
-                    return;
-                }
-                groupId = newGroup.id;
+                groupName = groupInputValue.trim()
             }
         } else {
-            setSubmitStatus('error');
-            setStatusMessage('Please select or enter a wallet group.');
-            return;
+            setSubmitStatus('error')
+            setStatusMessage('Please select or enter a wallet group.')
+            return
         }
 
-        if (groupId != null) {
-            setSubmitStatus('loading');
-            setStatusMessage('');
-            
-            const {data: wallets, error } = await supabase
-                .from('wallets')
-                .insert([{ 
-                    public_key: data.publicKey, 
-                    private_key: data.privateKey,
-                    funded: data.funded,
-                    wallet_type_id: data.walletType,
-                    owner_id: data.ownerID,
-                    group_id: groupId, 
-                }])
-                .select()
+        setSubmitStatus('loading')
+        setStatusMessage('')
 
-            if (error) {
-                setSubmitStatus('error');
-                setStatusMessage(walletInsertErrorMessage(error));
-            } else {
-                setSubmitStatus('success');
-                setStatusMessage(`Wallet added succesfully`);
-            }
+        const res = await fetch('/api/wallet-setup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                publicKey:  data.publicKey,
+                privateKey: data.privateKey,
+                funded:     data.funded,
+                walletType: data.walletType,
+                ownerID:    data.ownerID,
+                groupId,
+                groupName,
+            }),
+        })
+
+        const json = await res.json()
+
+        if (!res.ok) {
+            setSubmitStatus('error')
+            setStatusMessage(walletInsertErrorMessage(json))
+        } else {
+            setSubmitStatus('success')
+            setStatusMessage('Wallet added successfully')
         }
     }
 
     useEffect(() => {
-        getOwners(supabase).then(setOwners);
-        getWalletTypes(supabase).then(setWalletTypes);
-        getWalletGroups(supabase).then(setWalletGroups);
-    },[]);
+        fetch('/api/wallet-setup')
+            .then((r) => r.json())
+            .then(({ owners, walletTypes, walletGroups }) => {
+                setOwners(owners ?? [])
+                setWalletTypes(walletTypes ?? [])
+                setWalletGroups(walletGroups ?? [])
+            })
+    }, []);
 
 
 
