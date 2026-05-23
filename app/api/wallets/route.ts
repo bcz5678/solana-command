@@ -10,7 +10,7 @@ export async function GET() {
 
   const [walletRes, typeRes] = await Promise.all([
     supabase.from('wallets').select('id, public_key, wallet_type_id, solana_balance_in_lamports'),
-    supabase.from('wallet_type').select('id, name'),
+    supabase.from('wallet_types').select('id, name'),
   ])
 
   if (walletRes.error) return new Response(walletRes.error.message, { status: 500 })

@@ -11,7 +11,7 @@ export async function GET() {
 
   const [ownersRes, typesRes, groupsRes] = await Promise.all([
     supabase.from('owners').select('id, name'),
-    supabase.from('wallet_type').select('id, name'),
+    supabase.from('wallet_types').select('id, name'),
     supabase.from('wallet_groups').select('id, name, owner_id'),
   ])
 

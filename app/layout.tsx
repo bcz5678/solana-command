@@ -37,10 +37,7 @@ export default function Layout({
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
-        <main>
-          {children}
-        </main>
-
+        {children}
       </body>
     </html>
   );
