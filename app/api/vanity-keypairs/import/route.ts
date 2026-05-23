@@ -1,10 +1,13 @@
-import { createClient } from '@/lib/supabase/server'
+import { requireSuperAdmin }  from '@/app/api/require-super-admin'
+import { importVanityBatch }  from '@/lib/vault/vanity-batch'
 
 export async function POST(req: Request) {
-  const supabase = await createClient()
-
-  const { data: authData } = await supabase.auth.getClaims()
-  if (!authData?.claims) return new Response('Unauthorized', { status: 401 })
+  let admin, userId
+  try {
+    ({ admin, userId } = await requireSuperAdmin())
+  } catch (e) {
+    return e as Response
+  }
 
   let formData: FormData
   try {
@@ -19,16 +22,24 @@ export async function POST(req: Request) {
   const results: { filename: string; ok: boolean; message?: string }[] = []
 
   for (const file of files) {
-    const contract_address = file.name.replace(/\.json$/i, '')
     try {
-      const mint_keypair = JSON.parse(await file.text())
+      const parsed = JSON.parse(await file.text())
 
-      const { error } = await supabase
-        .from('vanity_keypairs')
-        .insert([{ mint_keypair, contract_address, available: true }])
+      // Each file is a single Solana keypair: a raw 64-element number[]
+      if (!Array.isArray(parsed) || parsed.length !== 64 || !parsed.every(n => typeof n === 'number')) {
+        throw new Error('File must contain a single 64-byte secret key array')
+      }
 
-      if (error) throw new Error(error.message)
-      results.push({ filename: file.name, ok: true })
+      const summary = await importVanityBatch(admin, userId, [parsed], file.name)
+
+      const { imported, skipped_suffix, skipped_duplicate, failed } = summary
+      results.push({
+        filename: file.name,
+        ok: imported > 0,
+        message: imported > 0
+          ? undefined
+          : `skipped_suffix=${skipped_suffix} skipped_duplicate=${skipped_duplicate} failed=${failed}`
+      })
     } catch (err) {
       results.push({
         filename: file.name,

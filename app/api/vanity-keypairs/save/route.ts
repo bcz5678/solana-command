@@ -1,32 +1,32 @@
-import { createClient } from '@/lib/supabase/server'
+import { requireSuperAdmin }        from '@/app/api/require-super-admin'
+import { addVanityKeypairToVault }  from '@/lib/vault/vanity'
 
 export async function POST(req: Request) {
-  const supabase = await createClient()
+  let admin, userId
+  try {
+    ({ admin, userId } = await requireSuperAdmin())
+  } catch (e) {
+    return e as Response
+  }
 
-  const { data: authData } = await supabase.auth.getClaims()
-  if (!authData?.claims) return new Response('Unauthorized', { status: 401 })
-
-  let body: { mintKeypair: number[]; contractAddress: string }
+  let body: { mintKeypair: number[] }
   try {
     body = await req.json()
   } catch {
     return new Response('Invalid JSON', { status: 400 })
   }
 
-  const { mintKeypair, contractAddress } = body
+  const { mintKeypair } = body
 
   if (!Array.isArray(mintKeypair) || mintKeypair.length !== 64) {
     return new Response('mintKeypair must be a 64-byte array', { status: 400 })
   }
-  if (!contractAddress?.toLowerCase().endsWith('pump')) {
-    return new Response('Contract address must end with pump', { status: 400 })
+
+  try {
+    const result = await addVanityKeypairToVault(admin, userId, mintKeypair)
+    return Response.json(result)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return Response.json({ error: message }, { status: 500 })
   }
-
-  const { error } = await supabase
-    .from('vanity_keypairs')
-    .insert([{ mint_keypair: mintKeypair, contract_address: contractAddress, available: true }])
-
-  if (error) return Response.json({ error: error.message }, { status: 500 })
-
-  return Response.json({ ok: true })
 }
