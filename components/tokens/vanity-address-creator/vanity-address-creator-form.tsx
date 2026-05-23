@@ -110,8 +110,13 @@ export default function VanityAddressCreatorForm() {
 
         try {
             const res = await fetch('/api/vanity-keypairs/import', { method: 'POST', body })
-            const json = await res.json()
-            results.push(...(json.results ?? []))
+            if (!res.ok) {
+                const text = await res.text()
+                results.push({ filename: '(all files)', ok: false, message: `${res.status} ${text}` })
+            } else {
+                const json = await res.json()
+                results.push(...(json.results ?? []))
+            }
         } catch (err) {
             results.push({ filename: '(all files)', ok: false, message: err instanceof Error ? err.message : String(err) })
         }
@@ -283,7 +288,7 @@ export default function VanityAddressCreatorForm() {
                                     <div key={i} className={`flex items-start gap-2 font-mono text-xs px-2 py-1 rounded border ${r.ok ? 'bg-background border-border' : 'bg-destructive/10 border-destructive/30 text-destructive'}`}>
                                         <span className="shrink-0">{r.ok ? '✓' : '✗'}</span>
                                         <span className="break-all">
-                                            {r.filename}{r.message ? ` — ${r.message}` : ''}
+                                            {r.filename}{r.error ? ` — ${r.error}` : ''}
                                         </span>
                                     </div>
                                 ))}

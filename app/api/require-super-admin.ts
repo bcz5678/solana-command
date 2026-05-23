@@ -7,29 +7,40 @@ interface AdminContext {
   userId: string
 }
 
-/**
- * Verifies the request is from a super_admin via JWT claims,
- * then returns a service-role admin client and the caller's user ID.
- *
- * Throws a Response (403/401) if the check fails — API routes
- * can catch and return it directly.
- *
- * Usage:
- *   const { admin, userId } = await requireSuperAdmin()
- */
 export async function requireSuperAdmin(): Promise<AdminContext> {
   const supabase = await createClient()
-  const { data } = await supabase.auth.getClaims()
 
-  const claims = data?.claims
-  if (!claims) throw new Response('Unauthorized', { status: 401 })
+  // ── 1. Get authenticated user ────────────────────────────
+  // getUser() validates the JWT server-side — more reliable than
+  // getClaims() alone which only decodes without server verification
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
 
-  if (claims.app_metadata?.role !== 'super_admin') {
+  if (userError || !user) {
+    throw new Response('Unauthorized', { status: 401 })
+  }
+
+  const userId = user.id
+
+  console.log(`userId: ${userId}`)
+
+  // ── 2. Verify super admin via RPC ────────────────────────
+  // is_super_admin() is a SECURITY DEFINER function in public schema —
+  // it reads private.super_admins internally, bridging the schema gap.
+  // Returns boolean — true only if JWT claim AND DB record both valid.
+  const { data: isAdmin, error: adminError } = await supabase
+    .rpc('is_super_admin')
+
+  if (adminError) {
+    console.error('is_super_admin() error:', adminError.message)
+    throw new Response('Unauthorized', { status: 401 })
+  }
+
+  if (!isAdmin) {
     throw new Response('Forbidden', { status: 403 })
   }
 
-  return {
-    admin:  createAdminClient(),
-    userId: claims.sub
-  }
+  // ── 3. Return service-role client for privileged operations
+  const admin = createAdminClient()
+
+  return { admin, userId }
 }

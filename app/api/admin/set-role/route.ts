@@ -1,19 +1,17 @@
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { requireSuperAdmin } from "@/app/api/require-super-admin";
 import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
-
-  const { data: isAdmin, error: rpcError } = await supabase.rpc("_is_super_admin");
-  if (rpcError || !isAdmin) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  let admin
+  try {
+    ({ admin } = await requireSuperAdmin())
+  } catch (e) {
+    return e as Response
   }
 
   const { userId, role } = await request.json();
 
-  const adminClient = createAdminClient();
-  const { error } = await adminClient.auth.admin.updateUserById(userId, {
+  const { error } = await admin.auth.admin.updateUserById(userId, {
     app_metadata: { role },
   });
 

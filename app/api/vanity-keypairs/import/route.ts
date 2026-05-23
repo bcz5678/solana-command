@@ -1,53 +1,45 @@
-import { requireSuperAdmin }  from '@/app/api/require-super-admin'
-import { importVanityBatch }  from '@/lib/vault/vanity-batch'
+// app/api/vanity-keypairs/import/route.ts
 
-export async function POST(req: Request) {
+import { NextRequest, NextResponse }  from 'next/server'
+import { requireSuperAdmin }          from '@/app/api/require-super-admin'
+import { importVanityBatch }          from '@/lib/vault/vanity-batch'
+
+export async function POST(req: NextRequest) {
+
+  // userId is already verified by requireSuperAdmin —
+  // no need to call getUser() again anywhere downstream
   let admin, userId
   try {
     ({ admin, userId } = await requireSuperAdmin())
-  } catch (e) {
-    return e as Response
+  } catch (res) {
+    return res as Response
   }
 
-  let formData: FormData
+  const formData = await req.formData()
+  const files    = formData.getAll('files') as File[]
+
+  if (files.length === 0) {
+    return NextResponse.json(
+      { error: 'No files provided' },
+      { status: 400 }
+    )
+  }
+
   try {
-    formData = await req.formData()
-  } catch {
-    return new Response('Invalid form data', { status: 400 })
+    const result = await importVanityBatch(
+      admin,       // service-role client
+      files,
+      userId       // ← pass verified userId directly
+    )
+
+
+    console.log(`result: ${result.results[0].error}`);
+
+    return NextResponse.json(result)
+  } catch (err) {
+    return NextResponse.json(
+      { error: (err as Error).message },
+      { status: 500 }
+    )
   }
-
-  const files = formData.getAll('files') as File[]
-  if (files.length === 0) return new Response('No files provided', { status: 400 })
-
-  const results: { filename: string; ok: boolean; message?: string }[] = []
-
-  for (const file of files) {
-    try {
-      const parsed = JSON.parse(await file.text())
-
-      // Each file is a single Solana keypair: a raw 64-element number[]
-      if (!Array.isArray(parsed) || parsed.length !== 64 || !parsed.every(n => typeof n === 'number')) {
-        throw new Error('File must contain a single 64-byte secret key array')
-      }
-
-      const summary = await importVanityBatch(admin, userId, [parsed], file.name)
-
-      const { imported, skipped_suffix, skipped_duplicate, failed } = summary
-      results.push({
-        filename: file.name,
-        ok: imported > 0,
-        message: imported > 0
-          ? undefined
-          : `skipped_suffix=${skipped_suffix} skipped_duplicate=${skipped_duplicate} failed=${failed}`
-      })
-    } catch (err) {
-      results.push({
-        filename: file.name,
-        ok: false,
-        message: err instanceof Error ? err.message : String(err),
-      })
-    }
-  }
-
-  return Response.json({ results })
 }
