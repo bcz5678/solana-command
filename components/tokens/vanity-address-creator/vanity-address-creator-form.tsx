@@ -13,7 +13,20 @@ import {
 type MintStatus = 'idle' | 'running' | 'stopped' | 'complete'
 type ImportStatus = 'idle' | 'importing' | 'done' | 'error'
 
-type ImportResult = { filename: string; ok: boolean; message?: string }
+interface SingleResult {
+    publicKey: string
+    status:    'imported' | 'skipped' | 'failed'
+    filename:  string
+    error?:    string
+}
+
+interface BatchResult {
+    imported:          number
+    skipped_suffix:    number
+    skipped_duplicate: number
+    failed:            number
+    results:           SingleResult[]
+}
 
 
 export default function VanityAddressCreatorForm() {
@@ -28,7 +41,7 @@ export default function VanityAddressCreatorForm() {
     // --- import form state ---
     const [importFiles, setImportFiles] = useState<FileList | null>(null)
     const [importStatus, setImportStatus] = useState<ImportStatus>('idle')
-    const [importResults, setImportResults] = useState<ImportResult[]>([])
+    const [importResults, setImportResults] = useState<SingleResult[]>([])
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     async function handleStart() {
@@ -103,7 +116,7 @@ export default function VanityAddressCreatorForm() {
         setImportStatus('importing')
         setImportResults([])
 
-        const results: ImportResult[] = []
+        const results: SingleResult[] = []
 
         const body = new FormData()
         for (const file of Array.from(importFiles)) body.append('files', file)
@@ -112,17 +125,17 @@ export default function VanityAddressCreatorForm() {
             const res = await fetch('/api/vanity-keypairs/import', { method: 'POST', body })
             if (!res.ok) {
                 const text = await res.text()
-                results.push({ filename: '(all files)', ok: false, message: `${res.status} ${text}` })
+                results.push({ publicKey: 'unknown', filename: '(all files)', status: 'failed', error: `${res.status} ${text}` })
             } else {
-                const json = await res.json()
-                results.push(...(json.results ?? []))
+                const json: BatchResult = await res.json()
+                results.push(...json.results)
             }
         } catch (err) {
-            results.push({ filename: '(all files)', ok: false, message: err instanceof Error ? err.message : String(err) })
+            results.push({ publicKey: 'unknown', filename: '(all files)', status: 'failed', error: err instanceof Error ? err.message : String(err) })
         }
 
         setImportResults(results)
-        setImportStatus(results.every((r) => r.ok) ? 'done' : 'error')
+        setImportStatus(results.every((r) => r.status === 'imported') ? 'done' : 'error')
         setImportFiles(null)
         if (fileInputRef.current) fileInputRef.current.value = ''
     }
@@ -281,12 +294,12 @@ export default function VanityAddressCreatorForm() {
                     {importResults.length > 0 && (
                         <div className="flex flex-col gap-1">
                             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                Results ({importResults.filter((r) => r.ok).length}/{importResults.length} imported)
+                                Results ({importResults.filter((r) => r.status === 'imported').length}/{importResults.length} imported)
                             </p>
                             <div className="max-h-64 overflow-y-auto flex flex-col gap-1 rounded-md border bg-muted/40 p-2">
                                 {importResults.map((r, i) => (
-                                    <div key={i} className={`flex items-start gap-2 font-mono text-xs px-2 py-1 rounded border ${r.ok ? 'bg-background border-border' : 'bg-destructive/10 border-destructive/30 text-destructive'}`}>
-                                        <span className="shrink-0">{r.ok ? '✓' : '✗'}</span>
+                                    <div key={i} className={`flex items-start gap-2 font-mono text-xs px-2 py-1 rounded border ${r.status === 'imported' ? 'bg-green-200 border-border' : 'bg-destructive/10 border-destructive/30 text-destructive'}`}>
+                                        <span className="shrink-0">{r.status === 'imported' ? '✓' : '✗'}</span>
                                         <span className="break-all">
                                             {r.filename}{r.error ? ` — ${r.error}` : ''}
                                         </span>
