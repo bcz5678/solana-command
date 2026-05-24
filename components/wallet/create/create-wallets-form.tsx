@@ -112,7 +112,7 @@ export default function CreateWalletsForm(){
     }
 
     useEffect(() => {
-        fetch('/api/wallet-setup')
+        fetch('/api/wallets/setup')
             .then((r) => r.json())
             .then(({ owners, walletTypes, walletGroups }) => {
                 setOwners(owners ?? [])

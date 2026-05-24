@@ -107,7 +107,7 @@ export default function AddExistingWalletForm(){
         setSubmitStatus('loading')
         setStatusMessage('')
 
-        const res = await fetch('/api/wallet-setup', {
+        const res = await fetch('/api/wallets', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -133,7 +133,7 @@ export default function AddExistingWalletForm(){
     }
 
     useEffect(() => {
-        fetch('/api/wallet-setup')
+        fetch('/api/wallets/setup')
             .then((r) => r.json())
             .then(({ owners, walletTypes, walletGroups }) => {
                 setOwners(owners ?? [])

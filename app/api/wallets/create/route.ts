@@ -1,14 +1,18 @@
-import { createClient } from '@/lib/supabase/server'
-import { Keypair }       from '@solana/web3.js'
-import bs58              from 'bs58'
+import { requireSuperAdmin } from '@/app/api/require-super-admin'
+import { Keypair }           from '@solana/web3.js'
+import bs58                  from 'bs58'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: Request) {
-  const supabase = await createClient()
+  let admin
+  try {
+    ({ admin } = await requireSuperAdmin())
+  } catch (e) {
+    return e as Response
+  }
 
-  const { data: authData } = await supabase.auth.getClaims()
-  if (!authData?.claims) return new Response('Unauthorized', { status: 401 })
+  const supabase = admin
 
   let body: {
     numberOfWallets: number
