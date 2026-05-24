@@ -53,7 +53,6 @@ export default function CreateWalletsForm(){
     const [groupInputValue, setGroupInputValue] = useState('');
     const [submitStatus, setSubmitStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
     const [statusMessage, setStatusMessage] = useState('');
-      const [loading, setLoading] = useState<boolean>(true);
 
     const filteredGroups = walletGroups.filter(g =>
         g.name.toLowerCase().includes(groupInputValue.toLowerCase())
@@ -112,12 +111,17 @@ export default function CreateWalletsForm(){
     }
 
     useEffect(() => {
-        fetch('/api/wallets/setup')
-            .then((r) => r.json())
-            .then(({ owners, walletTypes, walletGroups }) => {
-                setOwners(owners ?? [])
-                setWalletTypes(walletTypes ?? [])
-                setWalletGroups(walletGroups ?? [])
+        fetch('/api/wallets/create')
+            .then(async (r) => {
+                const json = await r.json()
+                if (!r.ok) {
+                    setSubmitStatus('error')
+                    setStatusMessage(json.error ?? 'Failed to load form data')
+                    return
+                }
+                setOwners(json.owners ?? [])
+                setWalletTypes(json.walletTypes ?? [])
+                setWalletGroups(json.walletGroups ?? [])
             })
     }, [])
 
@@ -207,12 +211,12 @@ export default function CreateWalletsForm(){
                         render={({ field }) => (
                             <Select
                                 onValueChange={(value) => field.onChange(Number(value))}
-                                value={field.value !== undefined ? String(field.value) : ""}
+                                value={field.value ? String(field.value) : undefined}
                             >
                                 <SelectTrigger id="input-wallet-type">
                                     <SelectValue placeholder="Select wallet type" />
                                 </SelectTrigger>
-                                <SelectContent>
+                                <SelectContent position="popper">
                                     <SelectGroup>
                                         {walletTypes.map((wt) => (
                                             <SelectItem key={wt.id} value={String(wt.id)}>
@@ -240,12 +244,12 @@ export default function CreateWalletsForm(){
                         render={({ field }) => (
                             <Select
                                 onValueChange={(value) => field.onChange(Number(value))}
-                                value={field.value !== undefined ? String(field.value) : ""}
+                                value={field.value ? String(field.value) : undefined}
                             >
                                 <SelectTrigger id="input-owner">
                                     <SelectValue placeholder="Select owner" />
                                 </SelectTrigger>
-                                <SelectContent>
+                                <SelectContent position="popper">
                                     <SelectGroup>
                                         {owners.map((o) => (
                                             <SelectItem key={o.id} value={String(o.id)}>
