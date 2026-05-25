@@ -25,7 +25,7 @@ export async function GET() {
 
 console.log(`walletResults: ${walletResults}`);
 
-  //if (walletResultsError) return new Response(walletResultsError.message, { status: 500 })
+  if (walletResultsError) return new Response(walletResultsError.message, { status: 500 })
 
   const wallets = (walletResults ?? []).map((w) => ({
     ...w,

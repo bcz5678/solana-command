@@ -1,6 +1,7 @@
 import { requireSuperAdmin } from '@/app/api/require-super-admin'
 import { Keypair }           from '@solana/web3.js'
 import bs58                  from 'bs58'
+import { NextRequest, NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,6 +47,17 @@ export async function GET() {
   })
 }
 
+
+interface CreateWalletBody {
+  publicKey:     string
+  label:         string
+  chain:         string
+  encryptedSeed: string
+  iv:            string
+  salt:          string
+  vaultSecretName:  string  
+}
+
 export async function POST(req: Request) {
   let admin
   try {
@@ -55,7 +67,6 @@ export async function POST(req: Request) {
   }
 
   let body: {
-    numberOfWallets: number
     walletType:      number
     ownerID:         number
     groupId:         number | null
@@ -68,11 +79,11 @@ export async function POST(req: Request) {
     return new Response('Invalid JSON', { status: 400 })
   }
 
-  const { numberOfWallets, walletType, ownerID, groupId, groupName } = body
 
-  if (!numberOfWallets || numberOfWallets < 1 || numberOfWallets > 20) {
-    return new Response('numberOfWallets must be between 1 and 20', { status: 400 })
-  }
+
+  const { walletType, ownerID, groupId, groupName } = body
+
+
   if (!walletType || !ownerID) {
     return new Response('Missing required fields', { status: 400 })
   }
@@ -102,7 +113,6 @@ export async function POST(req: Request) {
     return new Response('Wallet group is required', { status: 400 })
   }
 
-  const rows = Array.from({ length: numberOfWallets }, () => {
     const kp = Keypair.generate()
     const row = {
       public_key:     kp.publicKey.toBase58(),
@@ -113,12 +123,11 @@ export async function POST(req: Request) {
       group_id:       resolvedGroupId,
     }
     kp.secretKey.fill(0)
-    return row
-  })
+
 
   const { data, error } = await admin
     .from('wallets')
-    .insert(rows)
+    .insert(row)
     .select('id')
 
   if (error) return Response.json({ error: error.message }, { status: 500 })
