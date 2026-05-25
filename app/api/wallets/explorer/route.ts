@@ -21,11 +21,11 @@ export async function GET() {
 
 
   const { data: walletResults, error: walletResultsError }  =  await admin
-      .rpc('get_wallets')
+      .rpc('private.get_wallets')
 
 console.log(`walletResults: ${walletResults}`);
 
-  if (walletResultsError) return new Response(walletResultsError.message, { status: 500 })
+  //if (walletResultsError) return new Response(walletResultsError.message, { status: 500 })
 
   const wallets = (walletResults ?? []).map((w) => ({
     ...w,

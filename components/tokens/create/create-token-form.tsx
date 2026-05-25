@@ -1,5 +1,6 @@
 'use client'
 
+import { createClient } from '@/lib/supabase/client';
 import { useState, useRef, useEffect } from "react";
 import { useForm, Controller, SubmitHandler } from "react-hook-form";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,8 @@ function truncate(key: string) {
     return `${key.slice(0, 8)}...${key.slice(-8)}`;
 }
 
+const supabase = createClient();
+
 export default function CreateTokenForm() {
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [isDragging, setIsDragging] = useState(false);
@@ -48,12 +51,13 @@ export default function CreateTokenForm() {
     const { register, handleSubmit, control, formState: { errors } } = useForm<CreateTokenFormInput>();
 
     useEffect(() => {
-        fetch('/api/wallets')
-            .then((r) => r.json())
-            .then(({ wallets, walletTypes }) => {
-                setWallets(wallets ?? []);
-                setWalletTypes(walletTypes ?? []);
-            });
+        Promise.all([
+            supabase.from('wallets').select('id, public_key, wallet_type_id'),
+            supabase.from('wallet_type').select('id, name'),
+        ]).then(([walletRes, typeRes]) => {
+            if (walletRes.data) setWallets(walletRes.data);
+            if (typeRes.data) setWalletTypes(typeRes.data);
+        });
     }, []);
 
     const onSubmit: SubmitHandler<CreateTokenFormInput> = async (data) => {
@@ -67,31 +71,90 @@ export default function CreateTokenForm() {
         setMintStatus('checking');
         setMintAddress('');
 
-        const body = new FormData();
-        body.append('creatorWallet',  data.creatorWallet);
-        body.append('name',           data.name);
-        body.append('symbol',         data.symbol);
-        body.append('description',    data.description);
-        body.append('logo',           logoFile);
-        if (data.websiteUrl)     body.append('websiteUrl',     data.websiteUrl);
-        if (data.twitterUrl)     body.append('twitterUrl',     data.twitterUrl);
-        if (data.telegramHandle) body.append('telegramHandle', data.telegramHandle);
+        // 1. Try to claim a prebuilt vanity keypair from the DB
+        let mintSecretKey: unknown;
+        let contractAddress: string;
+        let vanityId: number | null = null;
 
-        setMintStatus('grinding');
-        setStatusMessage('Finding mint address…');
+        const { data: available } = await supabase
+            .from('vanity_keypairs')
+            .select('id, mint_secret_key, contract_address')
+            .eq('available', true)
+            .limit(1)
+            .single();
 
-        const res = await fetch('/api/token/create', { method: 'POST', body });
-        const json = await res.json();
+        if (available) {
+            mintSecretKey = available.mint_secret_key;
+            contractAddress = available.contract_address;
+            vanityId = available.id;
+            setMintStatus('found');
+            setMintAddress(contractAddress);
+            setStatusMessage(`Using prebuilt address ${contractAddress}`);
+        } else {
+            // 2. None available — grind a fresh one
+            setMintStatus('grinding');
+            const expected = estimateVanityMintAttempts({ suffix: 'pump' });
+            setStatusMessage(`No prebuilt address available. Estimated attempts: ~${expected}`);
 
-        if (!res.ok) {
+            const { keypair: mint, durationMs } = await generateVanityMint({
+                suffix: 'pump',
+                onProgress: ({ attempts, elapsedMs }) => {
+                    if (attempts % 5_000 === 0) {
+                        setStatusMessage(`${attempts.toLocaleString()}/~${expected} attempts tried in ${(elapsedMs / 1000).toFixed(1)}s`);
+                    }
+                },
+            });
+
+            mintSecretKey = mint.secretKey;
+            contractAddress = mint.publicKey.toBase58();
+            setMintStatus('found');
+            setMintAddress(contractAddress);
+            setStatusMessage(`Found ${contractAddress} in ${durationMs}ms`);
+        }
+
+        // 3. Upload logo
+        const ext = logoFile.name.split('.').pop();
+        const { data: imgData, error: uploadError } = await supabase.storage
+            .from('token-media')
+            .upload(`public/${data.symbol}_${contractAddress.slice(0, 7)}_logo.${ext}`, logoFile);
+
+        if (uploadError) {
             setSubmitStatus('error');
-            setStatusMessage(json.error ?? 'Token creation failed');
-            setMintStatus('idle');
+            setStatusMessage('Error uploading logo image: ' + uploadError.message);
             return;
         }
 
-        setMintStatus('found');
-        setMintAddress(json.contractAddress);
+        // 4. Insert token
+        const { error: insertError } = await supabase
+            .from('tokens')
+            .insert([{
+                dev_wallet_id: data.creatorWallet,
+                name: data.name,
+                symbol: data.symbol,
+                description: data.description,
+                mint_secret_key: mintSecretKey,
+                contract_address: contractAddress,
+                logo_url: imgData?.path,
+                website_url: data.websiteUrl,
+                twitter_url: data.twitterUrl,
+                telegram_handle: data.telegramHandle,
+            }])
+            .select();
+
+        if (insertError) {
+            setSubmitStatus('error');
+            setStatusMessage('Error creating token: ' + insertError.message);
+            return;
+        }
+
+        // 5. Mark the vanity row as consumed
+        if (vanityId !== null) {
+            await supabase
+                .from('vanity_keypairs')
+                .update({ available: false })
+                .eq('id', vanityId);
+        }
+
         setSubmitStatus('success');
         setStatusMessage('Token created successfully!');
     };
