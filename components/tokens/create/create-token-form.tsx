@@ -16,6 +16,9 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import {
+    e
+}
 
 type WalletType = { id: number; name: string };
 type Wallet = { id: number; public_key: string; wallet_type_id: number };
