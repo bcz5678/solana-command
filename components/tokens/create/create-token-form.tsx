@@ -16,14 +16,12 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import {
-    e
-}
+
 
 type WalletType = { id: number; name: string };
 type Wallet = { id: number; public_key: string; wallet_type_id: number };
 
-interface CreateTokenFormInput {
+export interface CreateTokenFormInput {
     creatorWallet: string;
     name: string;
     symbol: string;
@@ -33,20 +31,21 @@ interface CreateTokenFormInput {
     telegramHandle?: string;
 }
 
+interface CreateTokenFormProps {
+    onSubmit: (data: CreateTokenFormInput, logoFile: File) => Promise<void>;
+    isSubmitting?: boolean;
+}
+
 function truncate(key: string) {
     return `${key.slice(0, 8)}...${key.slice(-8)}`;
 }
 
 const supabase = createClient();
 
-export default function CreateTokenForm() {
+export default function CreateTokenForm({ onSubmit, isSubmitting = false }: CreateTokenFormProps) {
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [logoError, setLogoError] = useState('');
-    const [submitStatus, setSubmitStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-    const [statusMessage, setStatusMessage] = useState('');
-    const [mintStatus, setMintStatus] = useState<'idle' | 'checking' | 'grinding' | 'found'>('idle');
-    const [mintAddress, setMintAddress] = useState('');
     const [wallets, setWallets] = useState<Wallet[]>([]);
     const [walletTypes, setWalletTypes] = useState<WalletType[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -63,103 +62,13 @@ export default function CreateTokenForm() {
         });
     }, []);
 
-    const onSubmit: SubmitHandler<CreateTokenFormInput> = async (data) => {
+    const handleFormSubmit: SubmitHandler<CreateTokenFormInput> = async (data) => {
         if (!logoFile) {
             setLogoError('Logo image is required.');
             return;
         }
         setLogoError('');
-        setSubmitStatus('loading');
-        setStatusMessage('');
-        setMintStatus('checking');
-        setMintAddress('');
-
-        // 1. Try to claim a prebuilt vanity keypair from the DB
-        let mintSecretKey: unknown;
-        let contractAddress: string;
-        let vanityId: number | null = null;
-
-        const { data: available } = await supabase
-            .from('vanity_keypairs')
-            .select('id, mint_secret_key, contract_address')
-            .eq('available', true)
-            .limit(1)
-            .single();
-
-        if (available) {
-            mintSecretKey = available.mint_secret_key;
-            contractAddress = available.contract_address;
-            vanityId = available.id;
-            setMintStatus('found');
-            setMintAddress(contractAddress);
-            setStatusMessage(`Using prebuilt address ${contractAddress}`);
-        } else {
-            // 2. None available — grind a fresh one
-            setMintStatus('grinding');
-            const expected = estimateVanityMintAttempts({ suffix: 'pump' });
-            setStatusMessage(`No prebuilt address available. Estimated attempts: ~${expected}`);
-
-            const { keypair: mint, durationMs } = await generateVanityMint({
-                suffix: 'pump',
-                onProgress: ({ attempts, elapsedMs }) => {
-                    if (attempts % 5_000 === 0) {
-                        setStatusMessage(`${attempts.toLocaleString()}/~${expected} attempts tried in ${(elapsedMs / 1000).toFixed(1)}s`);
-                    }
-                },
-            });
-
-            mintSecretKey = mint.secretKey;
-            contractAddress = mint.publicKey.toBase58();
-            setMintStatus('found');
-            setMintAddress(contractAddress);
-            setStatusMessage(`Found ${contractAddress} in ${durationMs}ms`);
-        }
-
-        // 3. Upload logo
-        const ext = logoFile.name.split('.').pop();
-        const { data: imgData, error: uploadError } = await supabase.storage
-            .from('token-media')
-            .upload(`public/${data.symbol}_${contractAddress.slice(0, 7)}_logo.${ext}`, logoFile);
-
-        if (uploadError) {
-            setSubmitStatus('error');
-            setStatusMessage('Error uploading logo image: ' + uploadError.message);
-            return;
-        }
-
-        // 4. Insert token
-        const { error: insertError } = await supabase
-            .from('tokens')
-            .insert([{
-                dev_wallet_id: data.creatorWallet,
-                name: data.name,
-                symbol: data.symbol,
-                description: data.description,
-                mint_secret_key: mintSecretKey,
-                contract_address: contractAddress,
-                logo_url: imgData?.path,
-                website_url: data.websiteUrl,
-                twitter_url: data.twitterUrl,
-                telegram_handle: data.telegramHandle,
-            }])
-            .select();
-
-        if (insertError) {
-            setSubmitStatus('error');
-            setStatusMessage('Error creating token: ' + insertError.message);
-            return;
-        }
-
-        // 5. Mark the vanity row as consumed
-        if (vanityId !== null) {
-            await supabase
-                .from('vanity_keypairs')
-                .update({ available: false })
-                .eq('id', vanityId);
-        }
-
-        setSubmitStatus('success');
-        setStatusMessage('Token created successfully!');
+        await onSubmit(data, logoFile);
     };
 
     const handleFileSelect = (file: File | null) => {
@@ -177,7 +86,7 @@ export default function CreateTokenForm() {
 
     return (
         <div className="grid grid-cols-3 gap-4">
-            <form onSubmit={handleSubmit(onSubmit)}>
+            <form onSubmit={handleSubmit(handleFormSubmit)}>
 
                 <p className="mt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     Token Info
@@ -355,74 +264,20 @@ export default function CreateTokenForm() {
                     </InputGroup>
                 </div>
 
-                {mintStatus !== 'idle' && (
-                    <div className={[
-                        "mt-6 rounded-md px-3 py-2.5 text-sm flex flex-col gap-1",
-                        mintStatus === 'found'
-                            ? "bg-green-500/10 text-green-700 dark:text-green-400"
-                            : "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-                    ].join(' ')}>
-                        <span className="flex items-center gap-2 font-medium">
-                            {mintStatus === 'checking' ? (
-                                <>
-                                    <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent shrink-0" />
-                                    Checking for available address…
-                                </>
-                            ) : mintStatus === 'grinding' ? (
-                                <>
-                                    <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent shrink-0" />
-                                    Grinding vanity address…
-                                </>
-                            ) : (
-                                <>
-                                    <svg className="size-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                                    </svg>
-                                    Mint address found
-                                </>
-                            )}
-                        </span>
-                        {(mintStatus === 'checking' || mintStatus === 'grinding') && statusMessage && (
-                            <span className="font-mono text-xs opacity-80">{statusMessage}</span>
-                        )}
-                        {mintStatus === 'found' && mintAddress && (
-                            <span className="font-mono text-xs opacity-80 break-all">{mintAddress}</span>
-                        )}
-                    </div>
-                )}
-
                 <Button
                     className="mt-3"
                     size="lg"
                     variant="default"
                     type="submit"
-                    disabled={submitStatus === 'loading'}
+                    disabled={isSubmitting}
                 >
-                    {submitStatus === 'loading' ? (
+                    {isSubmitting ? (
                         <span className="flex items-center gap-2">
                             <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
                             Creating...
                         </span>
                     ) : 'Create Token'}
                 </Button>
-
-                {submitStatus === 'success' && (
-                    <div className="mt-3 flex items-center gap-2 rounded-md bg-green-500/10 px-3 py-2 text-sm text-green-600 dark:text-green-400">
-                        <svg className="size-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                        </svg>
-                        {statusMessage}
-                    </div>
-                )}
-
-                {submitStatus === 'error' && (
-                    <div className="mt-3 flex items-center gap-2 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                        <svg className="size-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                        </svg>
-                        {statusMessage}
-                    </div>
-                )}
 
             </form>
         </div>

@@ -1,4 +1,4 @@
-import { requireSuperAdmin } from "@/app/api/require-super-admin";
+import { requireSuperAdmin } from "@/lib/auth/require-super-admin";
 import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {

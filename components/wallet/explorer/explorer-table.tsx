@@ -32,11 +32,14 @@ type Wallet = {
   id: number
   created_at: string
   public_key: string
-  funded: boolean
-  wallet_type_id: number
+  is_active: boolean
+  wallet_type_id: string | null
+  wallet_type: string | null
+  wallet_group_id: string | null
+  group_name: string | null
+  group_color: string | null
+  owner_record_id: string | null
   solana_balance_in_lamports: string
-  owner_id: number
-  group_id: number
   token_holdings: Token[]
 }
 
@@ -52,11 +55,9 @@ type Props = {
 const ALL = 'all'
 
 export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
-  const walletTypeMap = Object.fromEntries(walletTypes.map((t) => [t.id, t.name]))
-  const ownerMap = Object.fromEntries(owners.map((o) => [o.id, o.name]))
-  const groupMap = Object.fromEntries(groups.map((g) => [g.id, g.name]))
+  const ownerMap = Object.fromEntries(owners.map((o) => [String(o.id), o.name]))
 
-  const [funded, setFunded] = useState<string>(ALL)
+  const [isActive, setIsActive] = useState<string>(ALL)
   const [walletTypeId, setWalletTypeId] = useState<string>(ALL)
   const [ownerId, setOwnerId] = useState<string>(ALL)
   const [groupId, setGroupId] = useState<string>(ALL)
@@ -65,12 +66,12 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
   const [copiedId, setCopiedId] = useState<number | null>(null)
 
   const filtered = useMemo(() => wallets.filter((w) => {
-    if (funded !== ALL && String(w.funded) !== funded) return false
-    if (walletTypeId !== ALL && String(w.wallet_type_id) !== walletTypeId) return false
-    if (ownerId !== ALL && String(w.owner_id) !== ownerId) return false
-    if (groupId !== ALL && String(w.group_id) !== groupId) return false
+    if (isActive !== ALL && String(w.is_active) !== isActive) return false
+    if (walletTypeId !== ALL && w.wallet_type_id !== walletTypeId) return false
+    if (ownerId !== ALL && w.owner_record_id !== ownerId) return false
+    if (groupId !== ALL && w.wallet_group_id !== groupId) return false
     return true
-  }), [wallets, funded, walletTypeId, ownerId, groupId])
+  }), [wallets, isActive, walletTypeId, ownerId, groupId])
 
   const allFilteredSelected = filtered.length > 0 && filtered.every((w) => selected.has(w.id))
 
@@ -104,14 +105,14 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap gap-3">
-        <Select value={funded} onValueChange={setFunded}>
+        <Select value={isActive} onValueChange={setIsActive}>
           <SelectTrigger className="w-36">
-            <SelectValue placeholder="Funded" />
+            <SelectValue placeholder="Status" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>All Funded</SelectItem>
-            <SelectItem value="true">Yes</SelectItem>
-            <SelectItem value="false">No</SelectItem>
+            <SelectItem value={ALL}>All Status</SelectItem>
+            <SelectItem value="true">Active</SelectItem>
+            <SelectItem value="false">Inactive</SelectItem>
           </SelectContent>
         </Select>
 
@@ -220,7 +221,7 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
                   </TooltipProvider>
                 </span>
                 <span className="w-36 text-sm font-normal shrink-0">
-                  {groupMap[wallet.group_id] ?? wallet.group_id}
+                  {wallet.group_name ?? wallet.wallet_group_id ?? '—'}
                 </span>
                 <span className="w-28 text-sm font-normal shrink-0">
                   {lamportsBNToSolDisplay(lamportsStringToBN(wallet.solana_balance_in_lamports))}
@@ -238,12 +239,12 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
                     <p>{wallet.created_at.slice(0, 19).replace('T', ' ')}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground mb-0.5">Funded</p>
-                    <p>{wallet.funded ? 'Yes' : 'No'}</p>
+                    <p className="text-xs text-muted-foreground mb-0.5">Active</p>
+                    <p>{wallet.is_active ? 'Yes' : 'No'}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground mb-0.5">Wallet Type</p>
-                    <p>{walletTypeMap[wallet.wallet_type_id] ?? wallet.wallet_type_id}</p>
+                    <p>{wallet.wallet_type ?? wallet.wallet_type_id ?? '—'}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground mb-0.5">SOL Balance</p>
@@ -251,7 +252,7 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground mb-0.5">Owner</p>
-                    <p>{ownerMap[wallet.owner_id] ?? wallet.owner_id}</p>
+                    <p>{(wallet.owner_record_id && ownerMap[wallet.owner_record_id]) ?? wallet.owner_record_id ?? '—'}</p>
                   </div>
                   <div className="col-span-2 sm:col-span-3">
                     <p className="text-xs text-muted-foreground mb-1">Token Holdings</p>

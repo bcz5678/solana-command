@@ -16,7 +16,7 @@ import { LaunchType } from '@/components/tokens/launch/types';
 import { WalletModelDTO } from '@/app/db/models/wallet';
 import { TokenDTO } from '@/components/tokens/launch/types';
 
-import { requireSuperAdmin } from '@/app/api/require-super-admin';
+import { requireSuperAdmin } from '@/lib/auth/require-super-admin';
 import { SupabaseClient } from '@supabase/supabase-js';
 
 
@@ -108,6 +108,7 @@ async function processLaunchBlock0(admin: SupabaseClient, launchConfig: LaunchCo
 
         const creator = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(devWallet.secret_key)));
         const mint = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(launchConfig.token.mint_secret_key!)));
+
 
 
         if (launchConfig.walletTrades.length == 0) {

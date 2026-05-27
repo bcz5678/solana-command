@@ -14,11 +14,29 @@ export interface WalletModelDTO {
     created_at?: string; 
     public_key: string;
     secret_key: string;
-    funded: boolean;
-    wallet_type_id: number;
+
+    wallet_label:     string | null
+    chain:            string
+    is_active:        boolean
+
+    // Ownership
+    owner_record_id:  string | null
+    role:             'sole' | 'primary' | 'co-owner' | 'view-only' | null
+    can_sign:         boolean | null
+    can_view:         boolean | null
+    can_share:        boolean | null
+    granted_at:       string | null
+
+    // Type — both ID and name returned for filter + display
+    wallet_type_id:   string | null   // ← filter by this
+    wallet_type:      string | null   // ← display this
+
+    // Group — both ID and name returned for filter + display
+    wallet_group_id:  string | null   // ← filter by this
+    group_name:       string | null   // ← display this
+    group_color:      string | null   // ← display this
+    
     solana_balance_in_lamports: BN;
-    owner_id: number;
-    group_id: number;
     token_holdings: TokenHoldingsDTO[];
 }
 

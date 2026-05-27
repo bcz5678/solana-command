@@ -1,7 +1,7 @@
 // app/api/vanity-keypairs/import/route.ts
 
 import { NextRequest, NextResponse }  from 'next/server'
-import { requireSuperAdmin }          from '@/app/api/require-super-admin'
+import { requireSuperAdmin }          from '@/lib/auth/require-super-admin'
 import { importVanityBatch }          from '@/lib/vault/vanity-batch'
 
 export async function POST(req: NextRequest) {

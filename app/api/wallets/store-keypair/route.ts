@@ -1,7 +1,7 @@
 // app/api/wallets/store-keypair/route.ts
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireSuperAdmin } from '../../require-super-admin'
+import { requireSuperAdmin } from '../../../../lib/auth/require-super-admin'
 
 export async function POST(req: NextRequest) {
   let admin, userId

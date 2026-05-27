@@ -1,4 +1,4 @@
-import { requireSuperAdmin }        from '@/app/api/require-super-admin'
+import { requireSuperAdmin }        from '@/lib/auth/require-super-admin'
 import { addVanityKeypairToVault }  from '@/lib/vault/vanity'
 
 export async function POST(req: Request) {
