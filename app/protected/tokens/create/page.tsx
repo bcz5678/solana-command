@@ -108,61 +108,44 @@ export default function Page() {
 
         setStep('uploadTokenMeta', 'success')
 
-        // Step 4 — Create token (off-chain)
-        setStep('buildToken', 'loading')
-        // TODO: wire to pumpfun launch API
-        
+        // Step 4 — Build token & store in DB
+        setStep('saveToken', 'loading')
+
         const buildTokenResponse = await fetch('/api/token/build-token', {
-          method: "PUT",
-          body: JSON.stringify({
-            keypairId: vanityId, 
-            devWalletId: data.creatorWallet,
-            tokenName: data.name,
-            tokenSymbol: data.symbol,
-            description: data.description,
-            metadataUri: tokenMetaUrl, 
-          })
-        });
-        
-        setStep('buildToken', 'success')
-
-        // Step 5 — Store token in DB
-        setStep('storeInDb', 'loading')
-
-        const { error: insertError } = await supabase
-            .from('tokens')
-            .insert([{
-                dev_wallet_id: data.creatorWallet,
-                name: data.name,
-                symbol: data.symbol,
+            method: 'POST',
+            body: JSON.stringify({
+                keypairId: vanityId,
+                devWalletId: data.creatorWallet,
+                tokenName: data.name,
+                tokenSymbol: data.symbol,
                 description: data.description,
-                mint_secret_key: mintSecretKey,
-                contract_address: contractAddress,
-                logo_url: imgData?.path,
-                website_url: data.websiteUrl ?? null,
-                twitter_url: data.twitterUrl ?? null,
-                telegram_handle: data.telegramHandle ?? null,
-            }])
+                metadataUri: tokenMetaUrl,
+            }),
+        })
 
-        if (insertError) {
-            setStep('storeInDb', 'error')
-            setErrorMessage('Error storing token: ' + insertError.message)
+        if (!buildTokenResponse.ok) {
+            setStep('saveToken', 'error')
+            setErrorMessage('Error building token.')
             setIsSubmitting(false)
             return
         }
-        setStep('storeInDb', 'success')
+
+        setStep('saveToken', 'success')
 
         // Step 6 — Update vanity mint
         setStep('updateVanityMint', 'loading')
 
-        const { error: updateError } = await supabase
-            .from('vanity_keypairs')
-            .update({ available: false })
-            .eq('id', vanityId)
+        const updateVanityMintResponse = await fetch('/api/token/update-vanity-mint', {
+          method: 'POST',
+          body: JSON.stringify({
+            keypairId: vanityId,
+            status: "reserved",
+          }),
+        });
 
-        if (updateError) {
+        if (!updateVanityMintResponse.ok) {
             setStep('updateVanityMint', 'error')
-            setErrorMessage('Error updating vanity mint: ' + updateError.message)
+            setErrorMessage('Error updating vanity mint')
             setIsSubmitting(false)
             return
         }

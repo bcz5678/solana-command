@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireSuperAdmin } from "@/lib/auth/require-super-admin";
-import type { WalletModelDTO } from "@/app/db/models/wallet";
+import type { WalletRecord } from "@/lib/types/wallet";
 
 export const dynamic = 'force-dynamic'
 
@@ -49,34 +49,7 @@ export async function GET(req: NextRequest) {
   }
 
 
-  type RawWalletResult = Omit<WalletModelDTO, 'solana_balance_in_lamports'> & {
-    solana_balance_in_lamports: string | number | bigint | null
-  }
-
-  type WalletRow = Omit<WalletModelDTO, 'solana_balance_in_lamports'> & { solana_balance_in_lamports: string }
-
-  const wallets: WalletRow[] = ((walletResults ?? []) as RawWalletResult[]).map((w) => ({
-    id:                         w.id,
-    created_at:                 w.created_at,
-    public_key:                 w.public_key,
-    secret_key:                 w.secret_key,
-    wallet_label:               w.wallet_label      ?? null,
-    chain:                      w.chain,
-    is_active:                  w.is_active,
-    owner_record_id:            w.owner_record_id   ?? null,
-    role:                       w.role              ?? null,
-    can_sign:                   w.can_sign          ?? null,
-    can_view:                   w.can_view          ?? null,
-    can_share:                  w.can_share         ?? null,
-    granted_at:                 w.granted_at        ?? null,
-    wallet_type_id:             w.wallet_type_id    ?? null,
-    wallet_type:                w.wallet_type       ?? null,
-    wallet_group_id:            w.wallet_group_id   ?? null,
-    group_name:                 w.group_name        ?? null,
-    group_color:                w.group_color       ?? null,
-    solana_balance_in_lamports: String(w.solana_balance_in_lamports ?? 0),
-    token_holdings:             w.token_holdings    ?? [],
-  }))
+  const wallets = (walletResults ?? []) as WalletRecord[]
 
   return Response.json({
     wallets,

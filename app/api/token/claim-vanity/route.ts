@@ -10,13 +10,49 @@ import { ClaimVanityResponse }       from '@/lib/types/api'
 export async function POST(req: NextRequest) {
 
   // ── 1. Auth ────────────────────────────────────────────────
+  let admin, userId
   try {
-    await requireSuperAdmin()
+    ({ admin, userId } = await requireSuperAdmin())
   } catch (res) {
     return res as Response
   }
 
+  // ── 1. Log raw auth state ──────────────────────────────────
   const supabase = await createClient()
+
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
+  console.log('[claim-vanity] user.id:',    user?.id)
+  console.log('[claim-vanity] user error:', userError?.message)
+
+  // ── 2. Check JWT claims directly ──────────────────────────
+  const { data: { session } } = await supabase.auth.getSession()
+  const claims = session?.access_token
+    ? JSON.parse(atob(session.access_token.split('.')[1]))
+    : null
+  console.log('[claim-vanity] app_metadata:', claims?.app_metadata)
+  console.log('[claim-vanity] role claim:',   claims?.app_metadata?.role)
+
+
+   // ── 3. Call is_super_admin() directly ─────────────────────
+  const { data: isAdmin, error: adminError } = await supabase
+    .rpc('is_super_admin')
+  console.log('[claim-vanity] is_super_admin():', isAdmin)
+  console.log('[claim-vanity] is_super_admin error:', adminError?.message)
+
+  // ── 4. Check private.super_admins record directly ─────────
+  const { data: adminRecord } = await supabase
+    .rpc('get_super_admin_record')
+  console.log('[claim-vanity] super_admin record:', adminRecord)
+
+  // ── 5. requireSuperAdmin check ────────────────────────────
+  try {
+    await requireSuperAdmin()
+    console.log('[claim-vanity] requireSuperAdmin: PASSED')
+  } catch (res) {
+    console.log('[claim-vanity] requireSuperAdmin: FAILED')
+    return res as Response
+  }
+
 
   // ── 2. Parse optional filters ──────────────────────────────
   let chain: string = 'solana'
@@ -32,7 +68,7 @@ export async function POST(req: NextRequest) {
   // concurrent requests cannot claim the same keypair
   // Status transitions: 'available' → 'reserved'
   // Reserved keypairs are held until Phase 2 confirms or releases
-  const { data: claimed, error: claimError } = await supabase
+  const { data: claimed, error: claimError } = await admin
     .rpc('claim_vanity_keypair', {
       p_chain:         chain,
       p_vanity_prefix: null    // null = any 'pump' suffix keypair

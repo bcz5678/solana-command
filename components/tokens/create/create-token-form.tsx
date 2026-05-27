@@ -1,7 +1,7 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client';
 import { useState, useRef, useEffect } from "react";
+import type { WalletRecord } from "@/lib/types/wallet";
 import { useForm, Controller, SubmitHandler } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupInput } from '@/components/ui/input-group';
@@ -18,8 +18,9 @@ import {
 } from "@/components/ui/select";
 
 
-type WalletType = { id: number; name: string };
-type Wallet = { id: number; public_key: string; wallet_type_id: number };
+
+type WalletTypeRow = { id: string; name: string };
+type WalletOwnerRow = { wallet_id: string; wallet_type_id: string | null };
 
 export interface CreateTokenFormInput {
     creatorWallet: string;
@@ -40,26 +41,43 @@ function truncate(key: string) {
     return `${key.slice(0, 8)}...${key.slice(-8)}`;
 }
 
-const supabase = createClient();
-
 export default function CreateTokenForm({ onSubmit, isSubmitting = false }: CreateTokenFormProps) {
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [logoError, setLogoError] = useState('');
-    const [wallets, setWallets] = useState<Wallet[]>([]);
-    const [walletTypes, setWalletTypes] = useState<WalletType[]>([]);
+    const [wallets, setWallets]         = useState<WalletRecord[]>([]);
+    const [typeById, setTypeById]       = useState<Record<string, string>>({});
+    const [ownerTypeMap, setOwnerTypeMap] = useState<Record<string, string>>({});
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const walletGroups: [string, WalletRecord[]][] = Object.entries(
+        wallets.reduce<Record<string, WalletRecord[]>>((acc, w) => {
+            const key = w.wallet_type
+                ?? (ownerTypeMap[w.id] ? typeById[ownerTypeMap[w.id]] : null)
+                ?? 'Other';
+            (acc[key] ??= []).push(w);
+            return acc;
+        }, {})
+    );
 
     const { register, handleSubmit, control, formState: { errors } } = useForm<CreateTokenFormInput>();
 
     useEffect(() => {
-        Promise.all([
-            supabase.from('wallets').select('id, public_key, wallet_type_id'),
-            supabase.from('wallet_type').select('id, name'),
-        ]).then(([walletRes, typeRes]) => {
-            if (walletRes.data) setWallets(walletRes.data);
-            if (typeRes.data) setWalletTypes(typeRes.data);
-        });
+        fetch('/api/wallets/explorer')
+            .then(r => {
+                if (!r.ok) {
+                    r.json().then(body => console.error('[wallets] API error', r.status, body));
+                    return;
+                }
+                return r.json();
+            })
+            .then(data => {
+                if (!data) return;
+                if (data.wallets)     setWallets(data.wallets);
+                if (data.walletTypes) setTypeById(Object.fromEntries(data.walletTypes.map((t: WalletTypeRow) => [t.id, t.name])));
+                if (data.owners)      setOwnerTypeMap(Object.fromEntries(data.owners.filter((o: WalletOwnerRow) => o.wallet_type_id).map((o: WalletOwnerRow) => [o.wallet_id, o.wallet_type_id!])));
+            })
+            .catch(err => console.error('[wallets] fetch failed', err));
     }, []);
 
     const handleFormSubmit: SubmitHandler<CreateTokenFormInput> = async (data) => {
@@ -104,21 +122,17 @@ export default function CreateTokenForm({ onSubmit, isSubmitting = false }: Crea
                                     <SelectValue placeholder="Select creator wallet" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {walletTypes.map((type, i) => {
-                                        const group = wallets.filter((w) => w.wallet_type_id === type.id);
-                                        if (!group.length) return null;
-                                        return (
-                                            <SelectGroup key={type.id}>
-                                                {i > 0 && <SelectSeparator />}
-                                                <SelectLabel>{type.name}</SelectLabel>
-                                                {group.map((w) => (
-                                                    <SelectItem key={w.id} value={String(w.id)}>
-                                                        {truncate(w.public_key)}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectGroup>
-                                        );
-                                    })}
+                                    {walletGroups.map(([typeName, group], i) => (
+                                        <SelectGroup key={typeName}>
+                                            {i > 0 && <SelectSeparator />}
+                                            <SelectLabel>{typeName}</SelectLabel>
+                                            {group.map((w) => (
+                                                <SelectItem key={String(w.id)} value={String(w.id)}>
+                                                    {truncate(w.public_key)}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectGroup>
+                                    ))}
                                 </SelectContent>
                             </Select>
                         )}
