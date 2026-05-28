@@ -28,7 +28,7 @@ import { WalletRecord } from '@/lib/types/wallet';
 
 type Token = { symbol: string; name: string }
 
-type LookupEntry = { id: number; name: string }
+type LookupEntry = { id: string; name: string }
 
 type Props = {
   wallets: WalletRecord[]
@@ -46,9 +46,9 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
   const [walletTypeId, setWalletTypeId] = useState<string>(ALL)
   const [ownerId, setOwnerId] = useState<string>(ALL)
   const [groupId, setGroupId] = useState<string>(ALL)
-  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [openItem, setOpenItem] = useState<string>('')
-  const [copiedId, setCopiedId] = useState<number | null>(null)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
 
   const filtered = useMemo(() => wallets.filter((w) => {
     if (isActive !== ALL && String(w.is_active) !== isActive) return false
@@ -72,14 +72,14 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
     })
   }
 
-  function copyKey(e: React.MouseEvent, key: string, id: number) {
+  function copyKey(e: React.MouseEvent, key: string, id: string) {
     e.stopPropagation()
     navigator.clipboard.writeText(key)
     setCopiedId(id)
     setTimeout(() => setCopiedId(null), 2000)
   }
 
-  function toggleOne(id: number) {
+  function toggleOne(id: string) {
     setSelected((prev) => {
       const next = new Set(prev)
       next.has(id) ? next.delete(id) : next.add(id)
@@ -108,7 +108,7 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
           <SelectContent>
             <SelectItem value={ALL}>All Types</SelectItem>
             {walletTypes.map((t) => (
-              <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
+              <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -120,7 +120,7 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
           <SelectContent>
             <SelectItem value={ALL}>All Owners</SelectItem>
             {owners.map((o) => (
-              <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>
+              <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -132,7 +132,7 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
           <SelectContent>
             <SelectItem value={ALL}>All Groups</SelectItem>
             {groups.map((g) => (
-              <SelectItem key={g.id} value={String(g.id)}>{g.name}</SelectItem>
+              <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -168,7 +168,7 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
           className="gap-0"
         >
           {filtered.map((wallet) => (
-            <AccordionItem key={wallet.id} value={String(wallet.id)}>
+            <AccordionItem key={wallet.id} value={wallet.id}>
               <AccordionTrigger
                 className="hover:no-underline px-1"
                 headerSlot={

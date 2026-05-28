@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from "react";
+import type { WalletRecord } from "@/lib/types/wallet";
 import { useForm, Controller, SubmitHandler } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { FieldLabel, FieldDescription } from "@/components/ui/field";
@@ -25,8 +26,8 @@ import {
     DialogClose,
 } from "@/components/ui/dialog";
 
-type WalletType = { id: number; name: string };
-type Wallet = { id: number; public_key: string; wallet_type_id: number };
+type WalletTypeRow  = { id: string; name: string };
+type WalletOwnerRow = { wallet_id: string; wallet_type_id: string | null };
 
 interface TransferFormInput {
     senderWalletAddress: string;
@@ -39,21 +40,41 @@ function truncate(key: string) {
 }
 
 export default function TransferForm() {
-    const [wallets, setWallets] = useState<Wallet[]>([]);
-    const [walletTypes, setWalletTypes] = useState<WalletType[]>([]);
+    const [wallets, setWallets]           = useState<WalletRecord[]>([]);
+    const [typeById, setTypeById]         = useState<Record<string, string>>({});
+    const [ownerTypeMap, setOwnerTypeMap] = useState<Record<string, string>>({});
     const [submitStatus, setSubmitStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
     const [statusMessage, setStatusMessage] = useState('');
     const [pending, setPending] = useState<TransferFormInput | null>(null);
 
+    const walletGroups: [string, WalletRecord[]][] = Object.entries(
+        wallets.reduce<Record<string, WalletRecord[]>>((acc, w) => {
+            const key = w.wallet_type
+                ?? (ownerTypeMap[w.id] ? typeById[ownerTypeMap[w.id]] : null)
+                ?? 'Other';
+            (acc[key] ??= []).push(w);
+            return acc;
+        }, {})
+    );
+
     const { handleSubmit, control, register, watch, formState: { errors } } = useForm<TransferFormInput>();
 
     useEffect(() => {
-        fetch('/api/wallets')
-            .then((r) => r.json())
-            .then(({ wallets, walletTypes }) => {
-                setWallets(wallets ?? []);
-                setWalletTypes(walletTypes ?? []);
-            });
+        fetch('/api/wallets/explorer')
+            .then((r) => {
+                if (!r.ok) {
+                    r.json().then(body => console.error('[wallets] API error', r.status, body));
+                    return;
+                }
+                return r.json();
+            })
+            .then((data) => {
+                if (!data) return;
+                if (data.wallets)     setWallets(data.wallets);
+                if (data.walletTypes) setTypeById(Object.fromEntries(data.walletTypes.map((t: WalletTypeRow) => [t.id, t.name])));
+                if (data.owners)      setOwnerTypeMap(Object.fromEntries(data.owners.filter((o: WalletOwnerRow) => o.wallet_type_id).map((o: WalletOwnerRow) => [o.wallet_id, o.wallet_type_id!])));
+            })
+            .catch(err => console.error('[wallets] fetch failed', err));
     }, []);
 
     const senderValue = watch('senderWalletAddress');
@@ -105,21 +126,17 @@ export default function TransferForm() {
                                     <SelectValue placeholder="Select sender wallet" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {walletTypes.map((type, i) => {
-                                        const group = wallets.filter((w) => w.wallet_type_id === type.id);
-                                        if (!group.length) return null;
-                                        return (
-                                            <SelectGroup key={type.id}>
-                                                {i > 0 && <SelectSeparator />}
-                                                <SelectLabel>{type.name}</SelectLabel>
-                                                {group.map((w) => (
-                                                    <SelectItem key={w.id} value={w.public_key}>
-                                                        {truncate(w.public_key)}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectGroup>
-                                        );
-                                    })}
+                                    {walletGroups.map(([typeName, group], i) => (
+                                        <SelectGroup key={typeName}>
+                                            {i > 0 && <SelectSeparator />}
+                                            <SelectLabel>{typeName}</SelectLabel>
+                                            {group.map((w) => (
+                                                <SelectItem key={w.id} value={w.public_key}>
+                                                    {w.label ? `${w.label} · ${truncate(w.public_key)}` : truncate(w.public_key)}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectGroup>
+                                    ))}
                                 </SelectContent>
                             </Select>
                         )}
@@ -141,16 +158,16 @@ export default function TransferForm() {
                                     <SelectValue placeholder="Select receiver wallet" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {walletTypes.map((type, i) => {
-                                        const group = wallets.filter((w) => w.wallet_type_id === type.id && w.public_key !== senderValue);
-                                        if (!group.length) return null;
+                                    {walletGroups.map(([typeName, group], i) => {
+                                        const filtered = group.filter((w) => w.public_key !== senderValue);
+                                        if (!filtered.length) return null;
                                         return (
-                                            <SelectGroup key={type.id}>
+                                            <SelectGroup key={typeName}>
                                                 {i > 0 && <SelectSeparator />}
-                                                <SelectLabel>{type.name}</SelectLabel>
-                                                {group.map((w) => (
+                                                <SelectLabel>{typeName}</SelectLabel>
+                                                {filtered.map((w) => (
                                                     <SelectItem key={w.id} value={w.public_key}>
-                                                        {truncate(w.public_key)}
+                                                        {w.label ? `${w.label} · ${truncate(w.public_key)}` : truncate(w.public_key)}
                                                     </SelectItem>
                                                 ))}
                                             </SelectGroup>

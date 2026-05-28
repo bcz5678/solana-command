@@ -5,7 +5,7 @@ import { WalletTable } from '@/components/wallet/explorer/explorer-table'
 import type { WalletRecord } from '@/lib/types/wallet'
 import { lamportsStringToBN } from '@/lib/lamports'
 
-type LookupEntry = { id: number; name: string }
+type LookupEntry = { id: string; name: string }
 
 export default function Page() {
   const [wallets, setWallets]         = useState<WalletRecord[]>([])
