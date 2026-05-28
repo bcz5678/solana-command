@@ -10,6 +10,7 @@ interface BuildTokenBody {
   tokenName:           string
   tokenSymbol:         string
   description?:        string
+  logoUrl?:            string | null 
   decimals?:           number
   tokenType?:          'fungible' | 'nft' | 'semi_fungible'
   maxSupply?:          number | null
@@ -41,6 +42,7 @@ export async function POST(req: NextRequest) {
     keypairId, devWalletId,
     tokenName, tokenSymbol,
     description        = null,
+    logoUrl            = null,
     decimals           = 9,
     tokenType          = 'fungible',
     maxSupply          = null,
@@ -76,6 +78,7 @@ export async function POST(req: NextRequest) {
       p_token_name:           tokenName,
       p_token_symbol:         tokenSymbol,
       p_description:          description,
+      p_logo_url:             logoUrl,  
       p_decimals:             decimals,
       p_token_type:           tokenType,
       p_max_supply:           maxSupply,

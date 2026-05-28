@@ -119,6 +119,7 @@ export default function Page() {
                 tokenName: data.name,
                 tokenSymbol: data.symbol,
                 description: data.description,
+                logoUrl: imageUrl,
                 metadataUri: tokenMetaUrl,
             }),
         })

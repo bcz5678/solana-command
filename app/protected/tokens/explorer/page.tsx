@@ -25,7 +25,7 @@ export default function Page() {
   const [error, setError]       = useState<string | null>(null)
 
   useEffect(() => {
-    fetch('/api/tokens/explorer')
+    fetch('/api/token/explorer')
       .then((r) => r.json())
       .then(({ tokens, walletMap, error }) => {
         if (error) { setError(error); return }
