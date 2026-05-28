@@ -65,10 +65,13 @@ export default function CreateTokenForm({ onSubmit, isSubmitting = false }: Crea
     useEffect(() => {
         fetch('/api/wallets/explorer')
             .then(r => {
+
+
                 if (!r.ok) {
                     r.json().then(body => console.error('[wallets] API error', r.status, body));
                     return;
                 }
+
                 return r.json();
             })
             .then(data => {

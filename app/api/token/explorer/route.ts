@@ -46,8 +46,7 @@ export async function GET(req: NextRequest) {
   const { data: tokens, error: rpcError } = await supabase
     .rpc('get_token_mints', {
       target_user_id: targetUserId
-    })
-    .returns<TokenMint[]>()
+    }) as { data: TokenMint[] | null; error: { message: string } | null }
 
   if (rpcError) {
     console.error('[tokens/explorer] get_token_mints error:', rpcError.message)

@@ -33,11 +33,11 @@ import { WalletGroupDTO, WalletTypeDTO } from '@/app/db/models/wallet'
 import { generateWallet } from '@/lib/wallet/generate'
 
 type Step = 'form' | 'mnemonic' | 'done'
-type GroupOption = { value: number; label: string };
+type GroupOption = { value: string; label: string };  // ← uuid string not number
 
 interface CreateWalletsFormInput {
     label:      string
-    walletType: number
+    walletType: string   // ← uuid string not number
     password:   string
     confirm:    string
 }
@@ -75,17 +75,17 @@ export default function CreateWalletsForm() {
             return
         }
 
-        let walletGroupId: number | null = null
+        let walletGroupId: string | null = null   // ← uuid string not number
         let walletGroupName: string | null = null
 
-        if (selectedGroup && selectedGroup.value !== 0) {
-            walletGroupId = selectedGroup.value
+        if (selectedGroup && selectedGroup.value !== '0') {
+            walletGroupId = selectedGroup.value    // ← already a uuid string
         } else if (groupInputValue.trim()) {
             const existing = walletGroups.find(
                 g => g.name.toLowerCase() === groupInputValue.trim().toLowerCase()
             )
             if (existing) {
-                walletGroupId = existing.id!
+                walletGroupId = existing.id!       // ← uuid string from DB
             } else {
                 walletGroupName = groupInputValue.trim()
             }
@@ -108,7 +108,7 @@ export default function CreateWalletsForm() {
                     iv:              wallet.iv,
                     salt:            wallet.salt,
                     vaultSecretName: wallet.vaultSecretName,
-                    walletTypeId:    data.walletType,
+                    walletTypeId:    data.walletType || null,   // ← uuid string directly
                     walletGroupId,
                     walletGroupName,
                 }),
@@ -257,7 +257,7 @@ export default function CreateWalletsForm() {
                                     </ComboboxItem>
                                 ))}
                                 {showCreate && (
-                                    <ComboboxItem value={{ value: 0, label: groupInputValue }}>
+                                    <ComboboxItem value={{ value: '', label: groupInputValue }}>
                                         Create &quot;{groupInputValue}&quot;
                                     </ComboboxItem>
                                 )}
@@ -284,8 +284,8 @@ export default function CreateWalletsForm() {
                         rules={{ required: true }}
                         render={({ field }) => (
                             <Select
-                                onValueChange={(value) => field.onChange(Number(value))}
-                                value={field.value ? String(field.value) : undefined}
+                                onValueChange={(value) => field.onChange(value)}  // ← uuid string, no Number()
+                                value={field.value ?? undefined}
                             >
                                 <SelectTrigger id="input-wallet-type">
                                     <SelectValue placeholder="Select wallet type" />
@@ -293,7 +293,7 @@ export default function CreateWalletsForm() {
                                 <SelectContent position="popper">
                                     <SelectGroup>
                                         {walletTypes.map((wt) => (
-                                            <SelectItem key={wt.id} value={String(wt.id)}>
+                                            <SelectItem key={wt.id} value={wt.id!}>
                                                 {wt.name}
                                             </SelectItem>
                                         ))}

@@ -174,9 +174,9 @@ export function AppSidebar() {
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
                 >
-                  <a href="/protected/tokens/vanity-address-creator">
+                  <a href="/protected/tokens/vanity-address-import">
                     <Computer />
-                    <span>Vanity Address Creator</span>
+                    <span>Vanity Address Import</span>
                   </a>
                 </SidebarMenuButton>
               </SidebarMenuItem>
