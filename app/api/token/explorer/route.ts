@@ -48,6 +48,8 @@ export async function GET(req: NextRequest) {
       target_user_id: targetUserId
     }) as { data: TokenMint[] | null; error: { message: string } | null }
 
+    console.log('[explorer] first token:', JSON.stringify(tokens?.[0], null, 2))
+
   if (rpcError) {
     console.error('[tokens/explorer] get_token_mints error:', rpcError.message)
     return NextResponse.json(

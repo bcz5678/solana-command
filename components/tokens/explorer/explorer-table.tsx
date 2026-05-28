@@ -17,25 +17,13 @@ import {
 } from '@/components/ui/tooltip'
 import { Copy } from 'lucide-react'
 
-interface ExplorerTokenRow {
-  id: number
-  created_at: string
-  dev_wallet_id: number
-  name: string
-  symbol: string
-  description: string
-  mint_secret_key: string | null
-  contract_address: string | null
-  logo_url: string | null
-  launched: boolean | null
-  website_url: string | null
-  twitter_url: string | null
-  telegram_handle: string | null
-}
+import { TokenMint } from '@/lib/types/token';
+
+
 
 type Props = {
-  tokens: ExplorerTokenRow[]
-  walletMap: Record<number, string>
+  tokens: TokenMint[]
+  walletMap: Record<string, string>
 }
 
 function maskKey(key: string) {
@@ -44,11 +32,11 @@ function maskKey(key: string) {
 
 export default function TokenTable({ tokens, walletMap }: Props) {
   const [search, setSearch] = useState('')
-  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [openItem, setOpenItem] = useState<string>('')
-  const [copiedId, setCopiedId] = useState<number | null>(null)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
 
-  function copyAddress(e: React.MouseEvent, address: string, id: number) {
+  function copyAddress(e: React.MouseEvent, address: string, id: string) {
     e.stopPropagation()
     navigator.clipboard.writeText(address)
     setCopiedId(id)
@@ -60,27 +48,27 @@ export default function TokenTable({ tokens, walletMap }: Props) {
     if (!q) return tokens
     return tokens.filter(
       (t) =>
-        t.name.toLowerCase().includes(q) ||
-        t.symbol.toLowerCase().includes(q),
+        t.token_name.toLowerCase().includes(q) ||
+        t.token_symbol.toLowerCase().includes(q),
     )
   }, [tokens, search])
 
   const allFilteredSelected =
-    filtered.length > 0 && filtered.every((t) => selected.has(t.id!))
+    filtered.length > 0 && filtered.every((t) => selected.has(t.id))
 
   function toggleAll() {
     setSelected((prev) => {
       const next = new Set(prev)
       if (allFilteredSelected) {
-        filtered.forEach((t) => next.delete(t.id!))
+        filtered.forEach((t) => next.delete(t.id))
       } else {
-        filtered.forEach((t) => next.add(t.id!))
+        filtered.forEach((t) => next.add(t.id))
       }
       return next
     })
   }
 
-  function toggleOne(id: number) {
+  function toggleOne(id: string) {
     setSelected((prev) => {
       const next = new Set(prev)
       next.has(id) ? next.delete(id) : next.add(id)
@@ -160,38 +148,38 @@ export default function TokenTable({ tokens, walletMap }: Props) {
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={token.logo_url}
-                        alt={token.symbol}
+                        alt={token.token_symbol}
                         width={28}
                         height={28}
                         className="rounded-full object-cover size-7 border border-border"
                       />
                     ) : (
                       <span className="size-7 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold text-muted-foreground">
-                        {token.symbol.slice(0, 1)}
+                        {token.token_symbol.slice(0, 1)}
                       </span>
                     )}
                   </span>
                   <span className="w-20 shrink-0">
                     <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs font-medium font-mono">
-                      {token.symbol}
+                      {token.token_symbol}
                     </span>
                   </span>
                   <span className="w-36 text-sm font-normal truncate shrink-0">
-                    {token.name}
+                    {token.token_name}
                   </span>
                   <span className="flex-1 flex items-center gap-1 min-w-0">
                     <span className="font-mono text-xs text-muted-foreground truncate">
-                      {token.contract_address ?? '—'}
+                      {token.mint_public_key ?? '—'}
                     </span>
-                    {token.contract_address && (
+                    {token.mint_public_key && (
                       <TooltipProvider>
                         <Tooltip open={copiedId === token.id ? true : undefined}>
                           <TooltipTrigger asChild>
                             <span
                               role="button"
                               tabIndex={0}
-                              onClick={(e) => copyAddress(e, token.contract_address!, token.id)}
-                              onKeyDown={(e) => e.key === 'Enter' && copyAddress(e as never, token.contract_address!, token.id)}
+                              onClick={(e) => copyAddress(e, token.mint_public_key!, token.id)}
+                              onKeyDown={(e) => e.key === 'Enter' && copyAddress(e as never, token.mint_public_key!, token.id)}
                               className="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer shrink-0"
                               aria-label="Copy contract address"
                             >
@@ -206,9 +194,9 @@ export default function TokenTable({ tokens, walletMap }: Props) {
                     )}
                   </span>
                   <span className="w-24 shrink-0">
-                    {token.launched ? (
+                    {token.launch_status && token.launch_status !== 'false' ? (
                       <span className="inline-flex items-center rounded-md bg-green-500/15 px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-400">
-                        Yes
+                        {token.launch_status}
                       </span>
                     ) : (
                       <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
@@ -226,7 +214,7 @@ export default function TokenTable({ tokens, walletMap }: Props) {
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={token.logo_url}
-                        alt={`${token.symbol} logo`}
+                        alt={`${token.token_symbol} logo`}
                         className="size-20 rounded-lg object-cover border border-border shrink-0"
                       />
                       <div className="flex flex-col gap-1">
@@ -256,11 +244,11 @@ export default function TokenTable({ tokens, walletMap }: Props) {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground mb-0.5">Symbol</p>
-                    <p className="font-mono">{token.symbol}</p>
+                    <p className="font-mono">{token.token_symbol}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground mb-0.5">Name</p>
-                    <p>{token.name}</p>
+                    <p>{token.token_name}</p>
                   </div>
                   <div className="col-span-2 sm:col-span-3">
                     <p className="text-xs text-muted-foreground mb-0.5">Description</p>

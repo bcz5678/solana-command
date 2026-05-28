@@ -131,7 +131,7 @@ export default function CreateTokenForm({ onSubmit, isSubmitting = false }: Crea
                                             <SelectLabel>{typeName}</SelectLabel>
                                             {group.map((w) => (
                                                 <SelectItem key={String(w.id)} value={String(w.id)}>
-                                                    {truncate(w.public_key)}
+                                                    {w.label ? `${w.label} · ${truncate(w.public_key)}` : truncate(w.public_key)}
                                                 </SelectItem>
                                             ))}
                                         </SelectGroup>
