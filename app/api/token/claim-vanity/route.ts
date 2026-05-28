@@ -2,96 +2,69 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient }              from '@/lib/supabase/server'
-import { createAdminClient }         from '@/lib/supabase/admin'
 import { requireSuperAdmin }         from '@/lib/auth/require-super-admin'
 import { ClaimVanityResponse }       from '@/lib/types/api'
 
+type ClaimedKeypair = {
+  keypair_id:        string
+  public_key:        string
+  vault_secret_name: string
+}
 
 export async function POST(req: NextRequest) {
 
-  // ── 1. Auth ────────────────────────────────────────────────
-  let admin, userId
-  try {
-    ({ admin, userId } = await requireSuperAdmin())
-  } catch (res) {
-    return res as Response
-  }
-
-  // ── 1. Log raw auth state ──────────────────────────────────
-  const supabase = await createClient()
-
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-  console.log('[claim-vanity] user.id:',    user?.id)
-  console.log('[claim-vanity] user error:', userError?.message)
-
-  // ── 2. Check JWT claims directly ──────────────────────────
-  const { data: { session } } = await supabase.auth.getSession()
-  const claims = session?.access_token
-    ? JSON.parse(atob(session.access_token.split('.')[1]))
-    : null
-  console.log('[claim-vanity] app_metadata:', claims?.app_metadata)
-  console.log('[claim-vanity] role claim:',   claims?.app_metadata?.role)
-
-
-   // ── 3. Call is_super_admin() directly ─────────────────────
-  const { data: isAdmin, error: adminError } = await supabase
-    .rpc('is_super_admin')
-  console.log('[claim-vanity] is_super_admin():', isAdmin)
-  console.log('[claim-vanity] is_super_admin error:', adminError?.message)
-
-  // ── 4. Check private.super_admins record directly ─────────
-  const { data: adminRecord } = await supabase
-    .rpc('get_super_admin_record')
-  console.log('[claim-vanity] super_admin record:', adminRecord)
-
-  // ── 5. requireSuperAdmin check ────────────────────────────
+  // ── 1. Verify super admin ──────────────────────────────────
+  // requireSuperAdmin() confirms the caller is in private.super_admins
+  // We still use createClient() for the RPC — NOT the admin client.
+  // Reason: claim_vanity_keypair() checks auth.uid() internally.
+  //         createClient() carries the user JWT → auth.uid() resolves.
+  //         createAdminClient() is service_role → auth.uid() = NULL.
   try {
     await requireSuperAdmin()
-    console.log('[claim-vanity] requireSuperAdmin: PASSED')
   } catch (res) {
-    console.log('[claim-vanity] requireSuperAdmin: FAILED')
     return res as Response
   }
 
+  // ── 2. User JWT client ─────────────────────────────────────
+  const supabase = await createClient()
 
-  // ── 2. Parse optional filters ──────────────────────────────
-  let chain: string = 'solana'
+  // ── 3. Parse optional chain filter ────────────────────────
+  let chain = 'solana'
   try {
     const body = await req.json()
     chain      = body.chain ?? 'solana'
   } catch {
-    // body is optional — defaults are fine
+    // body is optional — default to solana
   }
 
-  // ── 3. Claim a vanity keypair atomically ───────────────────
-  // claim_vanity_keypair() uses FOR UPDATE SKIP LOCKED —
-  // concurrent requests cannot claim the same keypair
-  // Status transitions: 'available' → 'reserved'
-  // Reserved keypairs are held until Phase 2 confirms or releases
-  const { data: claimed, error: claimError } = await admin
+  // ── 4. Claim atomically ────────────────────────────────────
+  // Uses FOR UPDATE SKIP LOCKED — concurrent requests safe
+  // Status: 'available' → 'reserved'
+  // public.claim_vanity_keypair() wrapper checks private.super_admins
+  // directly (DB-only check — no JWT app_metadata dependency)
+  const { data: claimed, error: claimError } = await supabase
     .rpc('claim_vanity_keypair', {
       p_chain:         chain,
       p_vanity_prefix: null    // null = any 'pump' suffix keypair
     })
-    .returns<{ keypair_id: string; public_key: string; vault_secret_name: string }[]>()
-    .single()
+    .single() as { data: ClaimedKeypair | null; error: { message: string } | null }
 
   if (claimError || !claimed) {
     console.error('[claim-vanity] error:', claimError?.message)
+
     return NextResponse.json(
       {
-        error: claimError?.message.includes('No available')
+        error: claimError?.message?.includes('No available')
           ? 'No vanity keypairs available in pool — import more'
-          : 'Failed to claim vanity keypair'
+          : claimError?.message ?? 'Failed to claim vanity keypair'
       },
-      { status: claimError?.message.includes('No available') ? 503 : 500 }
+      { status: claimError?.message?.includes('No available') ? 503 : 500 }
     )
   }
 
-  // ── 4. Return public key + keypair ID ─────────────────────
-  // vault_secret_name is intentionally NOT returned —
-  // only the admin Edge Function needs it in Phase 2
-  // publicKey is public data — safe to return for metadata use
+  // ── 5. Return public key + keypair ID only ─────────────────
+  // vault_secret_name intentionally excluded — server use only in Phase 2
+  // publicKey is public data — safe to return for image/metadata naming
   const response: ClaimVanityResponse = {
     keypairId: claimed.keypair_id,
     publicKey: claimed.public_key
