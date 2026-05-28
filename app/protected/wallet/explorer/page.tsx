@@ -2,25 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import { WalletTable } from '@/components/wallet/explorer/explorer-table'
-
-type Token = { symbol: string; name: string }
-
-type Wallet = {
-  id: number
-  created_at: string
-  public_key: string
-  funded: boolean
-  wallet_type_id: number
-  solana_balance_in_lamports: string
-  owner_id: number
-  group_id: number
-  token_holdings: Token[]
-}
+import type { WalletRecord } from '@/lib/types/wallet'
+import { lamportsStringToBN } from '@/lib/lamports'
 
 type LookupEntry = { id: number; name: string }
 
 export default function Page() {
-  const [wallets, setWallets]         = useState<Wallet[]>([])
+  const [wallets, setWallets]         = useState<WalletRecord[]>([])
   const [walletTypes, setWalletTypes] = useState<LookupEntry[]>([])
   const [owners, setOwners]           = useState<LookupEntry[]>([])
   const [groups, setGroups]           = useState<LookupEntry[]>([])
@@ -30,7 +18,13 @@ export default function Page() {
     fetch('/api/wallets/explorer')
       .then((r) => r.json())
       .then(({ wallets, walletTypes, owners, groups }) => {
-        setWallets(wallets ?? [])
+        const parsed: WalletRecord[] = (wallets ?? []).map((w: any) => ({
+          ...w,
+          solana_balance_in_lamports: w.solana_balance_in_lamports != null
+            ? lamportsStringToBN(String(w.solana_balance_in_lamports))
+            : null,
+        }))
+        setWallets(parsed)
         setWalletTypes(walletTypes ?? [])
         setOwners(owners ?? [])
         setGroups(groups ?? [])

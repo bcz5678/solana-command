@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { lamportsStringToBN, lamportsBNToSolDisplay } from '@/lib/lamports';
+import { lamportsBNToSolDisplay } from '@/lib/lamports';
 
 import {
   Accordion,
@@ -24,29 +24,14 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { Copy } from 'lucide-react'
-
+import { WalletRecord } from '@/lib/types/wallet';
 
 type Token = { symbol: string; name: string }
-
-type Wallet = {
-  id: number
-  created_at: string
-  public_key: string
-  is_active: boolean
-  wallet_type_id: string | null
-  wallet_type: string | null
-  wallet_group_id: string | null
-  group_name: string | null
-  group_color: string | null
-  owner_record_id: string | null
-  solana_balance_in_lamports: string
-  token_holdings: Token[]
-}
 
 type LookupEntry = { id: number; name: string }
 
 type Props = {
-  wallets: Wallet[]
+  wallets: WalletRecord[]
   walletTypes: LookupEntry[]
   owners: LookupEntry[]
   groups: LookupEntry[]
@@ -224,7 +209,7 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
                   {wallet.group_name ?? wallet.wallet_group_id ?? '—'}
                 </span>
                 <span className="w-28 text-sm font-normal shrink-0">
-                  {lamportsBNToSolDisplay(lamportsStringToBN(wallet.solana_balance_in_lamports))}
+                  {wallet.solana_balance_in_lamports ? lamportsBNToSolDisplay(wallet.solana_balance_in_lamports) : '—'}
                 </span>
               </AccordionTrigger>
 
@@ -248,7 +233,7 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground mb-0.5">SOL Balance</p>
-                    <p>{lamportsBNToSolDisplay(lamportsStringToBN(wallet.solana_balance_in_lamports))}</p>
+                    <p>{wallet.solana_balance_in_lamports ? lamportsBNToSolDisplay(wallet.solana_balance_in_lamports) : '—'}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground mb-0.5">Owner</p>

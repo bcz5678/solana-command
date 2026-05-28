@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import TokenTable from '@/components/tokens/explorer/explorer-table'
+import { TokenMint } from '@/lib/types/token'
 
 interface ExplorerTokenRow {
   id: number
@@ -20,7 +21,7 @@ interface ExplorerTokenRow {
 }
 
 export default function Page() {
-  const [tokens, setTokens]     = useState<ExplorerTokenRow[]>([])
+  const [tokens, setTokens]     = useState<TokenMint[]>([])
   const [walletMap, setWalletMap] = useState<Record<number, string>>({})
   const [error, setError]       = useState<string | null>(null)
 

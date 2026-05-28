@@ -9,7 +9,7 @@ import CreateTokenProgressDialog, {
     StepStatus,
 } from '@/components/tokens/create/create-token-progress-dialog'
 
-import { ClaimVanityResponse } from '@/lib/types/api'
+import { ClaimVanityResponse } from '@/lib/types/responses'
 
 const supabase = createClient()
 

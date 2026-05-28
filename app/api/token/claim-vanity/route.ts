@@ -3,7 +3,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient }              from '@/lib/supabase/server'
 import { requireSuperAdmin }         from '@/lib/auth/require-super-admin'
-import { ClaimVanityResponse }       from '@/lib/types/api'
+import { ClaimVanityResponse }       from '@/lib/types/responses'
 
 type ClaimedKeypair = {
   keypair_id:        string
