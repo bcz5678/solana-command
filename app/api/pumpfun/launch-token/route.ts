@@ -91,12 +91,12 @@ export async function POST(request: Request) {
 }
 
 
-async function processLaunchBlock0(admin: SupabaseClient, launchConfig: LaunchConfig) : Promise<Response>{
+async function processLaunchBlock0(supabase: SupabaseClient, launchConfig: LaunchConfig) : Promise<Response>{
     console.log('Block0 launchType');
 
     console.log(`launchConfig: ${launchConfig.token?.dev_wallet_id}`);
 
-    const { data: devWallet, error } = await admin
+    const { data: devWallet, error } = await supabase
         .from('wallets')
         .select('*')
         .eq('id', launchConfig.token?.dev_wallet_id)
@@ -105,6 +105,8 @@ async function processLaunchBlock0(admin: SupabaseClient, launchConfig: LaunchCo
         console.log(`DevWallet:${devWallet?.public_key}`);
 
     if (devWallet != null && launchConfig.token != null) {
+
+
 
         const creator = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(devWallet.secret_key)));
         const mint = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(launchConfig.token.mint_secret_key!)));

@@ -1,3 +1,5 @@
+'use client'
+
 import { useState, useEffect } from 'react';
 import {
     Token,
@@ -14,7 +16,7 @@ export default function TokenData({walletAddress}: TokenProps) {
     const [tokens, setTokens] = useState<Token[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-
+ 
     useEffect(() => {
         const fetchTokens = async () => {
             setLoading(true);
