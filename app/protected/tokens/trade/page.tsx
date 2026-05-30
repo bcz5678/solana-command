@@ -1,27 +1,26 @@
 'use client'
 
-import { useState, useEffect } from 'react'; 
-import TokenSearch from '@/components/tokens/trade/search/token-search'
+// app/trade/page.tsx
+// Token buy/sell trading interface
 
-export default function Page() {
-  const [ tokenPair, setTokenPair ] = useState<string | null>(null);
-    
-  const updateFromSearch = (data: string) => {
-    setTokenPair(data);
-  }
+import { Suspense } from 'react'
+import { TokenTradePanel } from '@/components/tokens/trade/TokenTradePanel'
 
+export default function TradePage() {
   return (
-    <div className="flex-1 w-full flex flex-col gap-6 p-4">
-      <h1 className="text-2xl font-bold text-black">Buy/Sell Tokens</h1>
-      <TokenSearch onSearchSubmit={updateFromSearch}/>
-      { tokenPair != null ? 
-        (`${tokenPair}`) :  ''
-
-      }
-
+    <div className="trade-page">
+      <Suspense fallback={<TradeSkeleton />}>
+        <TokenTradePanel />
+      </Suspense>
     </div>
   )
+}
 
-
-
+function TradeSkeleton() {
+  return (
+    <div className="skeleton-wrap">
+      <div className="skeleton-header" />
+      <div className="skeleton-body" />
+    </div>
+  )
 }

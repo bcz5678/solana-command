@@ -6,15 +6,13 @@ import BN from 'bn.js';
 
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { getWalletKeypairById } from "@/lib/vault/get-wallet-by-id"; 
-import { Executor } from "@/lib/pumpfun/executor";
+import { ExecuteResult, Executor } from "@/lib/pumpfun/executor";
 
 
-interface BuyTokenBody {
+interface SellAllTokenBody {
     walletId: string
     mintAddress: string
-    amountInSol: BN,
     slippage: number,
-
 }
 
 // initialize connection
@@ -30,7 +28,7 @@ export async function POST(request: NextRequest) {
         }
 
 
-    let body: BuyTokenBody
+    let body: SellAllTokenBody
 
     try{
         body = await request.json();
@@ -38,23 +36,16 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
     }
 
-    const { walletId, mintAddress, amountInSol, slippage } = body
+    const { walletId, mintAddress, slippage } = body
 
     const mintAddressPublicKey = new PublicKey(mintAddress);
 
-    const missing = ['walletId', 'mintAddress', 'amountInSol', 'slippage']
-        .filter(k => body[k as keyof BuyTokenBody] == null)
+    const missing = ['walletId', 'mintAddress', 'slippage']
+        .filter(k => body[k as keyof SellAllTokenBody] == null)
 
     if (missing.length > 0) {
         return NextResponse.json(
         { error: `Missing fields: ${missing.join(', ')}` },
-        { status: 400 }
-        )
-    }
-
-    if (amountInSol.lte(new BN(0))) {
-        return NextResponse.json(
-        { error: 'amountInSol must be greater than 0' },
         { status: 400 }
         )
     }
@@ -89,9 +80,8 @@ export async function POST(request: NextRequest) {
     });
 
     try {
-        const buySignature = await executor.buy(
+        const buySignature = await executor.sellAll(
             mintAddressPublicKey,
-            amountInSol,
             slippage,
         );
     } catch (err) {
@@ -104,8 +94,6 @@ export async function POST(request: NextRequest) {
         // Zero out the secretKey memory
         buyer.secretKey.fill(0);
     }
-
-
 }
 
 

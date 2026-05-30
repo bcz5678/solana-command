@@ -6,13 +6,13 @@ import BN from 'bn.js';
 
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { getWalletKeypairById } from "@/lib/vault/get-wallet-by-id"; 
-import { Executor } from "@/lib/pumpfun/executor";
+import { ExecuteResult, Executor } from "@/lib/pumpfun/executor";
 
 
-interface BuyTokenBody {
+interface SellTokenBody {
     walletId: string
     mintAddress: string
-    amountInSol: BN,
+    tokenAmount: BN,
     slippage: number,
 
 }
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
         }
 
 
-    let body: BuyTokenBody
+    let body: SellTokenBody
 
     try{
         body = await request.json();
@@ -38,12 +38,12 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
     }
 
-    const { walletId, mintAddress, amountInSol, slippage } = body
+    const { walletId, mintAddress, tokenAmount, slippage } = body
 
     const mintAddressPublicKey = new PublicKey(mintAddress);
 
-    const missing = ['walletId', 'mintAddress', 'amountInSol', 'slippage']
-        .filter(k => body[k as keyof BuyTokenBody] == null)
+    const missing = ['walletId', 'mintAddress', 'tokenAmount', 'slippage']
+        .filter(k => body[k as keyof SellTokenBody] == null)
 
     if (missing.length > 0) {
         return NextResponse.json(
@@ -52,9 +52,9 @@ export async function POST(request: NextRequest) {
         )
     }
 
-    if (amountInSol.lte(new BN(0))) {
+    if (tokenAmount.lte(new BN(0))) {
         return NextResponse.json(
-        { error: 'amountInSol must be greater than 0' },
+        { error: 'tokenAmount must be greater than 0' },
         { status: 400 }
         )
     }
@@ -89,9 +89,9 @@ export async function POST(request: NextRequest) {
     });
 
     try {
-        const buySignature = await executor.buy(
+        const buySignature = await executor.sell(
             mintAddressPublicKey,
-            amountInSol,
+            tokenAmount,
             slippage,
         );
     } catch (err) {
