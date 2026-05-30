@@ -4,7 +4,6 @@ import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 
 interface SlippageControlProps {
   value:    number
@@ -39,20 +38,20 @@ export function SlippageControl({ value, onChange }: SlippageControlProps) {
 
       {/* Header: label + current value */}
       <div className="flex items-center justify-between">
-        <Label className="font-mono text-[0.6rem] font-bold tracking-[0.18em] text-[#3a5060] uppercase">
-          SLIPPAGE TOLERANCE
-        </Label>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Slippage Tolerance
+        </p>
         <span
           className={cn(
-            'font-mono text-[0.68rem] font-bold tracking-wider transition-colors duration-200',
-            warningLevel === 'high'   ? 'text-[#ff5566]' :
-            warningLevel === 'medium' ? 'text-[#ffc800]' :
-                                        'text-[#00cc70]'
+            'font-mono text-xs font-semibold transition-colors duration-200',
+            warningLevel === 'high'   ? 'text-destructive' :
+            warningLevel === 'medium' ? 'text-amber-600'   :
+                                        'text-primary'
           )}
         >
           {displayPct}%
-          {warningLevel === 'high'   && ' ⚠ HIGH'}
-          {warningLevel === 'medium' && ' ⚠ ELEVATED'}
+          {warningLevel === 'high'   && ' ⚠ High'}
+          {warningLevel === 'medium' && ' ⚠ Elevated'}
         </span>
       </div>
 
@@ -65,11 +64,9 @@ export function SlippageControl({ value, onChange }: SlippageControlProps) {
             size="xs"
             onClick={() => handlePreset(p)}
             className={cn(
-              'flex-1 font-mono text-[0.62rem] font-bold tracking-[0.06em]',
-              'border-white/[0.07] bg-white/3 text-[#4a6070]',
-              'hover:bg-[#00ff88]/6 hover:border-[#00ff88]/15 hover:text-[#00cc70]',
+              'flex-1',
               !showInput && value === p &&
-                'bg-[#00ff88]/10 border-[#00ff88]/25 text-[#00ff88]'
+                'border-primary/50 bg-primary/5 text-primary'
             )}
           >
             {(p * 100).toFixed(1)}%
@@ -81,13 +78,11 @@ export function SlippageControl({ value, onChange }: SlippageControlProps) {
           size="xs"
           onClick={() => setShowInput(s => !s)}
           className={cn(
-            'flex-1 font-mono text-[0.62rem] font-bold tracking-[0.06em]',
-            'border-white/[0.07] bg-white/3 text-[#3a5060]',
-            'hover:bg-white/6 hover:border-white/15 hover:text-[#c8d4e0]',
-            showInput && 'bg-white/6 border-white/15 text-[#c8d4e0]'
+            'flex-1',
+            showInput && 'border-border bg-muted text-foreground'
           )}
         >
-          {showInput ? 'DONE' : 'CUSTOM'}
+          {showInput ? 'Done' : 'Custom'}
         </Button>
       </div>
 
@@ -104,17 +99,13 @@ export function SlippageControl({ value, onChange }: SlippageControlProps) {
             step="0.1"
             autoFocus
             className={cn(
-              'h-9 pr-10 rounded-lg',
-              'font-mono text-sm font-bold text-[#e8f0f8]',
-              'bg-white/4 border-[#00ff88]/20',
-              'placeholder:text-[#3a5060] placeholder:font-normal',
-              'focus-visible:border-[#00ff88]/30 focus-visible:ring-[#00ff88]/10',
+              'pr-8 font-mono',
               '[appearance:textfield]',
               '[&::-webkit-outer-spin-button]:appearance-none',
               '[&::-webkit-inner-spin-button]:appearance-none'
             )}
           />
-          <span className="absolute right-3.5 font-mono text-[0.75rem] text-[#3a5060] pointer-events-none">
+          <span className="absolute right-3 text-xs text-muted-foreground pointer-events-none">
             %
           </span>
         </div>
@@ -122,13 +113,13 @@ export function SlippageControl({ value, onChange }: SlippageControlProps) {
 
       {/* Slippage warnings */}
       {warningLevel === 'medium' && (
-        <div className="rounded-[7px] bg-[#ffc800]/6 border border-[#ffc800]/15 px-3 py-2 font-mono text-[0.6rem] tracking-[0.04em] leading-relaxed text-[#cc9900] animate-in fade-in duration-200">
+        <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700 leading-relaxed animate-in fade-in duration-200">
           Elevated slippage tolerance — only use on low-liquidity tokens.
         </div>
       )}
 
       {warningLevel === 'high' && (
-        <div className="rounded-[7px] bg-[#ff5566]/7 border border-[#ff5566]/20 px-3 py-2 font-mono text-[0.6rem] tracking-[0.04em] leading-relaxed text-[#ff8090] animate-in fade-in duration-200">
+        <div className="rounded-lg bg-destructive/5 border border-destructive/20 px-3 py-2 text-xs text-destructive leading-relaxed animate-in fade-in duration-200">
           ⚠ High slippage may result in significant loss. Front-running risk elevated.
         </div>
       )}
