@@ -1,12 +1,12 @@
 import { LaunchType } from '@/components/tokens/launch/types';
-import { CreatedTokenDTO } from '@/app/db/models/token';
-import { WalletTradeDTO } from '@/app/db/models/wallet';
+import { TokenMint } from '@/lib/types/token';
+import { WalletTradeDTO } from '@/lib/types/wallet';
 import BN from 'bn.js';
 
 
 export class LaunchConfig {
     launchType: LaunchType;
-    token: CreatedTokenDTO | null;
+    token: TokenMint | null;
     totalSOLInLamports: BN;
     tokensTotal: BN;
     percentOfSupply: BN;
@@ -15,7 +15,7 @@ export class LaunchConfig {
 
     constructor(
         launchType: LaunchType,
-        token: CreatedTokenDTO | null,
+        token: TokenMint | null,
         totalSOLInLamports: BN,
         tokensTotal: BN,
         percentOfSupply: BN,
@@ -33,13 +33,13 @@ export class LaunchConfig {
 
     toJSON(): {
         launchType: LaunchType;
-        token: CreatedTokenDTO | null;
+        token: TokenMint | null;
         totalSOLInLamports: string;
         tokensTotal: string;
         percentOfSupply: string;
         marketCap: string;
         walletTrades: {
-            walletId: number;
+            walletId: string;
             tradeType: string;
             buyAmountInSOL: string;
             tokensAmountHeld: string | null;
@@ -67,13 +67,13 @@ export class LaunchConfig {
 
     static fromJSON(json: {
         launchType: LaunchType;
-        token: CreatedTokenDTO,
+        token: TokenMint,
         totalSOLInLamports: string;
         tokensTotal: string;
         percentOfSupply: string;
         marketCap: string;
         walletTrades: {
-            walletId: number;
+            walletId: string;
             tradeType: string;
             buyAmountInSOL: string;
             tokensAmountHeld: string | null;
@@ -120,7 +120,7 @@ export class LaunchConfig {
         this.walletTrades.length = 0;
     }
 
-    updateWalletList(walletID: number, newAmount: BN, tradeType: string): void {
+    updateWalletList(walletID: string, newAmount: BN, tradeType: string): void {
         const walletListIndex: number = this.getWalletListIndex(walletID);
         
         if(walletListIndex != -1) {
@@ -162,7 +162,7 @@ export class LaunchConfig {
     }
 
 
-    getWalletListIndex(walletId: number): number {
+    getWalletListIndex(walletId: string): number {
         let isInList: number = -1;
         
         for(const [index, element] of this.walletTrades.entries()) {

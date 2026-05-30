@@ -1,7 +1,6 @@
 // lib/types/token.ts
 import BN from 'bn.js';
 
-
 export interface TokenMint {
   id:                string
   user_id:           string
@@ -28,10 +27,13 @@ export interface TokenMint {
 
 
 export interface TokenMetaDTO {
-    name: string,
-    symbol: string,
-    description?: string,
-    logo_url?: string,
+    name: string
+    symbol: string
+    description?: string
+    logo_url?: string
+    website_url?: string
+    twitter_url?: string
+    telegram_handle?: string
 }
 
 

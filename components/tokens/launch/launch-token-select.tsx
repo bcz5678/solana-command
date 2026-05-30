@@ -14,32 +14,36 @@ import {
     TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { Copy } from 'lucide-react'
-import { CreatedTokenDTO } from '@/app/db/models/token'
-
-// mint_secret_key is stripped server-side and never sent to the client
-type PublicTokenDTO = Omit<CreatedTokenDTO, 'mint_secret_key'>
+import { TokenMint } from '@/lib/types/token'
 
 type Props = {
-    selectedId: number | null
-    onSelect: (token: PublicTokenDTO) => void
+    selectedId: string | null
+    onSelect: (token: TokenMint) => void
 }
 
-export default function TokenSelect({ selectedId, onSelect }: Props) {
-    const [tokens, setTokens] = useState<PublicTokenDTO[]>([])
+export default function LaunchTokenSelect({ selectedId, onSelect }: Props) {
+    const [tokens, setTokens] = useState<TokenMint[]>([])
     const [loading, setLoading] = useState(true)
     const [openItem, setOpenItem] = useState<string>('')
-    const [copiedId, setCopiedId] = useState<number | null>(null)
+    const [copiedId, setCopiedId] = useState<string | null>(null)
     const [search, setSearch] = useState('')
 
     useEffect(() => {
-        fetch('/api/tokens')
-            .then((r) => r.json())
-            .then(({ tokens }) => {
-                setTokens(tokens ?? [])
+        fetch('/api/token/explorer?status=all')
+            .then((r) => {
+                if (!r.ok) {
+                    r.json().then(body => console.error('[tokens] API error', r.status, body))
+                    return
+                }
+                return r.json()
+            })
+            .then((data) => {
+                if (!data) return
+                setTokens(data.tokens ?? [])
                 setLoading(false)
             })
             .catch((err) => {
-                console.error('TokenSelect fetch error:', err)
+                console.error('LaunchTokenSelect fetch error:', err)
                 setLoading(false)
             })
     }, [])
@@ -49,12 +53,12 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
         if (!q) return tokens
         return tokens.filter(
             (t) =>
-                t.name.toLowerCase().includes(q) ||
-                t.symbol.toLowerCase().includes(q),
+                t.token_name.toLowerCase().includes(q) ||
+                t.token_symbol.toLowerCase().includes(q),
         )
     }, [tokens, search])
 
-    function copyAddress(e: React.MouseEvent, address: string, id: number) {
+    function copyAddress(e: React.MouseEvent, address: string, id: string) {
         e.stopPropagation()
         navigator.clipboard.writeText(address)
         setCopiedId(id)
@@ -85,8 +89,8 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
                 <span className="w-7 shrink-0" />
                 <span className="w-20 shrink-0">Symbol</span>
                 <span className="w-36 shrink-0">Name</span>
-                <span className="flex-1">Contract Address</span>
-                <span className="w-24 shrink-0">Launched</span>
+                <span className="flex-1">Mint Address</span>
+                <span className="w-24 shrink-0">Status</span>
                 <span className="w-4 shrink-0" />
             </div>
 
@@ -101,13 +105,13 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
                         onValueChange={setOpenItem}
                     >
                         {filtered.map((token) => {
-                            const isLaunched = token.launched === true
+                            const isLaunched = token.launch_status === 'launched'
                             const isSelected = selectedId === token.id
 
                             return (
                                 <AccordionItem
                                     key={token.id}
-                                    value={String(token.id)}
+                                    value={token.id}
                                     className={[
                                         'transition-colors',
                                         isSelected ? 'bg-blue-500/5 border-l-2 border-l-blue-500' : '',
@@ -155,42 +159,42 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
                                                 // eslint-disable-next-line @next/next/no-img-element
                                                 <img
                                                     src={token.logo_url}
-                                                    alt={token.symbol}
+                                                    alt={token.token_symbol}
                                                     width={28}
                                                     height={28}
                                                     className="rounded-full object-cover size-7 border border-border"
                                                 />
                                             ) : (
                                                 <span className="size-7 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold text-muted-foreground">
-                                                    {token.symbol.slice(0, 1)}
+                                                    {token.token_symbol.slice(0, 1)}
                                                 </span>
                                             )}
                                         </span>
 
                                         <span className="w-20 shrink-0">
                                             <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs font-medium font-mono">
-                                                {token.symbol}
+                                                {token.token_symbol}
                                             </span>
                                         </span>
 
                                         <span className="w-36 text-sm font-normal truncate shrink-0">
-                                            {token.name}
+                                            {token.token_name}
                                         </span>
 
                                         <span className="flex-1 flex items-center gap-1 min-w-0">
                                             <span className="font-mono text-xs text-muted-foreground truncate">
-                                                {token.contract_address ?? '—'}
+                                                {token.mint_public_key ?? '—'}
                                             </span>
-                                            {token.contract_address && (
+                                            {token.mint_public_key && (
                                                 <Tooltip open={copiedId === token.id ? true : undefined}>
                                                     <TooltipTrigger asChild>
                                                         <span
                                                             role="button"
                                                             tabIndex={0}
-                                                            onClick={(e) => copyAddress(e, token.contract_address!, token.id!)}
-                                                            onKeyDown={(e) => e.key === 'Enter' && copyAddress(e as never, token.contract_address!, token.id!)}
+                                                            onClick={(e) => copyAddress(e, token.mint_public_key!, token.id)}
+                                                            onKeyDown={(e) => e.key === 'Enter' && copyAddress(e as never, token.mint_public_key!, token.id)}
                                                             className="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer shrink-0"
-                                                            aria-label="Copy contract address"
+                                                            aria-label="Copy mint address"
                                                         >
                                                             <Copy className="size-3" />
                                                         </span>
@@ -208,8 +212,8 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
                                                     Launched
                                                 </span>
                                             ) : (
-                                                <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                                                    No
+                                                <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground capitalize">
+                                                    {token.launch_status}
                                                 </span>
                                             )}
                                         </span>
@@ -222,7 +226,7 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
                                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                                     <img
                                                         src={token.logo_url}
-                                                        alt={`${token.symbol} logo`}
+                                                        alt={`${token.token_symbol} logo`}
                                                         className="size-20 rounded-lg object-cover border border-border shrink-0"
                                                     />
                                                     <div className="flex flex-col gap-1">
@@ -235,19 +239,19 @@ export default function TokenSelect({ selectedId, onSelect }: Props) {
                                             )}
                                             <div>
                                                 <p className="text-xs text-muted-foreground mb-0.5">Created</p>
-                                                <p>{token.created_at?.slice(0, 19).replace('T', ' ')}</p>
+                                                <p>{token.created_at.slice(0, 19).replace('T', ' ')}</p>
                                             </div>
                                             <div>
                                                 <p className="text-xs text-muted-foreground mb-0.5">Symbol</p>
-                                                <p className="font-mono">{token.symbol}</p>
+                                                <p className="font-mono">{token.token_symbol}</p>
                                             </div>
                                             <div>
                                                 <p className="text-xs text-muted-foreground mb-0.5">Name</p>
-                                                <p>{token.name}</p>
+                                                <p>{token.token_name}</p>
                                             </div>
                                             <div className="col-span-2 sm:col-span-3">
                                                 <p className="text-xs text-muted-foreground mb-0.5">Description</p>
-                                                <p>{token.description}</p>
+                                                <p>{token.description ?? '—'}</p>
                                             </div>
                                             {token.website_url && (
                                                 <div>

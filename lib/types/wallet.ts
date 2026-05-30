@@ -3,10 +3,10 @@
 import BN from 'bn.js';
 
 export interface WalletModelDTO {
-    id?: number;
-    created_at?: string; 
-    public_key: string;
-    secret_key: string;
+    id?: number
+    created_at?: string
+    public_key: string
+    secret_key: string
 
     wallet_label:     string | null
     chain:            string
@@ -53,7 +53,7 @@ export interface OwnerDTO {
 }
 
 export interface WalletTradeDTO  {
-    walletId: number
+    walletId: string
     tradeType: string
     buyAmountInSOL: BN
     tokensAmountHeld: BN | null

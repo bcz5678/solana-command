@@ -8,12 +8,12 @@ import {
     TransactionSignature,
     VersionedTransaction
 } from "@solana/web3.js";
-import { PUMP_SDK, OnlinePumpSdk } from '@pump-fun/pump-sdk';
+import { PUMP_SDK, OnlinePumpSdk } from '@nirholas/pump-sdk';
 import { createClient } from '@/lib/supabase/client';
 
 import { LaunchConfig } from '@/components/tokens/launch/launch-config-class';
 import { LaunchType } from '@/components/tokens/launch/types';
-import { WalletModelDTO } from '@/app/db/models/wallet';
+import { WalletModelDTO } from '@/lib/types/wallet';
 import { TokenDTO } from '@/components/tokens/launch/types';
 
 import { requireSuperAdmin } from '@/lib/auth/require-super-admin';
@@ -114,9 +114,9 @@ async function processLaunchBlock0(admin: SupabaseClient, launchConfig: LaunchCo
         if (launchConfig.walletTrades.length == 0) {
             const createIx = await PUMP_SDK.createV2Instruction({
                 mint: mint.publicKey,
-                name: launchConfig.token?.name!,
-                symbol: launchConfig.token?.symbol!,
-                uri: launchConfig.token?.token_meta_url!, // Your token metadata URI
+                name: launchConfig.token?.token_name!,
+                symbol: launchConfig.token?.token_symbol!,
+                uri: launchConfig.token?.metadata_uri!, // Your token metadata URI
                 creator: creator.publicKey,
                 user: creator.publicKey,
                 mayhemMode: false,

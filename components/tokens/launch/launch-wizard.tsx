@@ -1,11 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import TokenSelect from '@/components/tokens/launch/token-select'
+import LaunchTokenSelect from '@/components/tokens/launch/launch-token-select'
 import LaunchTypeSelect from '@/components/tokens/launch/launch-type-select';
 import LaunchCurrentConfiguration from '@/components/tokens/launch/launch-current-configuration'
 import { LaunchType } from './types'
-import { CreatedTokenDTO } from '@/app/db/models/token';
+import { TokenMint } from '@/lib/types/token';
 import LaunchBuyerConfig from './launch-buyer-config';
 import { LaunchConfig } from './launch-config-class';
 
@@ -67,7 +67,7 @@ const steps = [
 
 export default function LaunchWizard() {
     const [currentStep, setCurrentStep] = useState(0)
-    const [selectedTokenId, setSelectedTokenId] = useState<number | null>(null)
+    const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null)
     const [launchConfig, setLaunchConfig] = useState<LaunchConfig>(
         new LaunchConfig(
             LaunchType.unselected,
@@ -80,7 +80,7 @@ export default function LaunchWizard() {
         )
     );
 
-    function onTokenSelect(token: CreatedTokenDTO) {
+    function onTokenSelect(token: TokenMint) {
         setSelectedTokenId(token.id ?? null)
         setLaunchConfig((prev) => prev.copyWith({ token }))
     }
@@ -89,7 +89,7 @@ export default function LaunchWizard() {
         setLaunchConfig((prev) => prev.copyWith({ launchType: selectedLaunchType }))
     }
 
-    function onBuyInputChange(walletId: number, newAmount: string) {
+    function onBuyInputChange(walletId: string, newAmount: string) {
         const newAmountInLamports = (newAmount === '' || newAmount === '.')
             ? new BN(0)
             : solStringToLamports(newAmount);
@@ -178,7 +178,7 @@ export default function LaunchWizard() {
             {/* Step content */}
             <div className="w-full">
                 {currentStep === 0 && (
-                    <TokenSelect selectedId={selectedTokenId} onSelect={onTokenSelect} />
+                    <LaunchTokenSelect selectedId={selectedTokenId} onSelect={onTokenSelect} />
                 )}
                 {currentStep === 1 && (
                     <LaunchTypeSelect selectedType={launchConfig.launchType} onSelect={onLaunchTypeSelect} />

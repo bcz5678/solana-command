@@ -3,67 +3,76 @@
 import { useState, useEffect, useMemo, Fragment } from 'react'
 import { LaunchType } from '@/components/tokens/launch/types'
 import { LaunchConfig } from '@/components/tokens/launch/launch-config-class';
-import { lamportsBNToSolDisplay, LAMPORTS_PER_SOL } from '@/lib/lamports';
-import { WalletModelDTO, WalletTypeDTO } from '@/app/db/models/wallet';
+import { lamportsBNToSolDisplay, lamportsStringToBN } from '@/lib/lamports';
+import { WalletRecord } from '@/lib/types/wallet';
 import BN from 'bn.js';
 
-// Subset of WalletModelDTO for the fields fetched in this view
-type WalletRow = Pick<WalletModelDTO, 'public_key' | 'wallet_type_id'> & {
-    id: number
-    solana_balance_in_lamports: BN
-}
-
-
+type WalletTypeRow = { id: string; name: string }
 
 type Props = {
     launchConfig: LaunchConfig
-    onBuyInputChange: (walletId: number, newAmount: string) => void
+    onBuyInputChange: (walletId: string, newAmount: string) => void
     onBuyInputReset: () => void
 }
-
 
 function maskPubKey(key: string) {
     return `${key.slice(0, 7)}....${key.slice(-7)}`
 }
 
 export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBuyInputReset }: Props) {
-    const [wallets, setWallets] = useState<WalletRow[]>([])
-    const [walletTypes, setWalletTypes] = useState<WalletTypeDTO[]>([])
-    const [loading, setLoading] = useState(true)
-    const [activeFilters, setActiveFilters] = useState<number[]>([])
-    const [buyAmounts, setBuyAmounts] = useState<Record<number, string>>({})
+    const [wallets, setWallets]         = useState<WalletRecord[]>([])
+    const [walletTypes, setWalletTypes] = useState<WalletTypeRow[]>([])
+    const [loading, setLoading]         = useState(true)
+    const [activeFilters, setActiveFilters] = useState<string[]>([])
+    const [buyAmounts, setBuyAmounts]   = useState<Record<string, string>>({})
 
     useEffect(() => {
-        fetch('/api/wallets')
-            .then((r) => r.json())
-            .then(({ wallets, walletTypes }) => {
-                setWallets((wallets ?? []).map((w: WalletRow & { solana_balance_in_lamports: string }) => ({
+        fetch('/api/wallets/explorer')
+            .then((r) => {
+                if (!r.ok) {
+                    r.json().then(body => console.error('[wallets] API error', r.status, body))
+                    return
+                }
+                return r.json()
+            })
+            .then((data) => {
+                if (!data) return
+                const parsed: WalletRecord[] = (data.wallets ?? []).map((w: any) => ({
                     ...w,
-                    solana_balance_in_lamports: new BN(String(w.solana_balance_in_lamports ?? 0)),
-                })))
-                setWalletTypes(walletTypes ?? [])
+                    solana_balance_in_lamports: w.solana_balance_in_lamports != null
+                        ? lamportsStringToBN(String(w.solana_balance_in_lamports))
+                        : null,
+                }))
+                setWallets(parsed)
+                setWalletTypes(data.walletTypes ?? [])
+                setLoading(false)
+            })
+            .catch(err => {
+                console.error('[wallets] fetch failed', err)
                 setLoading(false)
             })
     }, [])
 
+    const devWalletId = launchConfig.token?.dev_wallet_id != null
+        ? String(launchConfig.token.dev_wallet_id)
+        : null
 
     const devWallet = useMemo(
-        () => wallets.find((w) => w.id === launchConfig.token?.dev_wallet_id) ?? null,
-        [wallets, launchConfig.token?.dev_wallet_id],
+        () => (devWalletId ? wallets.find((w) => w.id === devWalletId) : null) ?? null,
+        [wallets, devWalletId],
     )
-
 
     const otherWallets = useMemo(
-        () => wallets.filter((w) => w.id !== launchConfig.token?.dev_wallet_id),
-        [wallets, launchConfig.token?.dev_wallet_id],
+        () => wallets.filter((w) => w.id !== devWalletId),
+        [wallets, devWalletId],
     )
-
 
     const groups = useMemo(() => {
         const filtered =
             activeFilters.length > 0
-                ? otherWallets.filter((w) => activeFilters.includes(w.wallet_type_id))
+                ? otherWallets.filter((w) => w.wallet_type_id != null && activeFilters.includes(w.wallet_type_id))
                 : otherWallets
+
         return walletTypes
             .map((type) => ({
                 type,
@@ -72,61 +81,21 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
             .filter((g) => g.wallets.length > 0)
     }, [otherWallets, walletTypes, activeFilters])
 
-
-    function toggleFilter(typeId: number) {
+    function toggleFilter(typeId: string) {
         setActiveFilters((prev) =>
             prev.includes(typeId) ? prev.filter((id) => id !== typeId) : [...prev, typeId],
         )
     }
 
-
-    function setBuyAmount(walletId: number, newAmount: string) {
-        onBuyInputChange(walletId, newAmount);
+    function setBuyAmount(walletId: string, newAmount: string) {
+        onBuyInputChange(walletId, newAmount)
         setBuyAmounts((prev) => ({ ...prev, [walletId]: newAmount }))
     }
 
-
     function clearAll() {
-        setBuyAmounts({});
+        setBuyAmounts({})
         onBuyInputReset()
     }
-
-
-    function getNewBondingCurve() {  
-        useEffect(() => {
-            const fetchInitialBondingCurve = async () => {
-
-            let bodyRequest: {} = {
-                type: ["getMarketCapFromSOL"],
-                solAmount:  "1.0",
-                tokenAmount: 10000000,
-            }
-
-
-            try {
-                const response = await fetch('/api/pumpfun/bonding-curve', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(bodyRequest),
-                });
-
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-                const data = await response.json();
-                console.log(data);
-            
-            } catch (error) {
-                console.error("Error fetching balance:", error);
-            } finally {
-                setLoading(false);
-            }
-            };
-
-            fetchInitialBondingCurve();
-        }, []); 
-    }
-
 
     if (loading) return <p className="text-sm text-muted-foreground py-4">Loading wallets…</p>
 
@@ -149,11 +118,11 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
                 </button>
                 {walletTypes.map((type) => (
                     <button
-                        key={type.id!}
-                        onClick={() => toggleFilter(type.id!)}
+                        key={type.id}
+                        onClick={() => toggleFilter(type.id)}
                         className={[
                             'px-3 py-1 rounded-full text-xs font-medium border transition-colors',
-                            activeFilters.includes(type.id!)
+                            activeFilters.includes(type.id)
                                 ? 'bg-blue-500 border-blue-500 text-white'
                                 : 'border-border text-muted-foreground hover:border-blue-400 hover:text-foreground',
                         ].join(' ')}
@@ -199,7 +168,9 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
                                     {maskPubKey(devWallet.public_key)}
                                 </td>
                                 <td className="px-3 py-2.5 text-right text-muted-foreground tabular-nums">
-                                    {lamportsBNToSolDisplay(devWallet.solana_balance_in_lamports)}
+                                    {devWallet.solana_balance_in_lamports
+                                        ? lamportsBNToSolDisplay(devWallet.solana_balance_in_lamports)
+                                        : '—'}
                                 </td>
                                 <td className="px-3 py-2.5 text-right text-muted-foreground">—</td>
                                 <td className="px-3 py-2.5 text-right text-muted-foreground">—</td>
@@ -209,8 +180,8 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
                                         min={0}
                                         step={0.000000001}
                                         placeholder="0.00"
-                                        value={buyAmounts[launchConfig.token!.dev_wallet_id] ?? ''}
-                                        onChange={(e) => setBuyAmount(launchConfig.token!.dev_wallet_id, e.target.value)}
+                                        value={devWallet.id ? (buyAmounts[devWallet.id] ?? '') : ''}
+                                        onChange={(e) => setBuyAmount(devWallet.id, e.target.value)}
                                         className="w-24 rounded border border-input bg-transparent px-2 py-1 text-right text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                     />
                                 </td>
@@ -243,7 +214,9 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
                                                 {maskPubKey(wallet.public_key)}
                                             </td>
                                             <td className="px-3 py-2.5 text-right text-muted-foreground tabular-nums text-xs">
-                                                {wallet.solana_balance_in_lamports.div(LAMPORTS_PER_SOL).toString()}
+                                                {wallet.solana_balance_in_lamports
+                                                    ? lamportsBNToSolDisplay(wallet.solana_balance_in_lamports)
+                                                    : '—'}
                                             </td>
                                             <td className="px-3 py-2.5 text-right text-muted-foreground text-xs">—</td>
                                             <td className="px-3 py-2.5 text-right text-muted-foreground text-xs">—</td>
