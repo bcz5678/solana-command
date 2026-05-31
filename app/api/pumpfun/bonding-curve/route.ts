@@ -7,7 +7,7 @@ import {
     getBuyTokenAmountFromSolAmount,
     getSellSolAmountFromTokenAmount,
     bondingCurveMarketCap
-} from '@pump-fun/pump-sdk';
+} from '@nirholas/pump-sdk';
 import BN from 'bn.js';
 
 export const dynamic = 'force-dynamic';
@@ -57,7 +57,7 @@ export async function POST(request: Request) {
                 case BondingCurveRequestType.getMarketCap:
                     result.marketCap = bondingCurveMarketCap({
                         mintSupply: bondingCurve.tokenTotalSupply,
-                        virtualQuoteReserves: bondingCurve.virtualQuoteReserves,
+                        virtualSolReserves: bondingCurve.virtualSolReserves,
                         virtualTokenReserves: bondingCurve.virtualTokenReserves,
                     });
                     break;
@@ -87,7 +87,7 @@ export async function POST(request: Request) {
                     });
                     result.marketCapFromSOL = bondingCurveMarketCap({
                         mintSupply: bondingCurve.tokenTotalSupply.sub(tokensBought),
-                        virtualQuoteReserves: bondingCurve.virtualQuoteReserves.add(solLamports),
+                        virtualSolReserves: bondingCurve.virtualSolReserves.add(solLamports),
                         virtualTokenReserves: bondingCurve.virtualTokenReserves.sub(tokensBought),
                     });
 

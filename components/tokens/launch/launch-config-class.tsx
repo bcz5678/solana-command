@@ -1,5 +1,5 @@
 import { LaunchType } from '@/components/tokens/launch/types';
-import { TokenMint } from '@/lib/types/token';
+import { TokenMint } from '@/lib/types/token-mint';
 import { WalletTradeDTO } from '@/lib/types/wallet';
 import BN from 'bn.js';
 

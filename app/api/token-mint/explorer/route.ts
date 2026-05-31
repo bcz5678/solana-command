@@ -3,7 +3,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient }              from '@/lib/supabase/server'
 import { requireSuperAdmin }         from '@/lib/auth/require-super-admin'
-import { TokenMint }                 from '@/lib/types/token';
+import { TokenMint }                 from '@/lib/types/token-mint';
 
 export async function GET(req: NextRequest) {
 

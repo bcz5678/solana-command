@@ -44,8 +44,8 @@ export function useTrade(): UseTradeReturn {
 
     try {
       const endpoint = params.type === 'buy'
-        ? '/api/tokens/buy'
-        : '/api/tokens/sell'
+        ? '/api/pumpfun/buy'
+        : '/api/pumpfun/sell'
 
       const res  = await fetch(endpoint, {
         method:  'POST',

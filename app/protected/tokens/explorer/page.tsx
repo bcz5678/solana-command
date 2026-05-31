@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import TokenTable from '@/components/tokens/explorer/explorer-table'
-import { TokenMint } from '@/lib/types/token'
+import { TokenMint } from '@/lib/types/token-mint'
 
 interface ExplorerTokenRow {
   id: number

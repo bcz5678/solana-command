@@ -5,7 +5,7 @@ import LaunchTokenSelect from '@/components/tokens/launch/launch-token-select'
 import LaunchTypeSelect from '@/components/tokens/launch/launch-type-select';
 import LaunchCurrentConfiguration from '@/components/tokens/launch/launch-current-configuration'
 import { LaunchType } from './types'
-import { TokenMint } from '@/lib/types/token';
+import { TokenMint } from '@/lib/types/token-mint';
 import LaunchBuyerConfig from './launch-buyer-config';
 import { LaunchConfig } from './launch-config-class';
 

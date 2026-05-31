@@ -6,7 +6,7 @@ import BN from 'bn.js';
 
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { getWalletKeypairById } from "@/lib/vault/get-wallet-by-id"; 
-import { Executor } from "@/lib/pumpfun/executor";
+import { ExecuteResult, Executor } from "@/lib/pumpfun/executor";
 
 
 interface BuyTokenBody {

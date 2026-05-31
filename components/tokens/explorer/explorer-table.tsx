@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/tooltip'
 import { Copy } from 'lucide-react'
 
-import { TokenMint } from '@/lib/types/token';
+import { TokenMint } from '@/lib/types/token-mint';
 
 
 
