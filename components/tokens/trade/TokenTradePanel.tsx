@@ -1,10 +1,12 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import BN from 'bn.js'
 import { cn }                           from '@/lib/utils'
 import { Input }                        from '@/components/ui/input'
 import { Label }                        from '@/components/ui/label'
 import { TokenSnapshot } from '@/lib/types/token-pumpfun'
+import { solStringToLamports, lamportsBNToSolDisplay, lamportsStringToBN } from '@/lib/lamports'
 import { useWallets }                   from './hooks/useWallets'
 import { useTrade, TradeType }          from './hooks/useTrade'
 import { TokenCard }                    from './TokenCard'
@@ -24,20 +26,34 @@ export function TokenTradePanel() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [tokenLoading, setTokenLoading]  = useState(false);
-  const [tokenError, setTokenError] = useState('');
+  const [tokenError, setTokenError] = useState(null);
   const [tokenInfo, setTokenInfo] = useState<TokenSnapshot | null>(null);
   
   const [wallets, setWallets] = useState<WalletRecord | null>(null);
   const [walletsLoading, setWalletsLoading ] = useState<boolean>(false);
 
-  const [priceImpact, setPriceImpact] = useState(0);
-  const [estimatedOutput, setEstimatedOutput] = useState(0);
-  const [estimatedSol, setEstimatedSol] = useState(0);
   
   const [tradeResult, setTradeResult] = useState(null);
   const [tradeError, setTradeError] = useState(null);
+  const [executingTrade, setExecutingTrade] = useState(false);
 
   
+
+  async function getWalletsList(): Promise<WalletRecord[] | null> {
+    try {
+      const res = await fetch('/api/wallets/explorer')
+      if (!res.ok) return null
+      const { wallets } = await res.json()
+      return (wallets ?? []).map((w: any) => ({
+        ...w,
+        solana_balance_in_lamports: w.solana_balance_in_lamports != null
+          ? lamportsStringToBN(String(w.solana_balance_in_lamports))
+          : null,
+      })) as WalletRecord[]
+    } catch {
+      return null
+    }
+  }
 
   async function getTokenInfo(mintAddress: string): Promise<TokenSnapshot | null> {
     try {
@@ -55,43 +71,71 @@ export function TokenTradePanel() {
     setTradeError(null);
   }
 
+   function clearToken() {
+    setTokenInfo(null);
+    setTokenError(null);
+  }
 
-/*
+  function handleTrade() {
+
+  }
+
+  function canTrade() {}
+  
+
+
   const estimatedOutput = (() => {
     if (!tokenInfo || !amountInSol) return null
-    const sol = parseFloat(amountInSol)
-    if (isNaN(sol) || sol <= 0) return null
-    const lamports = sol * 1_000_000_000
-    const out = (tokenInfo.virtual_token_reserves * lamports) /
-                (tokenInfo.virtual_sol_reserves + lamports)
-    return (out / 1_000_000).toFixed(2)
+    let lamports: BN
+    try { lamports = solStringToLamports(amountInSol) } catch { return null }
+    if (lamports.isZero()) return null
+    const TOKEN_UNIT = new BN(1_000_000)
+    const out = tokenInfo.virtualTokenReserves
+      .mul(lamports)
+      .div(tokenInfo.virtualSolReserves.add(lamports))
+    const whole = out.div(TOKEN_UNIT).toString()
+    const frac  = out.mod(TOKEN_UNIT).toString().padStart(6, '0').slice(0, 2)
+    return `${whole}.${frac}`
   })()
 
-  const estimatedSol = (() => {
+   function estimatedSol (){
     if (!tokenInfo || !tokenAmount) return null
-    const tokens = parseFloat(tokenAmount)
-    if (isNaN(tokens) || tokens <= 0) return null
-    const tokenLamports = tokens * 1_000_000
-    const sol = (tokenInfo.virtual_sol_reserves * tokenLamports) /
-                (tokenInfo.virtual_token_reserves - tokenLamports)
-    return (sol / 1_000_000_000).toFixed(6)
-  })()
+    const [whole = '0', frac = ''] = tokenAmount.split('.')
+    const fracPadded = frac.padEnd(6, '0').slice(0, 6)
+    let tokenRaw: BN
+    try { tokenRaw = new BN(whole).mul(new BN(1_000_000)).add(new BN(fracPadded)) } catch { return null }
+    if (tokenRaw.isZero() || tokenRaw.gte(tokenInfo.virtualTokenReserves)) return null
+    const sol = tokenInfo.virtualSolReserves
+      .mul(tokenRaw)
+      .div(tokenInfo.virtualTokenReserves.sub(tokenRaw))
+    return lamportsBNToSolDisplay(sol)
+  }
 
-  const priceImpact = (() => {
+  function priceImpact() {
     if (!tokenInfo || !amountInSol) return 0
-    const sol = parseFloat(amountInSol)
-    if (isNaN(sol)) return 0
-    return (sol * 1_000_000_000 / tokenInfo.virtual_sol_reserves) * 100
-  })()
+    let lamports: BN
+    try { lamports = solStringToLamports(amountInSol) } catch { return 0 }
+    if (lamports.isZero()) return 0
+    const basisPoints = lamports.mul(new BN(10_000)).div(tokenInfo.virtualSolReserves)
+    return basisPoints.toNumber() / 100
+  }
 
-  const canTrade = (
-    !!tokenInfo &&
-    !!selectedWallet &&
-    !tokenInfo.complete &&
-    (tradeType === 'buy' ? !!amountInSol : !!tokenAmount) &&
-    !executing
-  )
+  
+  function canTrade() {
+    if(
+      !!tokenInfo &&
+      !!selectedWallet &&
+      !tokenInfo.complete &&
+      (tradeType === 'buy' ? !!amountInSol : !!tokenAmount) &&
+      !executingTrade
+    ) {
+      return true
+    } else {
+      return false
+    }
+  }
 
+  /*
   async function handleTrade() {
     if (!selectedWallet || !tokenInfo) return
     const amount = tradeType === 'buy'
@@ -100,7 +144,7 @@ export function TokenTradePanel() {
     if (!amount || amount <= 0) return
     await execute({ type: tradeType, walletId: selectedWallet.id, mintAddress, amountInSol: amount, slippage })
   }
-
+  
   if (result) {
     return <TradeResult result={result} tradeType={tradeType} onReset={reset} />
   }
@@ -239,7 +283,7 @@ export function TokenTradePanel() {
           'disabled:opacity-40 disabled:cursor-not-allowed'
         )}
       >
-        {executing ? (
+        {executingTrade ? (
           <>
             <span className="size-4 rounded-full border-2 border-current/30 border-t-current animate-spin" />
             Executing…

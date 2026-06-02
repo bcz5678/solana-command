@@ -271,6 +271,30 @@ export default function LaunchTokenSelect({ selectedId, onSelect }: Props) {
                                                     <p>{token.telegram_handle}</p>
                                                 </div>
                                             )}
+                                            {token.tiktok_url && (
+                                                <div>
+                                                    <p className="text-xs text-muted-foreground mb-0.5">TikTok</p>
+                                                    <p className="truncate text-xs">{token.tiktok_url}</p>
+                                                </div>
+                                            )}
+                                            {token.instagram_url && (
+                                                <div>
+                                                    <p className="text-xs text-muted-foreground mb-0.5">Instagram</p>
+                                                    <p className="truncate text-xs">{token.instagram_url}</p>
+                                                </div>
+                                            )}
+                                            {token.discord_url && (
+                                                <div>
+                                                    <p className="text-xs text-muted-foreground mb-0.5">Discord</p>
+                                                    <p className="truncate text-xs">{token.discord_url}</p>
+                                                </div>
+                                            )}
+                                            {token.communities_url && (
+                                                <div>
+                                                    <p className="text-xs text-muted-foreground mb-0.5">Communities</p>
+                                                    <p className="truncate text-xs">{token.communities_url}</p>
+                                                </div>
+                                            )}
                                         </div>
                                     </AccordionContent>
                                 </AccordionItem>

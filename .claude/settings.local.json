@@ -6,7 +6,9 @@
       "Bash(npx shadcn@latest add checkbox --yes)",
       "Bash(npx shadcn@latest add accordion --yes)",
       "Bash(mkdir -p \"c:/Solana-Command/solana-node/components/tokens/create\")",
-      "Bash(npm ls *)"
+      "Bash(npm ls *)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Solana-Command\\\\solana-node\\\\app\" -Recurse -Include \"*.tsx\", \"*.ts\", \"*.jsx\", \"*.js\")",
+      "Bash(Select-Object -ExpandProperty FullName)"
     ],
     "additionalDirectories": [
       "c:\\Solana-Command\\solana-node\\components\\tokens"

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireSuperAdmin } from "@/lib/auth/require-super-admin";
 import type { WalletRecord } from "@/lib/types/wallet";
+import { initializeQuickNodeSolana } from "@/app/api/utils/helpers";
+import { fetchWalletBalances } from "@/lib/wallet/balances";
 
 export const dynamic = 'force-dynamic'
 
@@ -50,6 +52,15 @@ export async function GET(req: NextRequest) {
 
 
   const wallets = (walletResults ?? []) as WalletRecord[]
+
+  
+  try {
+    await fetchWalletBalances(wallets, initializeQuickNodeSolana().connection)
+  } catch (error) {
+    console.error('[explorer] balance fetch failed:', error)
+  }
+
+
 
   return Response.json({
     wallets,

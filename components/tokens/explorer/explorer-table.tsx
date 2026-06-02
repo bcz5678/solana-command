@@ -194,7 +194,7 @@ export default function TokenTable({ tokens, walletMap }: Props) {
                     )}
                   </span>
                   <span className="w-24 shrink-0">
-                    {token.launch_status && token.launch_status !== 'false' ? (
+                    {token.launch_status ? (
                       <span className="inline-flex items-center rounded-md bg-green-500/15 px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-400">
                         {token.launch_status}
                       </span>
@@ -237,8 +237,8 @@ export default function TokenTable({ tokens, walletMap }: Props) {
                   <div>
                     <p className="text-xs text-muted-foreground mb-0.5">Dev Wallet</p>
                     <p className="font-mono text-xs">
-                      {walletMap[token.dev_wallet_id]
-                        ? maskKey(walletMap[token.dev_wallet_id])
+                      {walletMap[token.dev_wallet_id!]
+                        ? maskKey(walletMap[token.dev_wallet_id!])
                         : token.dev_wallet_id}
                     </p>
                   </div>
@@ -265,6 +265,22 @@ export default function TokenTable({ tokens, walletMap }: Props) {
                   <div>
                     <p className="text-xs text-muted-foreground mb-0.5">Telegram</p>
                     <p>{token.telegram_handle ?? '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-0.5">TikTok</p>
+                    <p className="truncate text-xs">{token.tiktok_url ?? '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-0.5">Instagram</p>
+                    <p className="truncate text-xs">{token.instagram_url ?? '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-0.5">Discord</p>
+                    <p className="truncate text-xs">{token.discord_url ?? '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-0.5">Communities</p>
+                    <p className="truncate text-xs">{token.communities_url ?? '—'}</p>
                   </div>
                 </div>
               </AccordionContent>

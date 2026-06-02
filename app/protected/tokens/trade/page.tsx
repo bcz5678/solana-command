@@ -24,3 +24,4 @@ function TradeSkeleton() {
     </div>
   )
 }
+

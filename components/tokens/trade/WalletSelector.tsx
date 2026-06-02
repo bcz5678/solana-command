@@ -5,9 +5,12 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { WalletRecord } from '@/lib/types/wallet'
+import { lamportsBNToSolDisplay } from '@/lib/lamports'
 
 interface WalletSelectorProps {
   wallets:  WalletRecord[]
@@ -18,6 +21,14 @@ interface WalletSelectorProps {
 
 export function WalletSelector({ wallets, loading, selected, onSelect }: WalletSelectorProps) {
   const activeWallets = wallets.filter(w => w.is_active)
+
+  const walletGroups: [string, WalletRecord[]][] = Object.entries(
+    activeWallets.reduce<Record<string, WalletRecord[]>>((acc, w) => {
+      const key = w.wallet_type ?? 'Other'
+      ;(acc[key] ??= []).push(w)
+      return acc
+    }, {})
+  )
 
   return (
     <DropdownMenu>
@@ -69,46 +80,55 @@ export function WalletSelector({ wallets, loading, selected, onSelect }: WalletS
 
       {/* ── Dropdown ─────────────────────────────────────────── */}
       <DropdownMenuContent className="p-0 rounded-xl shadow-lg">
-        {activeWallets.length === 0 ? (
+        {walletGroups.length === 0 ? (
           <div className="px-5 py-5 text-center text-sm text-muted-foreground">
             No wallets available
           </div>
         ) : (
-          activeWallets.map(w => (
-            <DropdownMenuItem
-              key={w.id}
-              onSelect={() => onSelect(w)}
-              className={cn(
-                'flex items-center justify-between gap-3.5 px-4 py-3 rounded-none cursor-pointer',
-                'border-b border-border/50 last:border-b-0',
-                selected?.id === w.id && 'bg-primary/5'
-              )}
-            >
-              {/* left: dot + name + key */}
-              <div className="flex items-center gap-2.5 min-w-0">
-                <WalletDot active={selected?.id === w.id} />
-                <div className="flex flex-col gap-0.5 min-w-0">
-                  <span className="text-sm font-medium text-foreground truncate">
-                    {getWalletLabel(w)}
-                  </span>
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {formatPubkey(w.public_key)}
-                  </span>
-                </div>
-              </div>
+          walletGroups.map(([typeName, group], i) => (
+            <div key={typeName}>
+              {i > 0 && <DropdownMenuSeparator />}
+              <DropdownMenuLabel className="px-4 py-2 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                {typeName}
+              </DropdownMenuLabel>
+              {group.map(w => {
+                const isEmpty = w.solana_balance_in_lamports == null || w.solana_balance_in_lamports.isZero()
+                return (
+                  <DropdownMenuItem
+                    key={w.id}
+                    disabled={isEmpty}
+                    onSelect={() => onSelect(w)}
+                    className={cn(
+                      'flex items-center justify-between gap-3.5 px-4 py-3 rounded-none cursor-pointer',
+                      'border-b border-border/50 last:border-b-0',
+                      selected?.id === w.id && 'bg-primary/5',
+                      isEmpty && 'opacity-40 cursor-not-allowed'
+                    )}
+                  >
+                    {/* left: dot + label + pubkey */}
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <WalletDot active={selected?.id === w.id} />
+                      <div className="flex flex-col gap-0.5 min-w-0">
+                        <span className="text-sm font-medium text-foreground truncate">
+                          {getWalletLabel(w)}
+                        </span>
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {formatPubkey(w.public_key)}
+                        </span>
+                      </div>
+                    </div>
 
-              {/* right: balance + type */}
-              <div className="flex flex-col items-end gap-0.5 shrink-0">
-                <span className="font-mono text-sm font-semibold text-primary">
-                  {formatBalance(w)}
-                </span>
-                {w.wallet_type && (
-                  <span className="text-[0.65rem] font-medium uppercase tracking-wide text-muted-foreground">
-                    {w.wallet_type}
-                  </span>
-                )}
-              </div>
-            </DropdownMenuItem>
+                    {/* right: SOL balance */}
+                    <span className={cn(
+                      'font-mono text-sm font-semibold shrink-0',
+                      isEmpty ? 'text-muted-foreground' : 'text-primary'
+                    )}>
+                      {formatBalance(w)}
+                    </span>
+                  </DropdownMenuItem>
+                )
+              })}
+            </div>
           ))
         )}
       </DropdownMenuContent>
@@ -121,12 +141,11 @@ export function WalletSelector({ wallets, loading, selected, onSelect }: WalletS
 
 function formatBalance(w: WalletRecord): string {
   if (w.solana_balance_in_lamports == null) return '—'
-  const sol = w.solana_balance_in_lamports.toNumber() / 1_000_000_000
-  return `${sol.toFixed(4)} SOL`
+  return `${lamportsBNToSolDisplay(w.solana_balance_in_lamports)} SOL`
 }
 
 function formatPubkey(key: string): string {
-  return `${key.slice(0, 6)}...${key.slice(-6)}`
+  return `${key.slice(0, 7)}...${key.slice(-7)}`
 }
 
 function getWalletLabel(w: WalletRecord): string {

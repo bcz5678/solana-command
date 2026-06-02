@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import CreateTokenForm, { CreateTokenFormInput } from '@/components/tokens/create/create-token-form'
 import CreateTokenProgressDialog, {
     INITIAL_STEPS,
@@ -10,8 +9,6 @@ import CreateTokenProgressDialog, {
 } from '@/components/tokens/create/create-token-progress-dialog'
 
 import { ClaimVanityResponse } from '@/lib/types/responses'
-
-const supabase = createClient()
 
 export default function Page() {
     const [dialogOpen, setDialogOpen] = useState(false)
@@ -93,6 +90,10 @@ export default function Page() {
                     websiteUrl: data.websiteUrl,
                     twitterUrl: data.twitterUrl,
                     telegramHandle: data.telegramHandle,
+                    tiktokUrl: data.tiktokUrl,
+                    instagramUrl: data.instagramUrl,
+                    discordUrl: data.discordUrl,
+                    communitiesUrl: data.communitiesUrl,
                 },
             }),
         })
@@ -120,6 +121,13 @@ export default function Page() {
                 tokenSymbol: data.symbol,
                 description: data.description,
                 logoUrl: imageUrl,
+                websiteUrl: data.websiteUrl,
+                twitterUrl: data.twitterUrl,
+                telegramHandle: data.telegramHandle,
+                tiktokUrl: data.tiktokUrl,
+                instagramUrl: data.instagramUrl,
+                discordUrl: data.discordUrl,
+                communitiesUrl: data.communitiesUrl,
                 metadataUri: tokenMetaUrl,
             }),
         })

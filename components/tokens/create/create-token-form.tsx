@@ -23,13 +23,18 @@ type WalletTypeRow = { id: string; name: string };
 type WalletOwnerRow = { wallet_id: string; wallet_type_id: string | null };
 
 export interface CreateTokenFormInput {
-    creatorWallet: string;
-    name: string;
-    symbol: string;
-    description: string;
-    websiteUrl?: string;
-    twitterUrl?: string;
-    telegramHandle?: string;
+    creatorWallet:      string
+    name:               string
+    symbol:             string
+    description:        string
+    websiteUrl:         string | null
+    twitterUrl:         string | null
+    telegramHandle:     string | null
+      // Social links
+    tiktokUrl:          string | null
+    instagramUrl:       string | null
+    discordUrl:         string | null
+    communitiesUrl:     string | null
 }
 
 interface CreateTokenFormProps {
@@ -277,6 +282,70 @@ export default function CreateTokenForm({ onSubmit, isSubmitting = false }: Crea
                             name="telegramHandle"
                             type="text"
                             placeholder="@yourtoken"
+                        />
+                    </InputGroup>
+                </div>
+
+                <div className="mt-4">
+                    <FieldLabel htmlFor="input-tiktok">
+                        TikTok URL{' '}
+                        <span className="font-normal text-muted-foreground">(optional)</span>
+                    </FieldLabel>
+                    <InputGroup className="mt-2 mb-1">
+                        <InputGroupInput
+                            {...register("tiktokUrl")}
+                            id="input-tiktok"
+                            name="tiktokUrl"
+                            type="url"
+                            placeholder="https://tiktok.com/@yourtoken"
+                        />
+                    </InputGroup>
+                </div>
+
+                <div className="mt-4">
+                    <FieldLabel htmlFor="input-instagram">
+                        Instagram URL{' '}
+                        <span className="font-normal text-muted-foreground">(optional)</span>
+                    </FieldLabel>
+                    <InputGroup className="mt-2 mb-1">
+                        <InputGroupInput
+                            {...register("instagramUrl")}
+                            id="input-instagram"
+                            name="instagramUrl"
+                            type="url"
+                            placeholder="https://instagram.com/yourtoken"
+                        />
+                    </InputGroup>
+                </div>
+
+                <div className="mt-4">
+                    <FieldLabel htmlFor="input-discord">
+                        Discord URL{' '}
+                        <span className="font-normal text-muted-foreground">(optional)</span>
+                    </FieldLabel>
+                    <InputGroup className="mt-2 mb-1">
+                        <InputGroupInput
+                            {...register("discordUrl")}
+                            id="input-discord"
+                            name="discordUrl"
+                            type="url"
+                            placeholder="https://discord.gg/yourtoken"
+                        />
+                    </InputGroup>
+                </div>
+
+                <div className="mt-4">
+                    <FieldLabel htmlFor="input-communities">
+                        Communities URL{' '}
+                        <span className="font-normal text-muted-foreground">(optional)</span>
+                    </FieldLabel>
+                    <InputGroup className="mt-2 mb-1">
+                        <InputGroupInput
+                            {...register("communitiesUrl")}
+                            id="input-communities"
+                            name="communitiesUrl"
+                            type="url"
+                            placeholder="https://..."
                         />
                     </InputGroup>
                 </div>
