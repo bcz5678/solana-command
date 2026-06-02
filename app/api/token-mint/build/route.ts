@@ -5,18 +5,25 @@ import { createClient }              from '@/lib/supabase/server'
 import { requireSuperAdmin }         from '@/lib/auth/require-super-admin'
 
 interface BuildTokenBody {
-  keypairId:           string          // from claim-vanity
-  devWalletId:         string          // UUID from private.wallets
-  tokenName:           string
-  tokenSymbol:         string
-  description?:        string
-  logoUrl?:            string | null 
-  decimals?:           number
-  tokenType?:          'fungible' | 'nft' | 'semi_fungible'
-  maxSupply?:          number | null
-  metadataUri?:        string          // set after image/metadata upload
-  freezeAuthorityKey?: string | null
-  updateAuthorityKey?: string | null
+  keypairId:            string
+  devWalletId:          string
+  tokenName:            string
+  tokenSymbol:          string
+  description?:         string | null
+  logoUrl?:             string | null
+  websiteUrl?:          string | null   // ← added
+  twitterUrl?:          string | null   // ← added
+  telegramHandle?:      string | null   // ← added
+  tiktokUrl?:           string | null
+  instagramUrl?:        string | null
+  discordUrl?:          string | null
+  communitiesUrl?:      string | null
+  decimals?:            number
+  tokenType?:           'fungible' | 'nft' | 'semi_fungible'
+  maxSupply?:           number | null
+  metadataUri?:         string
+  freezeAuthorityKey:   string | null
+  updateAuthorityKey:   string | null
 }
 
 export async function POST(req: NextRequest) {
@@ -39,16 +46,23 @@ export async function POST(req: NextRequest) {
   }
 
   const {
-    keypairId, devWalletId,
-    tokenName, tokenSymbol,
-    description        = null,
-    logoUrl            = null,
-    decimals           = 9,
-    tokenType          = 'fungible',
-    maxSupply          = null,
-    metadataUri        = null,
-    freezeAuthorityKey = null,
-    updateAuthorityKey = null
+    keypairId, 
+    devWalletId,
+    tokenName, 
+    tokenSymbol,
+    description         = null,
+    logoUrl             = null,
+    websiteUrl          = null,
+    twitterUrl          = null,
+    telegramHandle      = null,    
+    tiktokUrl           = null,
+    instagramUrl        = null,   
+    discordUrl          = null, 
+    communitiesUrl      = null, 
+    decimals            = 9,
+    tokenType           = 'fungible',
+    maxSupply           = null,
+    metadataUri         = null,
   } = body
 
   const missing = ['keypairId', 'devWalletId', 'tokenName', 'tokenSymbol']
@@ -78,13 +92,18 @@ export async function POST(req: NextRequest) {
       p_token_name:           tokenName,
       p_token_symbol:         tokenSymbol,
       p_description:          description,
-      p_logo_url:             logoUrl,  
+      p_logo_url:             logoUrl,
+      p_website_url:          websiteUrl,
+      p_twitter_url:          twitterUrl,
+      p_telegram_handle:      telegramHandle,
+      p_tiktok_url:           tiktokUrl,
+      p_instagram_url:        instagramUrl,
+      p_discord_url:          discordUrl,
+      p_communities_url:      communitiesUrl,
       p_decimals:             decimals,
       p_token_type:           tokenType,
       p_max_supply:           maxSupply,
       p_metadata_uri:         metadataUri,
-      p_freeze_authority_key: freezeAuthorityKey,
-      p_update_authority_key: updateAuthorityKey
     })
 
   if (rpcError) {

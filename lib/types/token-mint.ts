@@ -1,6 +1,7 @@
 // lib/types/token.ts
 import BN from 'bn.js';
 
+// lib/types/token.ts
 export interface TokenMint {
   id:                string
   user_id:           string
@@ -9,18 +10,30 @@ export interface TokenMint {
   token_symbol:      string
   description:       string | null
   logo_url:          string | null
+
+  // Primary links
+  website_url:       string | null   // ← now wired
+  twitter_url:       string | null   // ← now wired
+  telegram_handle:   string | null   // ← now wired
+
+  // Social links
+  tiktok_url:        string | null
+  instagram_url:     string | null
+  discord_url:       string | null
+  communities_url:   string | null
+
   decimals:          number
   token_type:        'fungible' | 'nft' | 'semi_fungible'
-  chain:             string             // ← added
-  launch_status:     'draft' | 'ready' | 'launching' | 'launched' | 'failed'  // ← added
+  chain:             string
+  launch_status:     'draft' | 'ready' | 'launching' | 'launched' | 'failed'
   current_supply:    number
   max_supply:        number | null
   metadata_uri:      string | null
   is_active:         boolean
   authority_revoked: boolean
   freeze_revoked:    boolean
-  dev_wallet_id:     string | null      // ← added
-  vanity_keypair_id: string | null      // ← added
+  dev_wallet_id:     string | null
+  vanity_keypair_id: string | null
   created_at:        string
   updated_at:        string
 }

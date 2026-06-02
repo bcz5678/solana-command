@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { cn }                           from '@/lib/utils'
 import { Input }                        from '@/components/ui/input'
 import { Label }                        from '@/components/ui/label'
-import { useTokenInfo }                 from './hooks/useTokenInfo'
+import { TokenSnapshot } from '@/lib/types/token-pumpfun'
 import { useWallets }                   from './hooks/useWallets'
 import { useTrade, TradeType }          from './hooks/useTrade'
 import { TokenCard }                    from './TokenCard'
@@ -23,20 +23,40 @@ export function TokenTradePanel() {
   const [slippage,       setSlippage]       = useState(0.01)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const { tokenInfo, loading: tokenLoading, error: tokenError, fetchToken, clearToken } = useTokenInfo()
-  const { wallets,   loading: walletsLoading }                                           = useWallets()
-  const { executing, result, error: tradeError, execute, reset }                        = useTrade()
+  const [tokenLoading, setTokenLoading]  = useState(false);
+  const [tokenError, setTokenError] = useState('');
+  const [tokenInfo, setTokenInfo] = useState<TokenSnapshot | null>(null);
+  
+  const [wallets, setWallets] = useState<WalletRecord | null>(null);
+  const [walletsLoading, setWalletsLoading ] = useState<boolean>(false);
 
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    if (mintAddress.length >= 32) {
-      debounceRef.current = setTimeout(() => fetchToken(mintAddress), 600)
-    } else {
-      clearToken()
+  const [priceImpact, setPriceImpact] = useState(0);
+  const [estimatedOutput, setEstimatedOutput] = useState(0);
+  const [estimatedSol, setEstimatedSol] = useState(0);
+  
+  const [tradeResult, setTradeResult] = useState(null);
+  const [tradeError, setTradeError] = useState(null);
+
+  
+
+  async function getTokenInfo(mintAddress: string): Promise<TokenSnapshot | null> {
+    try {
+      const res = await fetch(`/api/pumpfun/token-info?mintAddress=${encodeURIComponent(mintAddress)}`)
+      if (!res.ok) return null
+      const data = await res.json()
+      return data.body.snapshot as TokenSnapshot
+    } catch {
+      return null
     }
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [mintAddress, fetchToken, clearToken])
+  }
 
+  function reset () {
+    setTradeResult(null)
+    setTradeError(null);
+  }
+
+
+/*
   const estimatedOutput = (() => {
     if (!tokenInfo || !amountInSol) return null
     const sol = parseFloat(amountInSol)
@@ -84,6 +104,7 @@ export function TokenTradePanel() {
   if (result) {
     return <TradeResult result={result} tradeType={tradeType} onReset={reset} />
   }
+    */
 
   return (
     <div className="w-full max-w-130 mx-auto flex flex-col gap-5 px-4 py-8">
