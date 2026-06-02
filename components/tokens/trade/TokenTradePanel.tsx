@@ -29,8 +29,15 @@ export function TokenTradePanel() {
   const [tokenError, setTokenError] = useState(null);
   const [tokenInfo, setTokenInfo] = useState<TokenSnapshot | null>(null);
   
-  const [wallets, setWallets] = useState<WalletRecord | null>(null);
+  const [wallets, setWallets] = useState<WalletRecord[]>([]);
   const [walletsLoading, setWalletsLoading ] = useState<boolean>(false);
+
+  useEffect(() => {
+    setWalletsLoading(true)
+    getWalletsList()
+      .then(result => { if (result) setWallets(result) })
+      .finally(() => setWalletsLoading(false))
+  }, [])
 
   
   const [tradeResult, setTradeResult] = useState(null);
@@ -80,8 +87,6 @@ export function TokenTradePanel() {
 
   }
 
-  function canTrade() {}
-  
 
 
   const estimatedOutput = (() => {
@@ -98,7 +103,7 @@ export function TokenTradePanel() {
     return `${whole}.${frac}`
   })()
 
-   function estimatedSol (){
+  const estimatedSol = (() => {
     if (!tokenInfo || !tokenAmount) return null
     const [whole = '0', frac = ''] = tokenAmount.split('.')
     const fracPadded = frac.padEnd(6, '0').slice(0, 6)
@@ -109,16 +114,16 @@ export function TokenTradePanel() {
       .mul(tokenRaw)
       .div(tokenInfo.virtualTokenReserves.sub(tokenRaw))
     return lamportsBNToSolDisplay(sol)
-  }
+  })()
 
-  function priceImpact() {
+  const priceImpact = (() => {
     if (!tokenInfo || !amountInSol) return 0
     let lamports: BN
     try { lamports = solStringToLamports(amountInSol) } catch { return 0 }
     if (lamports.isZero()) return 0
     const basisPoints = lamports.mul(new BN(10_000)).div(tokenInfo.virtualSolReserves)
     return basisPoints.toNumber() / 100
-  }
+  })()
 
   
   function canTrade() {
