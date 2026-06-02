@@ -29,7 +29,7 @@ export default function LaunchTokenSelect({ selectedId, onSelect }: Props) {
     const [search, setSearch] = useState('')
 
     useEffect(() => {
-        fetch('/api/token/explorer?status=all')
+        fetch('/api/token-mint/explorer?status=all')
             .then((r) => {
                 if (!r.ok) {
                     r.json().then(body => console.error('[tokens] API error', r.status, body))

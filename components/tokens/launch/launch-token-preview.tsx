@@ -43,15 +43,15 @@ export default function LaunchTokenPreview({ launchConfig, onLaunch }: Props) {
             <SubCard title="launchConfig.token Meta">
                 <div className="grid grid-cols-2 gap-6">
                     <div className="flex flex-col gap-3">
-                        <Field label="launchConfig.token Name" value={launchConfig.token?.name ?? '—'} />
-                        <Field label="launchConfig.token Symbol" value={launchConfig.token?.symbol ?? '—'} />
+                        <Field label="launchConfig.token Name" value={launchConfig.token?.token_name ?? '—'} />
+                        <Field label="launchConfig.token Symbol" value={launchConfig.token?.token_symbol ?? '—'} />
                         <Field label="Description" value={launchConfig.token?.description ?? '—'} />
                     </div>
                     <div className="flex items-center justify-center">
                         <div className="size-24 rounded-xl bg-muted border border-border overflow-hidden flex items-center justify-center text-2xl font-bold text-muted-foreground">
                             {launchConfig.token?.logo_url
-                                ? <img src={launchConfig.token.logo_url} alt={launchConfig.token.symbol} className="size-full object-cover" />
-                                : (launchConfig.token?.symbol?.slice(0, 1) ?? '?')
+                                ? <img src={launchConfig.token.logo_url} alt={launchConfig.token.token_symbol} className="size-full object-cover" />
+                                : (launchConfig.token?.token_symbol?.slice(0, 1) ?? '?')
                             }
                         </div>
                     </div>
@@ -60,7 +60,7 @@ export default function LaunchTokenPreview({ launchConfig, onLaunch }: Props) {
 
             {/* CA Configuration */}
             <SubCard title="CA Configuration">
-                <Field label="Contract Address" value={`${launchConfig.token?.contract_address ?? '-'}`} dim />
+                <Field label="Contract Address" value={`${launchConfig.token?.mint_public_key ?? '-'}`} dim />
             </SubCard>
 
             {/* Buyer Configuration */}
@@ -74,7 +74,7 @@ export default function LaunchTokenPreview({ launchConfig, onLaunch }: Props) {
                     />
                     <Field
                         label="Purchasing a Total of"
-                        value={`${totalSOL} SOL of ${launchConfig.token?.name ?? '—'}`}
+                        value={`${totalSOL} SOL of ${launchConfig.token?.token_name ?? '—'}`}
                     />
                     <Field label="Total Token Amount" value="Not implemented" dim />
                     <Field label="Percentage of Total Supply" value="Not implemented" dim />
