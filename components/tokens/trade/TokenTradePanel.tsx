@@ -353,6 +353,7 @@ export function TokenTradePanel() {
           wallets={wallets}
           loading={walletsLoading || holdingLoading}
           selected={selectedWallet}
+          tradeType={tradeType}
           onSelect={handleWalletSelect}
         />
         {tradeType === 'sell' && holdingError && (

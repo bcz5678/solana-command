@@ -11,15 +11,17 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { WalletRecord } from '@/lib/types/wallet'
 import { lamportsBNToSolDisplay } from '@/lib/lamports'
+import { TradeType } from './hooks/useTrade'
 
 interface WalletSelectorProps {
-  wallets:  WalletRecord[]
-  loading:  boolean
-  selected: WalletRecord | null
-  onSelect: (wallet: WalletRecord) => void
+  wallets:   WalletRecord[]
+  loading:   boolean
+  selected:  WalletRecord | null
+  tradeType: TradeType
+  onSelect:  (wallet: WalletRecord) => void
 }
 
-export function WalletSelector({ wallets, loading, selected, onSelect }: WalletSelectorProps) {
+export function WalletSelector({ wallets, loading, selected, tradeType, onSelect }: WalletSelectorProps) {
   const activeWallets = wallets.filter(w => w.is_active)
 
   const walletGroups: [string, WalletRecord[]][] = Object.entries(
@@ -92,7 +94,7 @@ export function WalletSelector({ wallets, loading, selected, onSelect }: WalletS
                 {typeName}
               </DropdownMenuLabel>
               {group.map(w => {
-                const isEmpty = w.solana_balance_in_lamports == null || w.solana_balance_in_lamports.isZero()
+                const isEmpty = tradeType === 'buy' && (w.solana_balance_in_lamports == null || w.solana_balance_in_lamports.isZero())
                 return (
                   <DropdownMenuItem
                     key={w.id}
