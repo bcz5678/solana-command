@@ -4,10 +4,9 @@ import {
   PUMP_SDK,
   OnlinePumpSdk,
   getBuyTokenAmountFromSolAmount,
-  getSellSolAmountFromTokenAmount,
   canonicalPumpPoolPda,
 } from '@nirholas/pump-sdk';
-import { TOKEN_PROGRAM_ID } from '@/app/api/utils/constants';
+import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
 
 export interface ExecuteResult {
   success: boolean;
@@ -52,57 +51,59 @@ export class Executor {
   async buy(mint: PublicKey, solAmount: BN, slippage?: number): Promise<ExecuteResult> {
     const slip = slippage ?? this.defaultSlippage;
     try {
-      // Fetch on-chain state
-      const [buyState, global, feeConfig] = await Promise.all([
+      // Check graduation and resolve token program once — neither changes mid-retry
+      const [initialBuyState, tokenProgram] = await Promise.all([
         this.onlineSdk.fetchBuyState(mint, this.wallet.publicKey),
-        this.onlineSdk.fetchGlobal(),
-        this.onlineSdk.fetchFeeConfig(),
+        this.resolveTokenProgram(mint),
       ]);
 
-      const { bondingCurveAccountInfo, bondingCurve, associatedUserAccountInfo } = buyState;
-
-      // Check if token has graduated
-      if (bondingCurve.complete) {
+      if (initialBuyState.bondingCurve.complete) {
         return this.ammBuy(mint, solAmount, slippage);
       }
 
-      // Calculate token amount from SOL
-      const mintSupply = bondingCurve.tokenTotalSupply;
-      const tokenAmount = getBuyTokenAmountFromSolAmount({
-        global,
-        feeConfig,
-        mintSupply,
-        bondingCurve,
-        amount: solAmount,
-      });
+      // Mutable refs updated by the builder on each attempt
+      let tokenAmount = new BN(0);
+      let price = 0;
 
-      if (tokenAmount.isZero()) {
-        return { success: false, error: 'Zero token output', solAmount, tokenAmount, price: 0 };
-      }
+      const buildInstructions = async (): Promise<TransactionInstruction[]> => {
+        const [buyState, global, feeConfig] = await Promise.all([
+          this.onlineSdk.fetchBuyState(mint, this.wallet.publicKey),
+          this.onlineSdk.fetchGlobal(),
+          this.onlineSdk.fetchFeeConfig(),
+        ]);
 
-      // Build instructions — spread tokenProgram so Token-2022 mints work correctly
-      const instructions = await PUMP_SDK.buyInstructions({
-        global,
-        bondingCurveAccountInfo,
-        bondingCurve,
-        associatedUserAccountInfo,
-        mint,
-        user: this.wallet.publicKey,
-        amount: tokenAmount,
-        solAmount,
-        slippage: slip,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      });
+        const { bondingCurveAccountInfo, bondingCurve, associatedUserAccountInfo } = buyState;
 
-      const price = solAmount.toNumber() / tokenAmount.toNumber();
+        tokenAmount = getBuyTokenAmountFromSolAmount({
+          global,
+          feeConfig,
+          mintSupply: bondingCurve.tokenTotalSupply,
+          bondingCurve,
+          amount: solAmount,
+        });
 
-      console.log(`BUY ${mint.toBase58().slice(0, 8)}… | ${(solAmount.toNumber() / 1e9).toFixed(4)} SOL → ${tokenAmount.toString()} tokens | sig=`);
-      return { success: false, signature: 'test', solAmount, tokenAmount, price };
+        if (tokenAmount.isZero()) throw new Error('Zero token output');
 
-      //const signature = await this.sendTransaction(instructions);
+        price = solAmount.toNumber() / tokenAmount.toNumber();
 
-      //console.log(`BUY ${mint.toBase58().slice(0, 8)}… | ${(solAmount.toNumber() / 1e9).toFixed(4)} SOL → ${tokenAmount.toString()} tokens | sig=${signature.slice(0, 16)}…`);
-      //return { success: true, signature, solAmount, tokenAmount, price };
+        return PUMP_SDK.buyInstructions({
+          global,
+          bondingCurveAccountInfo,
+          bondingCurve,
+          associatedUserAccountInfo,
+          mint,
+          user: this.wallet.publicKey,
+          amount: tokenAmount,
+          solAmount,
+          slippage: slip * 100, // SDK expects percent (5 = 5%), not decimal (0.05)
+          tokenProgram,
+        });
+      };
+
+      const signature = await this.sendTransaction(buildInstructions);
+
+      console.log(`BUY ${mint.toBase58().slice(0, 8)}… | ${(solAmount.toNumber() / 1e9).toFixed(4)} SOL → ${tokenAmount.toString()} tokens | sig=${signature.slice(0, 16)}…`);
+      return { success: true, signature, solAmount, tokenAmount, price };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.log(`BUY FAILED ${mint.toBase58().slice(0, 8)}…: ${msg}`);
@@ -114,50 +115,33 @@ export class Executor {
   async sell(mint: PublicKey, tokenAmount?: BN, slippage?: number): Promise<ExecuteResult> {
     const slip = slippage ?? this.defaultSlippage;
     try {
-      // If no amount specified, sell all
       if (!tokenAmount) {
         return this.sellAll(mint, slippage);
       }
 
-      const [sellState, global, feeConfig] = await Promise.all([
+      const [initialSellState, tokenProgram] = await Promise.all([
         this.onlineSdk.fetchSellState(mint, this.wallet.publicKey),
-        this.onlineSdk.fetchGlobal(),
-        this.onlineSdk.fetchFeeConfig(),
+        this.resolveTokenProgram(mint),
       ]);
 
-      const { bondingCurveAccountInfo, bondingCurve } = sellState;
-
-      // Check if graduated → route to AMM
-      if (bondingCurve.complete) {
+      if (initialSellState.bondingCurve.complete) {
         return this.ammSell(mint, tokenAmount, slippage);
       }
 
-      const mintSupply = bondingCurve.tokenTotalSupply;
-      const solAmount = getSellSolAmountFromTokenAmount({
-        global,
-        feeConfig,
-        mintSupply,
-        bondingCurve,
-        amount: tokenAmount,
-      });
-
-      const instructions = await PUMP_SDK.sellInstructions({
-        global,
-        bondingCurveAccountInfo,
-        bondingCurve,
+      // sellChunked re-fetches state per chunk and splits automatically when
+      // the amount would overflow the on-chain u64 multiply.
+      const signatures = await this.onlineSdk.sellChunked({
         mint,
         user: this.wallet.publicKey,
-        amount: tokenAmount,
-        solAmount,
-        slippage: slip,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        totalAmount: tokenAmount,
+        slippage: slip * 100, // SDK expects percent (5 = 5%), not decimal (0.05)
+        tokenProgram,
+        sendTx: (ixs) => this.sendTransaction(() => Promise.resolve(ixs)),
       });
 
-      const price = solAmount.toNumber() / tokenAmount.toNumber();
-      const signature = await this.sendTransaction(instructions);
-
-      console.log(`SELL ${mint.toBase58().slice(0, 8)}… | ${tokenAmount.toString()} tokens → ${(solAmount.toNumber() / 1e9).toFixed(4)} SOL | sig=${signature.slice(0, 16)}…`);
-      return { success: true, signature, solAmount, tokenAmount, price };
+      const signature = signatures[signatures.length - 1];
+      console.log(`SELL ${mint.toBase58().slice(0, 8)}… | ${tokenAmount.toString()} tokens | ${signatures.length} chunk(s) | sig=${signature.slice(0, 16)}…`);
+      return { success: true, signature, solAmount: new BN(0), tokenAmount, price: 0 };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.log(`SELL FAILED ${mint.toBase58().slice(0, 8)}…: ${msg}`);
@@ -173,13 +157,14 @@ export class Executor {
         return { success: false, error: 'Zero balance', solAmount: new BN(0), tokenAmount: new BN(0), price: 0 };
       }
 
-      const instructions = await this.onlineSdk.sellAllInstructions({
+      const slip = slippage ?? this.defaultSlippage;
+      const buildInstructions = () => this.onlineSdk.sellAllInstructions({
         mint,
         user: this.wallet.publicKey,
-        slippage: slippage ?? this.defaultSlippage,
+        slippage: slip * 100, // SDK expects percent (5 = 5%), not decimal (0.05)
       });
 
-      const signature = await this.sendTransaction(instructions);
+      const signature = await this.sendTransaction(buildInstructions);
 
       console.log(`SELL ALL ${mint.toBase58().slice(0, 8)}… | ${balance.toString()} tokens | sig=${signature.slice(0, 16)}…`);
       return { success: true, signature, solAmount: new BN(0), tokenAmount: balance, price: 0 };
@@ -197,16 +182,16 @@ export class Executor {
       const poolPda = canonicalPumpPoolPda(mint);
       const minBaseOut = solAmount.muln(Math.floor((1 - slip) * 10000)).divn(10000);
 
-      const instruction = await PUMP_SDK.ammBuyExactQuoteInInstruction({
+      const buildInstructions = async () => [await PUMP_SDK.ammBuyExactQuoteInInstruction({
         user: this.wallet.publicKey,
         pool: poolPda,
         mint,
         quoteAmountIn: solAmount,
         minBaseAmountOut: minBaseOut,
-      });
+      })];
 
-      const signature = await this.sendTransaction([instruction]);
-     console.log(`AMM BUY ${mint.toBase58().slice(0, 8)}… | ${(solAmount.toNumber() / 1e9).toFixed(4)} SOL | sig=${signature.slice(0, 16)}…`);
+      const signature = await this.sendTransaction(buildInstructions);
+      console.log(`AMM BUY ${mint.toBase58().slice(0, 8)}… | ${(solAmount.toNumber() / 1e9).toFixed(4)} SOL | sig=${signature.slice(0, 16)}…`);
       return { success: true, signature, solAmount, tokenAmount: minBaseOut, price: 0 };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -222,15 +207,15 @@ export class Executor {
       const poolPda = canonicalPumpPoolPda(mint);
       const minQuoteOut = new BN(0); // Accept any SOL amount (slippage applied in instruction)
 
-      const instruction = await PUMP_SDK.ammSellInstruction({
+      const buildInstructions = async () => [await PUMP_SDK.ammSellInstruction({
         user: this.wallet.publicKey,
         pool: poolPda,
         mint,
         baseAmountIn: tokenAmount,
         minQuoteAmountOut: minQuoteOut,
-      });
+      })];
 
-      const signature = await this.sendTransaction([instruction]);
+      const signature = await this.sendTransaction(buildInstructions);
       console.log(`AMM SELL ${mint.toBase58().slice(0, 8)}… | ${tokenAmount.toString()} tokens | sig=${signature.slice(0, 16)}…`);
       return { success: true, signature, solAmount: new BN(0), tokenAmount, price: 0 };
     } catch (err: unknown) {
@@ -251,13 +236,32 @@ export class Executor {
     return this.onlineSdk.getTokenBalance(mint, this.wallet.publicKey);
   }
 
-  /** Build, sign, and send a transaction with retry */
-  private async sendTransaction(instructions: TransactionInstruction[]): Promise<string> {
+  /** Resolve the correct token program for a given mint by checking its on-chain owner */
+  private async resolveTokenProgram(mint: PublicKey): Promise<PublicKey> {
+    const info = await this.connection.getAccountInfo(mint);
+    if (info && info.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+      return TOKEN_2022_PROGRAM_ID;
+    }
+    return TOKEN_PROGRAM_ID;
+  }
+
+  /**
+   * Build, sign, and send a transaction with retry.
+   * buildInstructions is called fresh on every attempt so each retry gets
+   * up-to-date bonding curve state and a matching maxSolCost / minSolOut.
+   */
+  private async sendTransaction(
+    buildInstructions: () => Promise<TransactionInstruction[]>
+  ): Promise<string> {
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       try {
-        const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash('confirmed');
+        // Fetch fresh state and blockhash in parallel on every attempt
+        const [instructions, { blockhash, lastValidBlockHeight }] = await Promise.all([
+          buildInstructions(),
+          this.connection.getLatestBlockhash('confirmed'),
+        ]);
 
         const messageV0 = new TransactionMessage({
           payerKey: this.wallet.publicKey,
@@ -268,12 +272,14 @@ export class Executor {
         const tx = new VersionedTransaction(messageV0);
         tx.sign([this.wallet]);
 
+        // skipPreflight: simulation runs against stale validator state and will
+        // reject a valid blockhash or flag false slippage errors. On-chain
+        // confirmation is the authoritative check.
         const signature = await this.connection.sendTransaction(tx, {
-          skipPreflight: false,
-          maxRetries: 2,
+          skipPreflight: true,
+          maxRetries: 0,
         });
 
-        // Wait for confirmation
         const confirmation = await this.connection.confirmTransaction(
           { signature, blockhash, lastValidBlockHeight },
           'confirmed'
@@ -294,5 +300,4 @@ export class Executor {
 
     throw lastError ?? new Error('Transaction failed after retries');
   }
-
 }

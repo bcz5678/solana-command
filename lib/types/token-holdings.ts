@@ -1,6 +1,4 @@
-import BN from 'bn.js'
-
 export interface TokenHoldings {
     mint: string
-    balance: BN
+    balance: number // uiAmount (human-readable, accounts for token decimals)
 }

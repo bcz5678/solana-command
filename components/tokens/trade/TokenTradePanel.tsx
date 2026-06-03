@@ -175,37 +175,70 @@ export function TokenTradePanel() {
 
     if (!selectedWallet || !tokenInfo || tokenInfo.complete) return
 
-  
-
-    let lamports: BN
-    try { lamports = solStringToLamports(amountInSol) } catch { return }
-    if (lamports.isZero()) return
-
-    setExecutingTrade(true)
-    setTradeError('')
 
     try {
-      const res = await fetch('/api/pumpfun/buy', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          walletId:    selectedWallet.id,
-          mintAddress,
-          amountInSol: lamports.toString(),
-          slippage,
-        }),
-      })
+      if(tradeType == 'buy') {
+        let lamports: BN
+        try { lamports = solStringToLamports(amountInSol) } catch { return }
+        if (lamports.isZero()) return
 
-      const data = await res.json()
+        setExecutingTrade(true)
+        setTradeError('')
 
-      if (!res.ok) {
-        setTradeError(data.error ?? 'Trade failed')
-        return
+        const res = await fetch('/api/pumpfun/buy', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            walletId:    selectedWallet.id,
+            mintAddress,
+            amountInSol: lamports.toString(),
+            slippage,
+          }),
+        })
+
+        const data = await res.json()
+
+        if (!res.ok) {
+          setTradeError(data.error ?? 'Trade failed')
+          return
+        }
+
+        setTradeResult(data)
+      } else {
+
+        // tokenAmount is human-readable (e.g. "1500000" = 1.5M tokens).
+        // Convert to raw units (* 10^6 for pump.fun 6-decimal tokens).
+        const [whole = '0', frac = ''] = tokenAmount.split('.')
+        const fracPadded = frac.padEnd(6, '0').slice(0, 6)
+        let tokens: BN
+        try { tokens = new BN(whole).mul(new BN(1_000_000)).add(new BN(fracPadded)) } catch { return }
+        if (tokens.isZero()) return
+
+          setExecutingTrade(true)
+          setTradeError('')
+
+          const res = await fetch('/api/pumpfun/sell', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            walletId:    selectedWallet.id,
+            mintAddress,
+            tokenAmount: tokens.toString(),
+            slippage,
+          }),
+        })
+
+        const data = await res.json()
+
+        if (!res.ok) {
+          setTradeError(data.error ?? 'Trade failed')
+          return
+        }
+
+        setTradeResult(data)
       }
-
-      setTradeResult(data)
-    } catch {
-      setTradeError('Network error — please try again')
+    } catch(error) {
+      setTradeError(`${error}error — please try again`)
     } finally {
       setExecutingTrade(false)
     }
