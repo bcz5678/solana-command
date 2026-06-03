@@ -31,6 +31,10 @@ export function TokenTradePanel() {
   const [wallets, setWallets] = useState<WalletRecord[]>([]);
   const [walletsLoading, setWalletsLoading ] = useState<boolean>(false);
 
+  const [tokenHolding,   setTokenHolding]   = useState<number | null>(null)
+  const [holdingLoading, setHoldingLoading] = useState(false)
+  const [holdingError,   setHoldingError]   = useState('')
+
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [debouncedMint, setDebouncedMint] = useState('')
 
@@ -46,7 +50,7 @@ export function TokenTradePanel() {
       .finally(() => setWalletsLoading(false))
   }, [])
 
-    // Debounce mint address input — fetch token after 600ms pause
+    // Debounce mint address input — fetch token after 1000ms pause
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
 
@@ -54,6 +58,9 @@ export function TokenTradePanel() {
       debounceRef.current = setTimeout(() => {
         setDebouncedMint(mintAddress)
         fetchToken(mintAddress)
+        if (tradeType === 'sell' && selectedWallet) {
+          fetchHolding(selectedWallet.public_key, mintAddress)
+        }
       }, 1000)
     } else {
       clearToken()
@@ -112,14 +119,51 @@ export function TokenTradePanel() {
     }
   }
 
+  useEffect(() => {
+    if (tradeType === 'buy') {
+      setTokenHolding(null)
+      setHoldingError('')
+    } else if (selectedWallet && mintAddress.length >= 32) {
+      fetchHolding(selectedWallet.public_key, mintAddress)
+    }
+  }, [tradeType]) // eslint-disable-line react-hooks/exhaustive-deps
+
   function reset () {
     setTradeResult(null)
     setTradeError('');
   }
 
-   function clearToken() {
-    setTokenInfo(null);
-    setTokenError('');
+  function clearToken() {
+    setTokenInfo(null)
+    setTokenError('')
+    setTokenHolding(null)
+    setHoldingError('')
+  }
+
+  async function fetchHolding(walletPublicKey: string, mint: string) {
+    setHoldingLoading(true)
+    setHoldingError('')
+    setTokenHolding(null)
+    try {
+      const res = await fetch(
+        `/api/pumpfun/wallet-holding?walletAddress=${encodeURIComponent(walletPublicKey)}&mintAddress=${encodeURIComponent(mint)}`
+      )
+      if (!res.ok) throw new Error()
+      const { balance } = await res.json()
+      setTokenHolding(balance)
+      if (balance === 0) setHoldingError('This wallet holds none of this token')
+    } catch {
+      setHoldingError('Failed to check token holdings')
+    } finally {
+      setHoldingLoading(false)
+    }
+  }
+
+  function handleWalletSelect(wallet: WalletRecord) {
+    setSelectedWallet(wallet)
+    if (tradeType === 'sell' && mintAddress.length >= 32) {
+      fetchHolding(wallet.public_key, mintAddress)
+    }
   }
 
   async function handleTrade() {
@@ -204,17 +248,12 @@ export function TokenTradePanel() {
 
   
   function canTrade() {
-    if(
-      !!tokenInfo &&
-      !!selectedWallet &&
-      !tokenInfo.complete &&
-      (tradeType === 'buy' ? !!amountInSol : !!tokenAmount) &&
-      !executingTrade
-    ) {
-      return true
-    } else {
-      return false
-    }
+    if (!tokenInfo || !selectedWallet || tokenInfo.complete || executingTrade) return false
+    if (tradeType === 'buy') return !!amountInSol
+    if (!tokenHolding || tokenHolding === 0) return false
+    if (!tokenAmount) return false
+    const amount = parseFloat(tokenAmount)
+    return !isNaN(amount) && amount > 0 && amount <= tokenHolding
   }
 
 
@@ -309,10 +348,22 @@ export function TokenTradePanel() {
         </Label>
         <WalletSelector
           wallets={wallets}
-          loading={walletsLoading}
+          loading={walletsLoading || holdingLoading}
           selected={selectedWallet}
-          onSelect={setSelectedWallet}
+          onSelect={handleWalletSelect}
         />
+        {tradeType === 'sell' && holdingError && (
+          <p className="flex items-center gap-1.5 text-xs text-destructive">
+            <span>⚠</span> {holdingError}
+          </p>
+        )}
+        {tradeType === 'sell' && tokenHolding != null && tokenHolding > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Holdings: <span className="font-mono font-semibold text-foreground">
+              {tokenHolding.toLocaleString()} {tokenInfo?.symbol ?? 'tokens'}
+            </span>
+          </p>
+        )}
       </div>
 
       {/* ── Amount Input ───────────────────────────────────── */}
@@ -325,6 +376,7 @@ export function TokenTradePanel() {
         estimatedSol={estimatedSol}
         onSolChange={setAmountInSol}
         onTokenChange={setTokenAmount}
+        maxTokenAmount={tokenHolding}
       />
 
       {/* ── Slippage ───────────────────────────────────────── */}
@@ -341,13 +393,13 @@ export function TokenTradePanel() {
       {/* ── Submit Button ──────────────────────────────────── */}
       <button
         onClick={handleTrade}
-        disabled={!canTrade}
+        disabled={!canTrade()}
         className={cn(
           'w-full py-3 rounded-xl flex items-center justify-center gap-2',
           'text-sm font-semibold transition-all duration-200 cursor-pointer',
           tradeType === 'buy'
             ? 'bg-primary text-primary-foreground shadow-sm hover:enabled:opacity-90'
-            : 'bg-destructive text-destructive-foreground shadow-sm hover:enabled:opacity-90',
+            : 'bg-red-500 text-primary-foreground shadow-sm hover:enabled:opacity-90',
           'enabled:hover:-translate-y-px',
           'disabled:opacity-40 disabled:cursor-not-allowed'
         )}

@@ -15,6 +15,7 @@ interface AmountInputProps {
   estimatedSol:    string | null
   onSolChange:     (v: string) => void
   onTokenChange:   (v: string) => void
+  maxTokenAmount?: number | null
 }
 
 const SOL_PRESETS   = [0.01, 0.05, 0.1, 0.5, 1]
@@ -23,9 +24,17 @@ const TOKEN_PRESETS = [25, 50, 75, 100]
 export function AmountInput({
   tradeType, tokenInfo, amountInSol, tokenAmount,
   estimatedOutput, estimatedSol, onSolChange, onTokenChange,
+  maxTokenAmount,
 }: AmountInputProps) {
-  const symbol = tokenInfo?.symbol ?? 'TOKEN'
-  const isBuy  = tradeType === 'buy'
+  const symbol    = tokenInfo?.symbol ?? 'TOKEN'
+  const isBuy     = tradeType === 'buy'
+  const exceedsMax = !isBuy && maxTokenAmount != null && !!tokenAmount && parseFloat(tokenAmount) > maxTokenAmount
+
+  function tokenPresetAmount(pct: number): string {
+    if (maxTokenAmount == null) return String(pct)
+    const amount = maxTokenAmount * pct / 100
+    return amount % 1 === 0 ? String(amount) : parseFloat(amount.toFixed(6)).toString()
+  }
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -56,7 +65,7 @@ export function AmountInput({
                 key={p}
                 variant="outline"
                 size="xs"
-                onClick={() => onTokenChange(String(p))}
+                onClick={() => onTokenChange(tokenPresetAmount(p))}
               >
                 {p}%
               </Button>
@@ -76,7 +85,8 @@ export function AmountInput({
             'h-12 pr-24 font-mono text-lg font-semibold',
             '[appearance:textfield]',
             '[&::-webkit-outer-spin-button]:appearance-none',
-            '[&::-webkit-inner-spin-button]:appearance-none'
+            '[&::-webkit-inner-spin-button]:appearance-none',
+            exceedsMax && 'border-destructive focus-visible:ring-destructive'
           )}
         />
         <div
@@ -91,6 +101,12 @@ export function AmountInput({
           {isBuy ? <><SolIcon /> SOL</> : symbol}
         </div>
       </div>
+
+      {exceedsMax && (
+        <p className="flex items-center gap-1.5 text-xs text-destructive">
+          <span>⚠</span> Exceeds your holding of {maxTokenAmount!.toLocaleString()} {symbol}
+        </p>
+      )}
 
       {/* Estimated receive — buy */}
       {isBuy && estimatedOutput && (
