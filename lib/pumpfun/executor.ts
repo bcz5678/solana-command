@@ -95,10 +95,14 @@ export class Executor {
       });
 
       const price = solAmount.toNumber() / tokenAmount.toNumber();
-      const signature = await this.sendTransaction(instructions);
 
-      console.log(`BUY ${mint.toBase58().slice(0, 8)}… | ${(solAmount.toNumber() / 1e9).toFixed(4)} SOL → ${tokenAmount.toString()} tokens | sig=${signature.slice(0, 16)}…`);
-      return { success: true, signature, solAmount, tokenAmount, price };
+      console.log(`BUY ${mint.toBase58().slice(0, 8)}… | ${(solAmount.toNumber() / 1e9).toFixed(4)} SOL → ${tokenAmount.toString()} tokens | sig=`);
+      return { success: false, signature: 'test', solAmount, tokenAmount, price };
+
+      //const signature = await this.sendTransaction(instructions);
+
+      //console.log(`BUY ${mint.toBase58().slice(0, 8)}… | ${(solAmount.toNumber() / 1e9).toFixed(4)} SOL → ${tokenAmount.toString()} tokens | sig=${signature.slice(0, 16)}…`);
+      //return { success: true, signature, solAmount, tokenAmount, price };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.log(`BUY FAILED ${mint.toBase58().slice(0, 8)}…: ${msg}`);

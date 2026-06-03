@@ -6,16 +6,14 @@ import { getTokenSnapshot } from '@/lib/pumpfun/token-snapshot';
 import { TokenSnapshot } from '@/lib/types/token-pumpfun';
 
 
-export async function GET(request: NextRequest) {   
+export async function GET(request: NextRequest) {       
     const url = new URL(request.url);
     const mintAddress = url.searchParams.get('mintAddress');
    
-
     try{
         
         if(mintAddress != null){
             const tokenSnapshotResponse: TokenSnapshot | null = await getTokenSnapshot(new PublicKey(mintAddress)); 
-        
             if (tokenSnapshotResponse != null) {
                 return NextResponse.json({
                     message: "Token Snapshot",

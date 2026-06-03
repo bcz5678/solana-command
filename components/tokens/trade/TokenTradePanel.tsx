@@ -6,8 +6,8 @@ import { cn }                           from '@/lib/utils'
 import { Input }                        from '@/components/ui/input'
 import { Label }                        from '@/components/ui/label'
 import { TokenSnapshot } from '@/lib/types/token-pumpfun'
+import { PublicKey } from '@solana/web3.js'
 import { solStringToLamports, lamportsBNToSolDisplay, lamportsStringToBN } from '@/lib/lamports'
-import { useWallets }                   from './hooks/useWallets'
 import { useTrade, TradeType }          from './hooks/useTrade'
 import { TokenCard }                    from './TokenCard'
 import { WalletSelector }               from './WalletSelector'
@@ -23,14 +23,21 @@ export function TokenTradePanel() {
   const [amountInSol,    setAmountInSol]    = useState('')
   const [tokenAmount,    setTokenAmount]    = useState('')
   const [slippage,       setSlippage]       = useState(0.01)
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [tokenLoading, setTokenLoading]  = useState(false);
-  const [tokenError, setTokenError] = useState(null);
+  const [tokenError, setTokenError] = useState('');
   const [tokenInfo, setTokenInfo] = useState<TokenSnapshot | null>(null);
   
   const [wallets, setWallets] = useState<WalletRecord[]>([]);
   const [walletsLoading, setWalletsLoading ] = useState<boolean>(false);
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [debouncedMint, setDebouncedMint] = useState('')
+
+    
+  const [tradeResult, setTradeResult] = useState(null);
+  const [tradeError, setTradeError] = useState('');
+  const [executingTrade, setExecutingTrade] = useState(false);
 
   useEffect(() => {
     setWalletsLoading(true)
@@ -39,12 +46,25 @@ export function TokenTradePanel() {
       .finally(() => setWalletsLoading(false))
   }, [])
 
-  
-  const [tradeResult, setTradeResult] = useState(null);
-  const [tradeError, setTradeError] = useState(null);
-  const [executingTrade, setExecutingTrade] = useState(false);
+    // Debounce mint address input — fetch token after 600ms pause
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
 
-  
+    if (mintAddress.length >= 32) {
+      debounceRef.current = setTimeout(() => {
+        setDebouncedMint(mintAddress)
+        fetchToken(mintAddress)
+      }, 1000)
+    } else {
+      clearToken()
+    }
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [mintAddress, fetchToken, clearToken])
+
+
 
   async function getWalletsList(): Promise<WalletRecord[] | null> {
     try {
@@ -62,29 +82,86 @@ export function TokenTradePanel() {
     }
   }
 
-  async function getTokenInfo(mintAddress: string): Promise<TokenSnapshot | null> {
+  async function fetchToken(mint: string): Promise<void> {
     try {
-      const res = await fetch(`/api/pumpfun/token-info?mintAddress=${encodeURIComponent(mintAddress)}`)
-      if (!res.ok) return null
-      const data = await res.json()
-      return data.body.snapshot as TokenSnapshot
-    } catch {
-      return null
+      const res = await fetch(`/api/pumpfun/token-info?mintAddress=${encodeURIComponent(mint)}`)
+      if (!res.ok) throw new Error('Token not found')
+      const { body: { snapshot: raw } } = await res.json()
+
+      // BN fields arrive as hex strings (BN.toJSON → hex).
+      // PublicKey fields arrive as base58 strings (PublicKey.toJSON → toBase58).
+      const snapshot = {
+        ...raw,
+        virtualSolReserves:     new BN(raw.virtualSolReserves,   16),
+        virtualTokenReserves:   new BN(raw.virtualTokenReserves, 16),
+        totalSupply:            new BN(raw.totalSupply,           16),
+        realSolReserves:        new BN(raw.realSolReserves,       16),
+        realTokenReserves:      new BN(raw.realTokenReserves,     16),
+        initialMarketCap:       new BN(raw.initialMarketCap,      16),
+        marketCap:              new BN(raw.marketCap,             16),
+        athMarketCap:           new BN(raw.athMarketCap,          16),
+        mint:                   new PublicKey(raw.mint),
+        bondingCurve:           new PublicKey(raw.bondingCurve),
+        associatedBondingCurve: new PublicKey(raw.associatedBondingCurve),
+        creator:                new PublicKey(raw.creator),
+      } as unknown as TokenSnapshot
+
+      setTokenInfo(snapshot)
+    } catch (error) {
+      setTokenError(error instanceof Error ? error.message : 'Failed to load token')
     }
   }
 
   function reset () {
     setTradeResult(null)
-    setTradeError(null);
+    setTradeError('');
   }
 
    function clearToken() {
     setTokenInfo(null);
-    setTokenError(null);
+    setTokenError('');
   }
 
-  function handleTrade() {
+  async function handleTrade() {
+    console.log(`button test - selectedWallet: ${selectedWallet?.id}`);
+    console.log(`button test - tokenInfo: ${tokenInfo}`);
 
+    if (!selectedWallet || !tokenInfo || tokenInfo.complete) return
+
+  
+
+    let lamports: BN
+    try { lamports = solStringToLamports(amountInSol) } catch { return }
+    if (lamports.isZero()) return
+
+    setExecutingTrade(true)
+    setTradeError('')
+
+    try {
+      const res = await fetch('/api/pumpfun/buy', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          walletId:    selectedWallet.id,
+          mintAddress,
+          amountInSol: lamports.toString(),
+          slippage,
+        }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        setTradeError(data.error ?? 'Trade failed')
+        return
+      }
+
+      setTradeResult(data)
+    } catch {
+      setTradeError('Network error — please try again')
+    } finally {
+      setExecutingTrade(false)
+    }
   }
 
 
@@ -140,20 +217,7 @@ export function TokenTradePanel() {
     }
   }
 
-  /*
-  async function handleTrade() {
-    if (!selectedWallet || !tokenInfo) return
-    const amount = tradeType === 'buy'
-      ? parseFloat(amountInSol)
-      : parseFloat(estimatedSol ?? '0')
-    if (!amount || amount <= 0) return
-    await execute({ type: tradeType, walletId: selectedWallet.id, mintAddress, amountInSol: amount, slippage })
-  }
-  
-  if (result) {
-    return <TradeResult result={result} tradeType={tradeType} onReset={reset} />
-  }
-    */
+
 
   return (
     <div className="w-full max-w-130 mx-auto flex flex-col gap-5 px-4 py-8">

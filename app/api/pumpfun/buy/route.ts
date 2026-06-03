@@ -5,16 +5,15 @@ import { OnlinePumpSdk } from "@nirholas/pump-sdk";
 import BN from 'bn.js';
 
 import { Keypair, PublicKey } from '@solana/web3.js';
-import { getWalletKeypairById } from "@/lib/vault/get-wallet-by-id"; 
-import { ExecuteResult, Executor } from "@/lib/pumpfun/executor";
+import { getWalletKeypairById } from "@/lib/vault/get-wallet-by-id";
+import { Executor } from "@/lib/pumpfun/executor";
 
 
 interface BuyTokenBody {
-    walletId: string
+    walletId:    string
     mintAddress: string
-    amountInSol: BN,
-    slippage: number,
-
+    amountInSol: string   // lamports as decimal string — BN can't cross JSON
+    slippage:    number
 }
 
 // initialize connection
@@ -38,9 +37,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
     }
 
-    const { walletId, mintAddress, amountInSol, slippage } = body
-
-    const mintAddressPublicKey = new PublicKey(mintAddress);
+    const { walletId, mintAddress, amountInSol: amountInSolRaw, slippage } = body
 
     const missing = ['walletId', 'mintAddress', 'amountInSol', 'slippage']
         .filter(k => body[k as keyof BuyTokenBody] == null)
@@ -49,6 +46,16 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
         { error: `Missing fields: ${missing.join(', ')}` },
         { status: 400 }
+        )
+    }
+
+    let amountInSol: BN
+    try {
+        amountInSol = new BN(amountInSolRaw)
+    } catch {
+        return NextResponse.json(
+            { error: 'amountInSol must be a valid integer string (lamports)' },
+            { status: 400 }
         )
     }
 
@@ -66,6 +73,7 @@ export async function POST(request: NextRequest) {
         )
     }
 
+    const mintAddressPublicKey = new PublicKey(mintAddress);
 
     // Get Wallet Keypair by the ID
 
@@ -94,6 +102,8 @@ export async function POST(request: NextRequest) {
             amountInSol,
             slippage,
         );
+
+        return NextResponse.json({ signature: buySignature }, { status: 200 })
     } catch (err) {
         buyer?.secretKey.fill(0)
         return NextResponse.json(
@@ -104,13 +114,4 @@ export async function POST(request: NextRequest) {
         // Zero out the secretKey memory
         buyer.secretKey.fill(0);
     }
-
-
 }
-
-
-
-
-
-
-
