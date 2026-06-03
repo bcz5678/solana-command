@@ -35,7 +35,8 @@ export function TokenTradePanel() {
   const [holdingLoading, setHoldingLoading] = useState(false)
   const [holdingError,   setHoldingError]   = useState('')
 
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const debounceRef        = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastHoldingMintRef = useRef('')
   const [debouncedMint, setDebouncedMint] = useState('')
 
     
@@ -58,7 +59,8 @@ export function TokenTradePanel() {
       debounceRef.current = setTimeout(() => {
         setDebouncedMint(mintAddress)
         fetchToken(mintAddress)
-        if (tradeType === 'sell' && selectedWallet) {
+        if (tradeType === 'sell' && selectedWallet && mintAddress !== lastHoldingMintRef.current) {
+          lastHoldingMintRef.current = mintAddress
           fetchHolding(selectedWallet.public_key, mintAddress)
         }
       }, 1000)
@@ -138,6 +140,7 @@ export function TokenTradePanel() {
     setTokenError('')
     setTokenHolding(null)
     setHoldingError('')
+    lastHoldingMintRef.current = ''
   }
 
   async function fetchHolding(walletPublicKey: string, mint: string) {
