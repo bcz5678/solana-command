@@ -5,12 +5,25 @@ import { LaunchConfig } from './launch-config-class';
 import LaunchTokenPreview from './launch-token-preview';
 import LaunchTokenFinal from './launch-token-final';
 
+export interface LaunchResult {
+    message:      string
+    mintId?:      string
+    mintAddress?: string
+    tokenName?:   string
+    tokenSymbol?: string
+    signature?:   string
+    explorerUrl?: string
+    pumpUrl?:     string
+    partial?:     boolean
+    error?:       string
+}
+
 type Props = {
     launchConfig: LaunchConfig;
 }
 
 export default function LaunchToken({ launchConfig }: Props) {
-    const [launchSubmitted, setLaunchSubmitted] = useState<boolean>(false);
+    const [launchResult, setLaunchResult] = useState<LaunchResult | null>(null);
 
     async function handleLaunch() {
         try {
@@ -19,21 +32,17 @@ export default function LaunchToken({ launchConfig }: Props) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ launchConfig }),
             });
-           
-            if (!response.ok) {
-                throw new Error('Network response was not ok');
-            }
-            const data = await response.json();
-            console.log(data);
 
+            const data: LaunchResult = await response.json();
+            setLaunchResult(data);
         } catch (error) {
             console.log(`components/tokens/launch/launch-token -> handleLaunch -> error: ${error}`);
+            setLaunchResult({ message: 'Launch failed', error: (error as Error).message });
         }
-        setLaunchSubmitted(true);
     }
 
-    if (launchSubmitted) {
-        <LaunchTokenFinal />
+    if (launchResult) {
+        return <LaunchTokenFinal result={launchResult} />;
     }
 
     return <LaunchTokenPreview launchConfig={launchConfig} onLaunch={handleLaunch} />;

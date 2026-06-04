@@ -33,8 +33,17 @@ function SubCard({ title, children }: { title: string; children: React.ReactNode
 
 export default function LaunchTokenPreview({ launchConfig, onLaunch }: Props) {
     const totalSOL = lamportsBNToSolDisplay(launchConfig.totalSOLInLamports)
-    const buyerWalletCount = launchConfig.walletTrades.length
-    const totalWallets = launchConfig.walletTrades.length + 1
+    const devWalletId = launchConfig.token?.dev_wallet_id != null
+        ? String(launchConfig.token.dev_wallet_id)
+        : null
+    const devWalletIsBuyer = devWalletId != null
+        && launchConfig.walletTrades.some(t => t.walletId === devWalletId)
+    const buyerWalletCount = devWalletIsBuyer
+        ? launchConfig.walletTrades.length - 1
+        : launchConfig.walletTrades.length
+    const totalWallets = devWalletIsBuyer
+        ? launchConfig.walletTrades.length
+        : launchConfig.walletTrades.length + 1
 
     return (
         <div className="flex flex-col gap-4 w-full">

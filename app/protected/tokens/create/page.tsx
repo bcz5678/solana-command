@@ -29,7 +29,7 @@ export default function Page() {
         // Step 1 — Claim vanity mint
         setStep('claimVanityMint', 'loading')
 
-        const vanityMintResponse = await fetch('/api/token/claim-vanity', { method: 'POST' })
+        const vanityMintResponse = await fetch('/api/token-mint/claim-vanity', { method: 'POST' })
 
         if (!vanityMintResponse.ok) {
             setStep('claimVanityMint', 'error')
@@ -60,7 +60,7 @@ export default function Page() {
         const imageForm = new FormData()
         imageForm.append('image', renamedImage)
 
-        const uploadImageResponse = await fetch('/api/token/upload-image', {
+        const uploadImageResponse = await fetch('/api/token-mint/upload-image', {
             method: 'POST',
             body: imageForm,   // do NOT set Content-Type — browser adds the boundary automatically
         })
@@ -77,7 +77,7 @@ export default function Page() {
         // Step 3 — Upload token meta to AWS
         setStep('uploadTokenMeta', 'loading')
 
-        const uploadMetaResponse = await fetch('/api/token/upload-meta', {
+        const uploadMetaResponse = await fetch('/api/token-mint/upload-meta', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -112,7 +112,7 @@ export default function Page() {
         // Step 4 — Build token & store in DB
         setStep('saveToken', 'loading')
 
-        const buildTokenResponse = await fetch('/api/token/build', {
+        const buildTokenResponse = await fetch('/api/token-mint/build', {
             method: 'POST',
             body: JSON.stringify({
                 keypairId: vanityId,
@@ -144,7 +144,7 @@ export default function Page() {
         // Step 6 — Update vanity mint
         setStep('updateVanityMint', 'loading')
 
-        const updateVanityMintResponse = await fetch('/api/token/update-vanity-mint', {
+        const updateVanityMintResponse = await fetch('/api/token-mint/update-vanity-mint', {
           method: 'PATCH',
           body: JSON.stringify({
             keypairId: vanityId,

@@ -49,18 +49,16 @@ export async function POST(req: NextRequest) {
     })
     .single() as { data: ClaimedKeypair | null; error: { message: string } | null }
 
-  if (claimError || !claimed) {
-    console.error('[claim-vanity] error:', claimError?.message)
 
-    return NextResponse.json(
-      {
-        error: claimError?.message?.includes('No available')
-          ? 'No vanity keypairs available in pool — import more'
-          : claimError?.message ?? 'Failed to claim vanity keypair'
-      },
-      { status: claimError?.message?.includes('No available') ? 503 : 500 }
-    )
-  }
+if (claimError || !claimed) {// ← log full error
+  return NextResponse.json(
+    {
+      error: claimError?.message ?? 'Failed to claim vanity keypair',  // ← return raw
+      debug: claimError                                                  // ← full object
+    },
+    { status: 500 }
+  )
+}
 
   // ── 5. Return public key + keypair ID only ─────────────────
   // vault_secret_name intentionally excluded — server use only in Phase 2
