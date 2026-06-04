@@ -4,7 +4,7 @@ import {
   PUMP_SDK,
   OnlinePumpSdk,
   getBuyTokenAmountFromSolAmount,
-  canonicalPumpPoolPda,
+  maxSafeSellAmount,
 } from '@nirholas/pump-sdk';
 import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
 
@@ -29,17 +29,20 @@ export class Executor {
   private readonly wallet: Keypair;
   private readonly defaultSlippage: number;
   private readonly maxRetries: number;
+  private readonly maxChunks: number;
 
   constructor(opts: {
     connection: Connection;
     wallet: Keypair;
     defaultSlippage?: number;
     maxRetries?: number;
+    maxChunks?: number;
   }) {
     this.connection = opts.connection;
     this.wallet = opts.wallet;
     this.defaultSlippage = opts.defaultSlippage ?? 0.05; // 5%
     this.maxRetries = opts.maxRetries ?? 2;
+    this.maxChunks = opts.maxChunks ?? 5;
     this.onlineSdk = new OnlinePumpSdk(this.connection);
   }
 
@@ -128,6 +131,23 @@ export class Executor {
         return this.ammSell(mint, tokenAmount, slippage);
       }
 
+      // Estimate chunk count from current state. As tokens are sold the bonding
+      // curve shifts and chunks get larger, so this is a conservative upper bound.
+      const chunkSize = maxSafeSellAmount(initialSellState.bondingCurve.virtualSolReserves);
+      if (chunkSize.gtn(0)) {
+        const estimatedChunks = tokenAmount.div(chunkSize).addn(1).toNumber();
+        if (estimatedChunks > this.maxChunks) {
+          const maxSellable = chunkSize.muln(this.maxChunks);
+          return {
+            success: false,
+            error: `Sell amount requires ~${estimatedChunks} transactions (limit: ${this.maxChunks}). Max sellable in one call: ${maxSellable.toString()} raw units.`,
+            solAmount: new BN(0),
+            tokenAmount,
+            price: 0,
+          };
+        }
+      }
+
       // sellChunked re-fetches state per chunk and splits automatically when
       // the amount would overflow the on-chain u64 multiply.
       const signatures = await this.onlineSdk.sellChunked({
@@ -179,20 +199,18 @@ export class Executor {
   private async ammBuy(mint: PublicKey, solAmount: BN, slippage?: number): Promise<ExecuteResult> {
     const slip = slippage ?? this.defaultSlippage;
     try {
-      const poolPda = canonicalPumpPoolPda(mint);
-      const minBaseOut = solAmount.muln(Math.floor((1 - slip) * 10000)).divn(10000);
-
-      const buildInstructions = async () => [await PUMP_SDK.ammBuyExactQuoteInInstruction({
-        user: this.wallet.publicKey,
-        pool: poolPda,
+      // ammBuyInstructions fetches pool state and computes minBaseAmountOut from
+      // the current price — slip is a decimal; the SDK multiplies by 100 internally
+      const buildInstructions = () => this.onlineSdk.ammBuyInstructions({
         mint,
-        quoteAmountIn: solAmount,
-        minBaseAmountOut: minBaseOut,
-      })];
+        user: this.wallet.publicKey,
+        solAmount,
+        slippage: slip,
+      });
 
       const signature = await this.sendTransaction(buildInstructions);
       console.log(`AMM BUY ${mint.toBase58().slice(0, 8)}… | ${(solAmount.toNumber() / 1e9).toFixed(4)} SOL | sig=${signature.slice(0, 16)}…`);
-      return { success: true, signature, solAmount, tokenAmount: minBaseOut, price: 0 };
+      return { success: true, signature, solAmount, tokenAmount: new BN(0), price: 0 };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.log(`AMM BUY FAILED: ${msg}`);
@@ -204,16 +222,14 @@ export class Executor {
   private async ammSell(mint: PublicKey, tokenAmount: BN, slippage?: number): Promise<ExecuteResult> {
     const slip = slippage ?? this.defaultSlippage;
     try {
-      const poolPda = canonicalPumpPoolPda(mint);
-      const minQuoteOut = new BN(0); // Accept any SOL amount (slippage applied in instruction)
-
-      const buildInstructions = async () => [await PUMP_SDK.ammSellInstruction({
-        user: this.wallet.publicKey,
-        pool: poolPda,
+      // ammSellInstructions fetches pool state and computes minQuoteAmountOut from
+      // the current price — slip is a decimal; the SDK multiplies by 100 internally
+      const buildInstructions = () => this.onlineSdk.ammSellInstructions({
         mint,
-        baseAmountIn: tokenAmount,
-        minQuoteAmountOut: minQuoteOut,
-      })];
+        user: this.wallet.publicKey,
+        tokenAmount,
+        slippage: slip,
+      });
 
       const signature = await this.sendTransaction(buildInstructions);
       console.log(`AMM SELL ${mint.toBase58().slice(0, 8)}… | ${tokenAmount.toString()} tokens | sig=${signature.slice(0, 16)}…`);
