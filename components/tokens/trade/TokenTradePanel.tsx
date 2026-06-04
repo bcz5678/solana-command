@@ -8,12 +8,11 @@ import { Label }                        from '@/components/ui/label'
 import { TokenSnapshot } from '@/lib/types/token-pumpfun'
 import { PublicKey } from '@solana/web3.js'
 import { solStringToLamports, lamportsBNToSolDisplay, lamportsStringToBN } from '@/lib/lamports'
-import { useTrade, TradeType }          from './hooks/useTrade'
+import { TradeType }                    from './hooks/useTrade'
 import { TokenCard }                    from './TokenCard'
 import { WalletSelector }               from './WalletSelector'
 import { AmountInput }                  from './AmountInput'
 import { SlippageControl }              from './SlippageControl'
-import { TradeResult }                  from './TradeResult'
 import { WalletRecord }                 from '@/lib/types/wallet'
 
 export function TokenTradePanel() {
@@ -37,10 +36,7 @@ export function TokenTradePanel() {
 
   const debounceRef        = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastHoldingMintRef = useRef('')
-  const [debouncedMint, setDebouncedMint] = useState('')
 
-    
-  const [tradeResult, setTradeResult] = useState(null);
   const [tradeError, setTradeError] = useState('');
   const [executingTrade, setExecutingTrade] = useState(false);
 
@@ -57,7 +53,6 @@ export function TokenTradePanel() {
 
     if (mintAddress.length >= 32) {
       debounceRef.current = setTimeout(() => {
-        setDebouncedMint(mintAddress)
         fetchToken(mintAddress)
         if (tradeType === 'sell' && selectedWallet && mintAddress !== lastHoldingMintRef.current) {
           lastHoldingMintRef.current = mintAddress
@@ -92,6 +87,7 @@ export function TokenTradePanel() {
   }
 
   async function fetchToken(mint: string): Promise<void> {
+    setTokenLoading(true)
     try {
       const res = await fetch(`/api/pumpfun/token-info?mintAddress=${encodeURIComponent(mint)}`)
       if (!res.ok) throw new Error('Token not found')
@@ -118,6 +114,8 @@ export function TokenTradePanel() {
       setTokenInfo(snapshot)
     } catch (error) {
       setTokenError(error instanceof Error ? error.message : 'Failed to load token')
+    } finally {
+      setTokenLoading(false)
     }
   }
 
@@ -131,7 +129,6 @@ export function TokenTradePanel() {
   }, [tradeType]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function reset () {
-    setTradeResult(null)
     setTradeError('');
   }
 
@@ -203,7 +200,7 @@ export function TokenTradePanel() {
           return
         }
 
-        setTradeResult(data)
+        // trade succeeded
       } else {
 
         // tokenAmount is human-readable (e.g. "1500000" = 1.5M tokens).
@@ -235,7 +232,7 @@ export function TokenTradePanel() {
           return
         }
 
-        setTradeResult(data)
+        // trade succeeded
       }
     } catch(error) {
       setTradeError(`${error}error — please try again`)
@@ -284,7 +281,7 @@ export function TokenTradePanel() {
 
   
   function canTrade() {
-    if (!tokenInfo || !selectedWallet || tokenInfo.complete || executingTrade) return false
+    if (!tokenInfo || !selectedWallet || executingTrade) return false
     if (tradeType === 'buy') return !!amountInSol
     if (!tokenHolding || tokenHolding === 0) return false
     if (!tokenAmount) return false
