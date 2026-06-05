@@ -18,6 +18,7 @@ interface SellTokenBody {
 const quicknodeSolana = initializeQuickNodeSolana();
 
 export async function POST(request: NextRequest) {
+    console.log('[sell] POST received')
     try {
         await requireSuperAdmin()
     } catch (e) {
@@ -32,6 +33,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { walletId, mintAddress, tokenAmount: tokenAmountRaw, slippage } = body
+    console.log('[sell] body:', { walletId, mintAddress, tokenAmount: tokenAmountRaw, slippage })
 
     const missing = ['walletId', 'mintAddress', 'tokenAmount', 'slippage']
         .filter(k => body[k as keyof SellTokenBody] == null)
@@ -64,10 +66,13 @@ export async function POST(request: NextRequest) {
         )
     }
 
+    console.log('[sell] validation passed — loading wallet keypair')
     let buyer: Keypair | null = null
     try {
         buyer = await getWalletKeypairById(walletId)
+        console.log('[sell] keypair loaded OK')
     } catch (err) {
+        console.error('[sell] keypair load failed:', (err as Error).message)
         return NextResponse.json(
             { error: `Failed to load wallet keypair: ${(err as Error).message}` },
             { status: 500 }
@@ -82,13 +87,24 @@ export async function POST(request: NextRequest) {
     });
 
     try {
+        console.log('[sell] calling executor.sell — mint:', mintAddress, 'tokens:', tokenAmount.toString())
         const result = await executor.sell(
             new PublicKey(mintAddress),
             tokenAmount,
             slippage,
         );
-        return NextResponse.json(result, { status: 200 })
+        console.log('[sell] executor.sell result:', JSON.stringify({ success: result.success, error: result.error, signature: result.signature, tokensRemaining: result.tokensRemaining.toString() }))
+        return NextResponse.json(
+            {
+                success:         result.success,
+                signature:       result.signature,
+                error:           result.error,
+                tokensRemaining: result.tokensRemaining.toString(), // BN → string for JSON
+            },
+            { status: result.success ? 200 : 500 }
+        )
     } catch (err) {
+        console.error('[sell] executor threw:', (err as Error).message)
         return NextResponse.json(
             { error: `Transaction failed: ${(err as Error).message}` },
             { status: 500 }

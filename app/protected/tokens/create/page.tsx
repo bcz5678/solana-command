@@ -20,7 +20,7 @@ export default function Page() {
         setSteps(prev => ({ ...prev, [key]: status }))
     }
 
-    const onSubmit = async (data: CreateTokenFormInput, logoFile: File) => {
+    const onSubmit = async (data: CreateTokenFormInput, logoFile: File, bannerFile: File | null) => {
         setSteps(INITIAL_STEPS)
         setErrorMessage('')
         setIsSubmitting(true)
@@ -74,7 +74,36 @@ export default function Page() {
         const { url: imageUrl } = await uploadImageResponse.json()
         setStep('uploadTokenImage', 'success')
 
-        // Step 3 — Upload token meta to AWS
+        // Step 3 — Upload banner image (optional)
+        let bannerUrl: string | null = null
+        if (bannerFile) {
+            setStep('uploadBannerImage', 'loading')
+            const bannerExt = bannerFile.name.split('.').pop()
+            const renamedBanner = new File(
+                [bannerFile],
+                `${data.symbol}_${contractAddress.slice(0, 7)}_banner.${bannerExt}`,
+                { type: bannerFile.type }
+            )
+            const bannerForm = new FormData()
+            bannerForm.append('image', renamedBanner)
+            const uploadBannerResponse = await fetch('/api/token-mint/upload-image', {
+                method: 'POST',
+                body: bannerForm,
+            })
+            if (!uploadBannerResponse.ok) {
+                setStep('uploadBannerImage', 'error')
+                setErrorMessage('Error uploading banner.')
+                setIsSubmitting(false)
+                return
+            }
+            const { url: bUrl } = await uploadBannerResponse.json()
+            bannerUrl = bUrl
+            setStep('uploadBannerImage', 'success')
+        } else {
+            setStep('uploadBannerImage', 'success')
+        }
+
+        // Step 4 — Upload token meta to AWS
         setStep('uploadTokenMeta', 'loading')
 
         const uploadMetaResponse = await fetch('/api/token-mint/upload-meta', {
@@ -121,6 +150,7 @@ export default function Page() {
                 tokenSymbol: data.symbol,
                 description: data.description,
                 logoUrl: imageUrl,
+                bannerUrl,
                 websiteUrl: data.websiteUrl,
                 twitterUrl: data.twitterUrl,
                 telegramHandle: data.telegramHandle,

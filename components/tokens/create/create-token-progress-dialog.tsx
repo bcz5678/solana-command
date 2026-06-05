@@ -23,22 +23,25 @@ export interface TokenCreationStep {
 export type TokenCreationSteps = {
     claimVanityMint: StepStatus
     uploadTokenImage: StepStatus
+    uploadBannerImage: StepStatus
     uploadTokenMeta: StepStatus
     saveToken: StepStatus
     updateVanityMint: StepStatus
 }
 
 const STEP_LABELS: { key: keyof TokenCreationSteps; label: string }[] = [
-    { key: 'claimVanityMint', label: 'Claiming Vanity Mint' },
-    { key: 'uploadTokenImage', label: 'Uploading Token Image to AWS' },
-    { key: 'uploadTokenMeta', label: 'Uploading Token Meta to AWS' },
-    { key: 'saveToken', label: 'Build & Save Token' },
-    { key: 'updateVanityMint', label: 'Updating Vanity Mint' },
+    { key: 'claimVanityMint',   label: 'Claiming Vanity Mint' },
+    { key: 'uploadTokenImage',  label: 'Uploading Logo Image' },
+    { key: 'uploadBannerImage', label: 'Uploading Banner Image' },
+    { key: 'uploadTokenMeta',   label: 'Uploading Token Meta to AWS' },
+    { key: 'saveToken',         label: 'Build & Save Token' },
+    { key: 'updateVanityMint',  label: 'Updating Vanity Mint' },
 ]
 
 export const INITIAL_STEPS: TokenCreationSteps = {
     claimVanityMint: 'idle',
     uploadTokenImage: 'idle',
+    uploadBannerImage: 'idle',
     uploadTokenMeta: 'idle',
     saveToken: 'idle',
     updateVanityMint: 'idle',

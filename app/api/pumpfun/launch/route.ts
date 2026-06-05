@@ -128,6 +128,13 @@ async function processLaunchBlock0(
         );
     }
 
+    if (!launchData.mint_vault_secret_name) {
+        return Response.json(
+            { error: 'Token has no mint vault secret — vanity keypair may not be fully provisioned' },
+            { status: 400 }
+        );
+    }
+
     // ── C. Lock the draft — transition to 'launching' ──────────
     // Prevents a concurrent request from double-launching.
     const { error: lockError } = await admin
@@ -193,8 +200,10 @@ async function processLaunchBlock0(
             p_reason:  `key load failed: ${(err as Error).message}`
         });
 
+        const reason = (err as Error).message;
+        console.error('[launch] key load error:', reason);
         return Response.json(
-            { error: 'Failed to load signing keys' },
+            { error: `Failed to load signing keys: ${reason}` },
             { status: 500 }
         );
     }

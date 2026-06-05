@@ -38,7 +38,7 @@ export interface CreateTokenFormInput {
 }
 
 interface CreateTokenFormProps {
-    onSubmit: (data: CreateTokenFormInput, logoFile: File) => Promise<void>;
+    onSubmit: (data: CreateTokenFormInput, logoFile: File, bannerFile: File | null) => Promise<void>;
     isSubmitting?: boolean;
 }
 
@@ -50,10 +50,13 @@ export default function CreateTokenForm({ onSubmit, isSubmitting = false }: Crea
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [logoError, setLogoError] = useState('');
+    const [bannerFile, setBannerFile] = useState<File | null>(null);
+    const [isDraggingBanner, setIsDraggingBanner] = useState(false);
     const [wallets, setWallets]         = useState<WalletRecord[]>([]);
     const [typeById, setTypeById]       = useState<Record<string, string>>({});
     const [ownerTypeMap, setOwnerTypeMap] = useState<Record<string, string>>({});
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const bannerInputRef = useRef<HTMLInputElement>(null);
 
     const walletGroups: [string, WalletRecord[]][] = Object.entries(
         wallets.reduce<Record<string, WalletRecord[]>>((acc, w) => {
@@ -94,7 +97,7 @@ export default function CreateTokenForm({ onSubmit, isSubmitting = false }: Crea
             return;
         }
         setLogoError('');
-        await onSubmit(data, logoFile);
+        await onSubmit(data, logoFile, bannerFile);
     };
 
     const handleFileSelect = (file: File | null) => {
@@ -108,6 +111,13 @@ export default function CreateTokenForm({ onSubmit, isSubmitting = false }: Crea
         e.preventDefault();
         setIsDragging(false);
         handleFileSelect(e.dataTransfer.files[0] ?? null);
+    };
+
+    const handleBannerDrop = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        setIsDraggingBanner(false);
+        const file = e.dataTransfer.files[0] ?? null;
+        if (file) setBannerFile(file);
     };
 
     return (
@@ -217,6 +227,47 @@ export default function CreateTokenForm({ onSubmit, isSubmitting = false }: Crea
                     )}
                     <FieldDescription className="italic">
                         PNG, JPG, GIF or SVG. Recommended 512×512.
+                    </FieldDescription>
+                </div>
+
+                <div className="mt-4">
+                    <FieldLabel>
+                        Banner Image{' '}
+                        <span className="font-normal text-muted-foreground">(optional)</span>
+                    </FieldLabel>
+                    <div
+                        className={[
+                            "mt-2 flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed px-4 py-6 text-sm transition-colors cursor-pointer",
+                            isDraggingBanner
+                                ? "border-primary bg-primary/5 text-primary"
+                                : "border-border text-muted-foreground hover:border-primary/50 hover:bg-muted/30",
+                        ].join(" ")}
+                        onClick={() => bannerInputRef.current?.click()}
+                        onDragOver={(e) => { e.preventDefault(); setIsDraggingBanner(true); }}
+                        onDragLeave={() => setIsDraggingBanner(false)}
+                        onDrop={handleBannerDrop}
+                    >
+                        <svg className="size-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                        </svg>
+                        {bannerFile ? (
+                            <span className="font-medium text-foreground">{bannerFile.name}</span>
+                        ) : (
+                            <span>Drag & drop or <span className="text-primary underline">browse</span></span>
+                        )}
+                        <input
+                            ref={bannerInputRef}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                                const file = e.target.files?.[0] ?? null;
+                                if (file) setBannerFile(file);
+                            }}
+                        />
+                    </div>
+                    <FieldDescription className="italic">
+                        PNG, JPG, GIF or SVG. Recommended 1500×500.
                     </FieldDescription>
                 </div>
 

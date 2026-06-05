@@ -30,6 +30,7 @@ interface UpdateTokenDraftBody {
 
   // ── Link fields (three-state — '' clears) ────────────────
   logoUrl?:         string
+  bannerUrl?:       string
   websiteUrl?:      string
   twitterUrl?:      string
   telegramHandle?:  string
@@ -88,7 +89,7 @@ export async function POST(req: NextRequest) {
   // ── 3. Confirm at least one field is being changed ─────────
   const updatableKeys: (keyof UpdateTokenDraftBody)[] = [
     'tokenName', 'tokenSymbol', 'description',
-    'logoUrl', 'websiteUrl', 'twitterUrl', 'telegramHandle',
+    'logoUrl', 'bannerUrl', 'websiteUrl', 'twitterUrl', 'telegramHandle',
     'tiktokUrl', 'instagramUrl', 'discordUrl', 'communitiesUrl',
     'decimals', 'maxSupply', 'metadataUri',
     'freezeAuthorityKey', 'updateAuthorityKey', 'devWalletId'
@@ -175,6 +176,7 @@ export async function POST(req: NextRequest) {
 
       // Links — '' clears, value sets, null keeps
       p_logo_url:             passthrough(body.logoUrl),
+      p_banner_url:           passthrough(body.bannerUrl),
       p_website_url:          passthrough(body.websiteUrl),
       p_twitter_url:          passthrough(body.twitterUrl),
       p_telegram_handle:      passthrough(body.telegramHandle),

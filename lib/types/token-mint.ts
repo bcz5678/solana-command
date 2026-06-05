@@ -10,6 +10,7 @@ export interface TokenMint {
   token_symbol:      string
   description:       string | null
   logo_url:          string | null
+  banner_url:        string | null
 
   // Primary links
   website_url:       string | null   // ← now wired
@@ -42,11 +43,20 @@ export interface TokenMint {
 export interface TokenMetaDTO {
     name: string
     symbol: string
-    description?: string
-    logo_url?: string
-    website_url?: string
-    twitter_url?: string
-    telegram_handle?: string
+    description:      string | null
+    logo_url:          string | null
+    banner_url:        string | null
+
+    // Primary links
+    website_url:       string | null   // ← now wired
+    twitter_url:       string | null   // ← now wired
+    telegram_handle:   string | null   // ← now wired
+
+    // Social links
+    tiktok_url:        string | null
+    instagram_url:     string | null
+    discord_url:       string | null
+    communities_url:   string | null
 }
 
 

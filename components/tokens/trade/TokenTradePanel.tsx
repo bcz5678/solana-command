@@ -214,25 +214,43 @@ export function TokenTradePanel() {
           setExecutingTrade(true)
           setTradeError('')
 
-          const res = await fetch('/api/pumpfun/sell', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            walletId:    selectedWallet.id,
-            mintAddress,
-            tokenAmount: tokens.toString(),
-            slippage,
-          }),
-        })
+          // Auto-retry loop: the route caps each call to MAX_CHUNKS_PER_CALL
+          // transactions to avoid timeouts. We keep calling until tokensRemaining = 0.
+          let remaining = tokens
+          let lastSignature = ''
+          let batch = 0
 
-        const data = await res.json()
+          while (remaining.gtn(0)) {
+            batch++
+            console.log(`[sell] batch ${batch} — sending ${remaining.toString()} raw tokens`)
 
-        if (!res.ok) {
-          setTradeError(data.error ?? 'Trade failed')
-          return
-        }
+            const res = await fetch('/api/pumpfun/sell', {
+              method:  'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                walletId:    selectedWallet.id,
+                mintAddress,
+                tokenAmount: remaining.toString(),
+                slippage,
+              }),
+            })
 
-        // trade succeeded
+            console.log(`[sell] batch ${batch} response status:`, res.status)
+            const data = await res.json()
+            console.log(`[sell] batch ${batch} response body:`, data)
+
+            if (!res.ok || !data.success) {
+              setTradeError(data.error ?? 'Sell failed')
+              return
+            }
+
+            lastSignature = data.signature ?? lastSignature
+            remaining = data.tokensRemaining ? new BN(data.tokensRemaining) : new BN(0)
+            console.log(`[sell] batch ${batch} complete — signature: ${lastSignature} — remaining: ${remaining.toString()}`)
+          }
+
+          // trade fully complete
+          console.log('[sell] fully sold — last signature:', lastSignature)
       }
     } catch(error) {
       setTradeError(`${error}error — please try again`)

@@ -27,7 +27,7 @@ export default function LaunchToken({ launchConfig }: Props) {
 
     async function handleLaunch() {
         try {
-            const response = await fetch(`/api/pumpfun/launch-token`, {
+            const response = await fetch(`/api/pumpfun/launch`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ launchConfig }),

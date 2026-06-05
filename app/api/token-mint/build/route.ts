@@ -11,6 +11,7 @@ interface BuildTokenBody {
   tokenSymbol:          string
   description?:         string | null
   logoUrl?:             string | null
+  bannerUrl?:           string | null
   websiteUrl?:          string | null   // ← added
   twitterUrl?:          string | null   // ← added
   telegramHandle?:      string | null   // ← added
@@ -52,6 +53,7 @@ export async function POST(req: NextRequest) {
     tokenSymbol,
     description         = null,
     logoUrl             = null,
+    bannerUrl           = null,
     websiteUrl          = null,
     twitterUrl          = null,
     telegramHandle      = null,    
@@ -93,6 +95,7 @@ export async function POST(req: NextRequest) {
       p_token_symbol:         tokenSymbol,
       p_description:          description,
       p_logo_url:             logoUrl,
+      p_banner_url:           bannerUrl,
       p_website_url:          websiteUrl,
       p_twitter_url:          twitterUrl,
       p_telegram_handle:      telegramHandle,
