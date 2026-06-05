@@ -48,12 +48,22 @@ export default function LaunchTokenPreview({ launchConfig, onLaunch }: Props) {
     return (
         <div className="flex flex-col gap-4 w-full">
 
-            {/* launchConfig.token Meta */}
-            <SubCard title="launchConfig.token Meta">
+            {/* Token Meta */}
+            <SubCard title="Token Meta">
+                {launchConfig.token?.banner_url && (
+                    <div className="w-full rounded-lg overflow-hidden border border-border">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                            src={launchConfig.token.banner_url}
+                            alt={`${launchConfig.token.token_symbol} banner`}
+                            className="w-full h-28 object-cover"
+                        />
+                    </div>
+                )}
                 <div className="grid grid-cols-2 gap-6">
                     <div className="flex flex-col gap-3">
-                        <Field label="launchConfig.token Name" value={launchConfig.token?.token_name ?? '—'} />
-                        <Field label="launchConfig.token Symbol" value={launchConfig.token?.token_symbol ?? '—'} />
+                        <Field label="Token Name" value={launchConfig.token?.token_name ?? '—'} />
+                        <Field label="Token Symbol" value={launchConfig.token?.token_symbol ?? '—'} />
                         <Field label="Description" value={launchConfig.token?.description ?? '—'} />
                     </div>
                     <div className="flex items-center justify-center">

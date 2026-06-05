@@ -48,9 +48,11 @@ function truncate(key: string) {
 
 export default function CreateTokenForm({ onSubmit, isSubmitting = false }: CreateTokenFormProps) {
     const [logoFile, setLogoFile] = useState<File | null>(null);
+    const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [logoError, setLogoError] = useState('');
     const [bannerFile, setBannerFile] = useState<File | null>(null);
+    const [bannerPreviewUrl, setBannerPreviewUrl] = useState<string | null>(null);
     const [isDraggingBanner, setIsDraggingBanner] = useState(false);
     const [wallets, setWallets]         = useState<WalletRecord[]>([]);
     const [typeById, setTypeById]       = useState<Record<string, string>>({});
@@ -104,6 +106,20 @@ export default function CreateTokenForm({ onSubmit, isSubmitting = false }: Crea
         if (file) {
             setLogoFile(file);
             setLogoError('');
+            setLogoPreviewUrl(prev => {
+                if (prev) URL.revokeObjectURL(prev);
+                return URL.createObjectURL(file);
+            });
+        }
+    };
+
+    const handleBannerFileSelect = (file: File | null) => {
+        if (file) {
+            setBannerFile(file);
+            setBannerPreviewUrl(prev => {
+                if (prev) URL.revokeObjectURL(prev);
+                return URL.createObjectURL(file);
+            });
         }
     };
 
@@ -116,8 +132,7 @@ export default function CreateTokenForm({ onSubmit, isSubmitting = false }: Crea
     const handleBannerDrop = (e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault();
         setIsDraggingBanner(false);
-        const file = e.dataTransfer.files[0] ?? null;
-        if (file) setBannerFile(file);
+        handleBannerFileSelect(e.dataTransfer.files[0] ?? null);
     };
 
     return (
@@ -194,33 +209,42 @@ export default function CreateTokenForm({ onSubmit, isSubmitting = false }: Crea
 
                 <div className="mt-4">
                     <FieldLabel>Choose Logo Image</FieldLabel>
-                    <div
-                        className={[
-                            "mt-2 flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed px-4 py-6 text-sm transition-colors cursor-pointer",
-                            isDragging
-                                ? "border-primary bg-primary/5 text-primary"
-                                : "border-border text-muted-foreground hover:border-primary/50 hover:bg-muted/30",
-                        ].join(" ")}
-                        onClick={() => fileInputRef.current?.click()}
-                        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-                        onDragLeave={() => setIsDragging(false)}
-                        onDrop={handleDrop}
-                    >
-                        <svg className="size-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-                        </svg>
-                        {logoFile ? (
-                            <span className="font-medium text-foreground">{logoFile.name}</span>
-                        ) : (
-                            <span>Drag & drop or <span className="text-primary underline">browse</span></span>
+                    <div className="mt-2 flex gap-3 items-start">
+                        <div
+                            className={[
+                                "flex-1 flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed px-4 py-6 text-sm transition-colors cursor-pointer",
+                                isDragging
+                                    ? "border-primary bg-primary/5 text-primary"
+                                    : "border-border text-muted-foreground hover:border-primary/50 hover:bg-muted/30",
+                            ].join(" ")}
+                            onClick={() => fileInputRef.current?.click()}
+                            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                            onDragLeave={() => setIsDragging(false)}
+                            onDrop={handleDrop}
+                        >
+                            <svg className="size-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                            </svg>
+                            {logoFile ? (
+                                <span className="font-medium text-foreground">{logoFile.name}</span>
+                            ) : (
+                                <span>Drag & drop or <span className="text-primary underline">browse</span></span>
+                            )}
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => handleFileSelect(e.target.files?.[0] ?? null)}
+                            />
+                        </div>
+                        {logoPreviewUrl && (
+                            <img
+                                src={logoPreviewUrl}
+                                alt="Logo preview"
+                                className="w-20 h-20 shrink-0 rounded-md object-cover border border-border"
+                            />
                         )}
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={(e) => handleFileSelect(e.target.files?.[0] ?? null)}
-                        />
                     </div>
                     {logoError && (
                         <p className="mt-1 text-sm text-destructive">{logoError}</p>
@@ -235,36 +259,42 @@ export default function CreateTokenForm({ onSubmit, isSubmitting = false }: Crea
                         Banner Image{' '}
                         <span className="font-normal text-muted-foreground">(optional)</span>
                     </FieldLabel>
-                    <div
-                        className={[
-                            "mt-2 flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed px-4 py-6 text-sm transition-colors cursor-pointer",
-                            isDraggingBanner
-                                ? "border-primary bg-primary/5 text-primary"
-                                : "border-border text-muted-foreground hover:border-primary/50 hover:bg-muted/30",
-                        ].join(" ")}
-                        onClick={() => bannerInputRef.current?.click()}
-                        onDragOver={(e) => { e.preventDefault(); setIsDraggingBanner(true); }}
-                        onDragLeave={() => setIsDraggingBanner(false)}
-                        onDrop={handleBannerDrop}
-                    >
-                        <svg className="size-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-                        </svg>
-                        {bannerFile ? (
-                            <span className="font-medium text-foreground">{bannerFile.name}</span>
-                        ) : (
-                            <span>Drag & drop or <span className="text-primary underline">browse</span></span>
+                    <div className="mt-2 flex gap-3 items-start">
+                        <div
+                            className={[
+                                "flex-1 flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed px-4 py-6 text-sm transition-colors cursor-pointer",
+                                isDraggingBanner
+                                    ? "border-primary bg-primary/5 text-primary"
+                                    : "border-border text-muted-foreground hover:border-primary/50 hover:bg-muted/30",
+                            ].join(" ")}
+                            onClick={() => bannerInputRef.current?.click()}
+                            onDragOver={(e) => { e.preventDefault(); setIsDraggingBanner(true); }}
+                            onDragLeave={() => setIsDraggingBanner(false)}
+                            onDrop={handleBannerDrop}
+                        >
+                            <svg className="size-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                            </svg>
+                            {bannerFile ? (
+                                <span className="font-medium text-foreground">{bannerFile.name}</span>
+                            ) : (
+                                <span>Drag & drop or <span className="text-primary underline">browse</span></span>
+                            )}
+                            <input
+                                ref={bannerInputRef}
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => handleBannerFileSelect(e.target.files?.[0] ?? null)}
+                            />
+                        </div>
+                        {bannerPreviewUrl && (
+                            <img
+                                src={bannerPreviewUrl}
+                                alt="Banner preview"
+                                className="w-36 h-12 shrink-0 rounded-md object-cover border border-border"
+                            />
                         )}
-                        <input
-                            ref={bannerInputRef}
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={(e) => {
-                                const file = e.target.files?.[0] ?? null;
-                                if (file) setBannerFile(file);
-                            }}
-                        />
                     </div>
                     <FieldDescription className="italic">
                         PNG, JPG, GIF or SVG. Recommended 1500×500.
