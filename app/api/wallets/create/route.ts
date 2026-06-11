@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
     encryptedSeed, iv, salt,
     vaultSecretName,
     walletGroupId  = null,
-    walletTypeId   = null
+    walletTypeId   = null,
   } = body
 
   // ── 3. Validate required fields ────────────────────────────

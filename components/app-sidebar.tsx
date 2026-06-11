@@ -20,7 +20,7 @@ import {
     DropdownMenuContent,
 } from '@/components/ui/dropdown-menu'
 
-import { ChevronDown, Computer, Rocket, User2} from "lucide-react"
+import { ChevronDown, Computer, Rocket, User2, Table} from "lucide-react"
 
 
 export function AppSidebar() {
@@ -177,6 +177,17 @@ export function AppSidebar() {
                   <a href="/protected/tokens/trade">
                     <Computer />
                     <span>Trade</span>
+                  </a>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+               <SidebarMenuItem>
+                <SidebarMenuButton
+                  className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
+                  asChild
+                >
+                  <a href="/protected/tokens/lookup-table">
+                    <Table />
+                    <span>Build Lookup Table</span>
                   </a>
                 </SidebarMenuButton>
               </SidebarMenuItem>

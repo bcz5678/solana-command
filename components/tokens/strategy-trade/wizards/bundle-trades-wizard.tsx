@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import WizardShell, { StepPlaceholder, WizardStep } from './wizard-shell'
 import StrategyWalletSelector from '@/components/tokens/strategy-trade/strategy-wallet-selector'
+import { solStringToLamports } from '@/lib/lamports'
 
 const steps: WizardStep[] = [
     {
@@ -33,10 +34,20 @@ const steps: WizardStep[] = [
     },
 ]
 
+type TradeType = 'buy' | 'sell'
+
 export default function BundleTradesWizard() {
-    const [step, setStep]                   = useState(0)
+    const [step, setStep]                       = useState(0)
+    const [tradeType, setTradeType]             = useState<TradeType>('buy')
+    const [jitoTipSol, setJitoTipSol]           = useState('')
     const [selectedWallets, setSelectedWallets] = useState<Set<string>>(new Set())
-    const [tradeAmounts, setTradeAmounts]   = useState<Record<string, string>>({})
+    const [tradeAmounts, setTradeAmounts]       = useState<Record<string, string>>({})
+
+    const jitoTipLamports = useMemo(() => {
+        const v = jitoTipSol.trim()
+        if (!v || v === '.') return null
+        try { return solStringToLamports(v) } catch { return null }
+    }, [jitoTipSol])
 
     return (
         <div className="flex flex-col gap-4">
@@ -51,13 +62,69 @@ export default function BundleTradesWizard() {
                 onNext={() => setStep((s) => s + 1)}
             >
                 {step === 0 && (
-                    <StrategyWalletSelector
-                        selectedIds={selectedWallets}
-                        onSelectionChange={setSelectedWallets}
-                        onTradeAmountChange={(id, amt) => setTradeAmounts((p) => ({ ...p, [id]: amt }))}
-                        onTradeAmountReset={() => setTradeAmounts({})}
-                        defaultTypeName="Trader"
-                    />
+                    <div className="flex flex-col gap-6">
+
+                        {/* Trade type + Jito tip */}
+                        <div className="flex flex-wrap items-end gap-6">
+
+                            {/* Buy / Sell radio */}
+                            <div className="flex flex-col gap-1.5">
+                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Trade Type</span>
+                                <div className="flex gap-1 rounded-lg border border-input p-0.5 bg-muted/40">
+                                    {(['buy', 'sell'] as TradeType[]).map((t) => (
+                                        <button
+                                            key={t}
+                                            type="button"
+                                            onClick={() => setTradeType(t)}
+                                            className={[
+                                                'flex-1 px-5 py-1.5 rounded-md text-sm font-medium transition-colors capitalize',
+                                                tradeType === t
+                                                    ? t === 'buy'
+                                                        ? 'bg-green-500 text-white shadow-sm'
+                                                        : 'bg-red-500 text-white shadow-sm'
+                                                    : 'text-muted-foreground hover:text-foreground',
+                                            ].join(' ')}
+                                        >
+                                            {t}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Jito tip */}
+                            <div className="flex flex-col gap-1.5">
+                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Jito Tip</span>
+                                <div className="flex items-center gap-2 rounded-lg border border-input bg-transparent px-3 h-9 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30">
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        step={0.000000001}
+                                        placeholder="0.00"
+                                        value={jitoTipSol}
+                                        onChange={(e) => setJitoTipSol(e.target.value)}
+                                        className="w-28 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                                    />
+                                    <span className="text-xs text-muted-foreground shrink-0">SOL</span>
+                                </div>
+                                {jitoTipLamports !== null && (
+                                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                                        {jitoTipLamports.toString()} lamports
+                                    </span>
+                                )}
+                            </div>
+
+                        </div>
+
+                        {/* Wallet selector */}
+                        <StrategyWalletSelector
+                            selectedIds={selectedWallets}
+                            onSelectionChange={setSelectedWallets}
+                            onTradeAmountChange={(id, amt) => setTradeAmounts((p) => ({ ...p, [id]: amt }))}
+                            onTradeAmountReset={() => setTradeAmounts({})}
+                            defaultTypeName="Trader"
+                        />
+
+                    </div>
                 )}
                 {step === 1 && (
                     <StepPlaceholder

@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 
-import { Skeleton } from '@/components/ui/skeleton';
 import {
     useForm,
     SubmitHandler,
@@ -29,7 +28,7 @@ import {
     ComboboxList,
     ComboboxItem,
 } from "@/components/ui/combobox"
-import { WalletGroupDTO, WalletTypeDTO } from '@/app/db/models/wallet'
+import { WalletGroupDTO, WalletTypeDTO } from '@/lib/types/wallet'
 import { generateWallet } from '@/lib/wallet/generate'
 
 type Step = 'form' | 'mnemonic' | 'done'
@@ -78,16 +77,16 @@ export default function CreateWalletsForm() {
         let walletGroupId: string | null = null   // ← uuid string not number
         let walletGroupName: string | null = null
 
-        if (selectedGroup && selectedGroup.value !== '0') {
-            walletGroupId = selectedGroup.value    // ← already a uuid string
+        if (selectedGroup && selectedGroup.value && selectedGroup.value !== '__new__') {
+            walletGroupId = selectedGroup.value    // existing group UUID
         } else if (groupInputValue.trim()) {
             const existing = walletGroups.find(
                 g => g.name.toLowerCase() === groupInputValue.trim().toLowerCase()
             )
             if (existing) {
-                walletGroupId = existing.id!       // ← uuid string from DB
+                walletGroupId = existing.id!       // matched an existing group
             } else {
-                walletGroupName = groupInputValue.trim()
+                walletGroupName = groupInputValue.trim()  // signal API to create it
             }
         }
 
@@ -95,6 +94,22 @@ export default function CreateWalletsForm() {
         setStatusMessage('')
 
         try {
+            // ── Create new wallet group first if needed ──────────
+            if (walletGroupName) {
+                const groupRes = await fetch('/api/wallets/create-group', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: walletGroupName }),
+                })
+                const groupJson = await groupRes.json()
+                if (!groupRes.ok) {
+                    setSubmitStatus('error')
+                    setStatusMessage(groupJson.error ?? 'Failed to create wallet group.')
+                    return
+                }
+                walletGroupId = groupJson.groupId
+            }
+
             const wallet = await generateWallet(data.password)
 
             const res = await fetch('/api/wallets/create', {
@@ -257,7 +272,7 @@ export default function CreateWalletsForm() {
                                     </ComboboxItem>
                                 ))}
                                 {showCreate && (
-                                    <ComboboxItem value={{ value: '', label: groupInputValue }}>
+                                    <ComboboxItem value={{ value: '__new__', label: groupInputValue }}>
                                         Create &quot;{groupInputValue}&quot;
                                     </ComboboxItem>
                                 )}
