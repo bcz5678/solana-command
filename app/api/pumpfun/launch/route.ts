@@ -101,7 +101,7 @@ async function processLaunchBlock0(
     // vault name and the dev wallet vault name in one call.
     const { data: launchData, error: dataError } = await admin
         .rpc('get_token_launch_data', { p_mint_id: mintId })
-        .returns<TokenLaunchData[]>()
+        .returns<TokenLaunchData>()
         .single();
 
     if (dataError || !launchData) {
@@ -113,9 +113,9 @@ async function processLaunchBlock0(
     if (launchData.launch_status !== 'draft') {
         return Response.json(
             {
-                error:         'Token cannot be launched',
-                launch_status: launchData.launch_status,
-                hint:          'Only draft tokens can be launched'
+                error:        'Token cannot be launched',
+                launchStatus: launchData.launch_status,
+                hint:         'Only draft tokens can be launched'
             },
             { status: 409 }
         );

@@ -1,8 +1,21 @@
 'use client'
 
-import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
+import { useState, useEffect, useMemo, Fragment } from 'react'
 import { WalletRecord } from '@/lib/types/wallet'
-import { lamportsStringToBN } from '@/lib/lamports'
+import { LookupTable } from '@/lib/types/lookup-table'
+import { lamportsStringToBN, lamportsBNToSolDisplay } from '@/lib/lamports'
+import { Input } from '@/components/ui/input'
+import { FieldLabel, FieldDescription } from '@/components/ui/field'
+import {
+    Select,
+    SelectContent,
+    SelectGroup,
+    SelectItem,
+    SelectLabel,
+    SelectSeparator,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select'
 
 type WalletTypeRow = { id: string; name: string }
 
@@ -35,7 +48,11 @@ export default function LookupTableBuilder() {
     const [loading, setLoading]             = useState(true)
     const [activeFilters, setActiveFilters] = useState<string[]>([])
     const [selectedIds, setSelectedIds]     = useState<Set<string>>(new Set())
+    const [tableName, setTableName]         = useState('')
+    const [signerWalletId, setSignerWalletId] = useState('')
     const [building, setBuilding]           = useState(false)
+    const [buildError, setBuildError]       = useState<string | null>(null)
+    const [buildResult, setBuildResult]     = useState<LookupTable | null>(null)
 
     useEffect(() => {
         fetch('/api/wallets/explorer')
@@ -93,16 +110,35 @@ export default function LookupTableBuilder() {
 
     const allVisibleIds = useMemo(() => visibleWallets.map((w) => w.id), [visibleWallets])
 
+    const signerGroups = useMemo<[string, WalletRecord[]][]>(() => {
+        const withSol = wallets.filter(
+            (w) => w.solana_balance_in_lamports != null && w.solana_balance_in_lamports.gtn(0),
+        )
+        const map: Record<string, WalletRecord[]> = {}
+        for (const w of withSol) {
+            const key = w.wallet_type ?? 'Other'
+            ;(map[key] ??= []).push(w)
+        }
+        return Object.entries(map)
+    }, [wallets])
+
     function toggleFilter(typeId: string) {
         setActiveFilters((prev) =>
             prev.includes(typeId) ? prev.filter((id) => id !== typeId) : [...prev, typeId],
         )
     }
 
+    const MAX_WALLETS = 20
+    const overLimit = selectedIds.size > MAX_WALLETS
+
     function toggleWallet(id: string) {
         const next = new Set(selectedIds)
-        if (next.has(id)) next.delete(id)
-        else next.add(id)
+        if (next.has(id)) {
+            next.delete(id)
+        } else {
+            if (next.size >= MAX_WALLETS) return
+            next.add(id)
+        }
         setSelectedIds(next)
     }
 
@@ -112,13 +148,21 @@ export default function LookupTableBuilder() {
         if (allSelected) {
             groupWallets.forEach((w) => next.delete(w.id))
         } else {
-            groupWallets.forEach((w) => next.add(w.id))
+            for (const w of groupWallets) {
+                if (next.size >= MAX_WALLETS) break
+                next.add(w.id)
+            }
         }
         setSelectedIds(next)
     }
 
     function selectAll() {
-        setSelectedIds(new Set(allVisibleIds))
+        const next = new Set<string>()
+        for (const id of allVisibleIds) {
+            if (next.size >= MAX_WALLETS) break
+            next.add(id)
+        }
+        setSelectedIds(next)
     }
 
     function clearAll() {
@@ -127,9 +171,38 @@ export default function LookupTableBuilder() {
         setSelectedIds(next)
     }
 
-    function handleBuild() {
-        // wired up later
+    async function handleBuild() {
+        if (!signerWalletId) return
+
+        const walletsToAdd = wallets
+            .filter((w) => selectedIds.has(w.id))
+            .map((w) => w.public_key)
+
         setBuilding(true)
+        setBuildError(null)
+        setBuildResult(null)
+
+        try {
+            const res = await fetch('/api/lookup-table/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    displayName:       tableName,
+                    authorityWalletId: signerWalletId,
+                    addresses:         walletsToAdd,
+                }),
+            })
+            const json = await res.json()
+            if (!res.ok) {
+                setBuildError(json.error ?? 'Failed to build lookup table')
+            } else {
+                setBuildResult(json.data as LookupTable)
+            }
+        } catch (err) {
+            setBuildError(err instanceof Error ? err.message : 'Request failed')
+        } finally {
+            setBuilding(false)
+        }
     }
 
     if (loading) return <p className="text-sm text-muted-foreground py-4">Loading wallets…</p>
@@ -229,11 +302,70 @@ export default function LookupTableBuilder() {
     return (
         <div className="flex flex-col gap-6 p-6 w-full">
 
+            {/* Page header */}
             <div>
                 <h2 className="text-base font-semibold mb-1">Lookup Table Builder</h2>
                 <p className="text-xs text-muted-foreground">
-                    Select wallets to include in the address lookup table. Group headers can be clicked to select or deselect all wallets in that group.
+                    Configure and build an on-chain address lookup table (ALT) from your wallets.
                 </p>
+            </div>
+
+            {/* Config */}
+            <div className="rounded-lg border border-border bg-card p-4 flex flex-col gap-4">
+                <h3 className="text-sm font-semibold text-foreground">Configuration</h3>
+                <div className="flex flex-col gap-1.5 max-w-sm">
+                    <label htmlFor="lut-name" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                        Table Name
+                    </label>
+                    <Input
+                        id="lut-name"
+                        placeholder="e.g. Trading Wallets ALT"
+                        value={tableName}
+                        onChange={(e) => setTableName(e.target.value)}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                        A label for this lookup table — stored locally for reference.
+                    </p>
+                </div>
+
+                <div className="flex flex-col gap-1.5 max-w-sm">
+                    <FieldLabel htmlFor="lut-signer">Payer / Signer Wallet</FieldLabel>
+                    <Select value={signerWalletId} onValueChange={setSignerWalletId}>
+                        <SelectTrigger id="lut-signer">
+                            <SelectValue placeholder="Select a wallet" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {signerGroups.map(([typeName, group], i) => (
+                                <SelectGroup key={typeName}>
+                                    {i > 0 && <SelectSeparator />}
+                                    <SelectLabel>{typeName}</SelectLabel>
+                                    {group.map((w) => (
+                                        <SelectItem key={w.id} value={w.id}>
+                                            {w.label ? `${w.label} · ` : ''}
+                                            {maskPubKey(w.public_key)}
+                                            {' · '}
+                                            {lamportsBNToSolDisplay(w.solana_balance_in_lamports!)} SOL
+                                        </SelectItem>
+                                    ))}
+                                </SelectGroup>
+                            ))}
+                            {signerGroups.length === 0 && (
+                                <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                                    No wallets with SOL found
+                                </div>
+                            )}
+                        </SelectContent>
+                    </Select>
+                    <FieldDescription>
+                        This wallet pays rent and transaction fees. Must have SOL.
+                    </FieldDescription>
+                </div>
+            </div>
+
+            {/* Wallet selection header */}
+            <div className="flex items-center gap-3">
+                <h3 className="text-sm font-semibold text-foreground shrink-0">Wallet Selection</h3>
+                <div className="flex-1 h-px bg-border" />
             </div>
 
             {/* Type filter chips */}
@@ -327,19 +459,57 @@ export default function LookupTableBuilder() {
                 </table>
             </div>
 
+            {/* Over-limit error */}
+            {overLimit && (
+                <div className="flex items-start gap-2.5 rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                    <svg className="mt-0.5 size-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                    </svg>
+                    <span>
+                        <strong>{selectedIds.size} wallets selected</strong> — address lookup tables support a maximum of{' '}
+                        <strong>{MAX_WALLETS} addresses</strong> due to Solana transaction size limits. Deselect{' '}
+                        {selectedIds.size - MAX_WALLETS} wallet{selectedIds.size - MAX_WALLETS !== 1 ? 's' : ''} to continue.
+                    </span>
+                </div>
+            )}
+
+            {/* Build error */}
+            {buildError && (
+                <div className="flex items-start gap-2.5 rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                    <svg className="mt-0.5 size-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                    </svg>
+                    <span>{buildError}</span>
+                </div>
+            )}
+
+            {/* Build success */}
+            {buildResult && (
+                <div className="flex items-start gap-2.5 rounded-md border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-700 dark:text-green-400">
+                    <svg className="mt-0.5 size-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                    </svg>
+                    <span>
+                        Lookup table created —{' '}
+                        <span className="font-mono">{buildResult.public_address}</span>
+                        {buildResult.address_count > 0 && ` · ${buildResult.address_count} addresses added`}
+                    </span>
+                </div>
+            )}
+
             {/* Footer */}
             <div className="flex items-center justify-between pt-2">
                 <p className="text-xs text-muted-foreground">
                     {selectedIds.size > 0
-                        ? `${selectedIds.size} wallet${selectedIds.size !== 1 ? 's' : ''} selected`
+                        ? `${selectedIds.size} / ${MAX_WALLETS} wallets selected`
                         : 'No wallets selected'}
                 </p>
                 <button
                     onClick={handleBuild}
-                    disabled={selectedIds.size === 0 || building}
+                    disabled={selectedIds.size === 0 || overLimit || !signerWalletId || building}
                     className={[
                         'inline-flex items-center gap-2 rounded-md px-5 py-2 text-sm font-medium transition-colors',
-                        selectedIds.size === 0 || building
+                        selectedIds.size === 0 || overLimit || !signerWalletId || building
                             ? 'bg-muted text-muted-foreground cursor-not-allowed border border-border'
                             : 'bg-blue-500 text-white hover:bg-blue-600 shadow-sm',
                     ].join(' ')}

@@ -5,15 +5,13 @@ import { wallet, connection, PUMP_PROGRAM, payer } from '../config';
 import { searcherClient } from "./clients/jito";
 import { Bundle as JitoBundle } from 'jito-ts/dist/sdk/block-engine/types.js';
 import { getRandomTipAccount } from "./clients/config";
-import { lookupTableProvider } from "./clients/LookupTableProvider";
+import { lookupTableProvider } from "@/lib/jito/helpers/lookup-table-provider';
 import { loadKeypairs } from './createKeys';
 import * as spl from '@solana/spl-token';
 import idl from "../pumpfun-IDL.json";
 import { Program, Idl, AnchorProvider, setProvider } from "@coral-xyz/anchor";
-import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
+import bs58 from 'bs58';
 
-const prompt = promptSync();
-const keyInfoPath = path.join(__dirname, 'keyInfo.json');
 
 const provider = new AnchorProvider(connection, wallet as any, {});
 
