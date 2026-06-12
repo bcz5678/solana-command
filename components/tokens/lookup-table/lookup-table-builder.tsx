@@ -2,8 +2,13 @@
 
 import { useState, useEffect, useMemo, Fragment } from 'react'
 import { WalletRecord } from '@/lib/types/wallet'
-import { LookupTable } from '@/lib/types/lookup-table'
 import { lamportsStringToBN, lamportsBNToSolDisplay } from '@/lib/lamports'
+
+type BuildSuccess = {
+    altAddress:   string
+    addressCount: number
+    explorerUrl:  string
+}
 import { Input } from '@/components/ui/input'
 import { FieldLabel, FieldDescription } from '@/components/ui/field'
 import {
@@ -50,9 +55,9 @@ export default function LookupTableBuilder() {
     const [selectedIds, setSelectedIds]     = useState<Set<string>>(new Set())
     const [tableName, setTableName]         = useState('')
     const [signerWalletId, setSignerWalletId] = useState('')
-    const [building, setBuilding]           = useState(false)
-    const [buildError, setBuildError]       = useState<string | null>(null)
-    const [buildResult, setBuildResult]     = useState<LookupTable | null>(null)
+    const [building, setBuilding]       = useState(false)
+    const [buildError, setBuildError]   = useState<string | null>(null)
+    const [buildResult, setBuildResult] = useState<BuildSuccess | null>(null)
 
     useEffect(() => {
         fetch('/api/wallets/explorer')
@@ -193,10 +198,14 @@ export default function LookupTableBuilder() {
                 }),
             })
             const json = await res.json()
-            if (!res.ok) {
-                setBuildError(json.error ?? 'Failed to build lookup table')
+            if (res.status === 201) {
+                setBuildResult({
+                    altAddress:   json.altAddress,
+                    addressCount: json.addressCount,
+                    explorerUrl:  json.explorerUrl,
+                })
             } else {
-                setBuildResult(json.data as LookupTable)
+                setBuildError(json.error ?? 'Failed to build lookup table')
             }
         } catch (err) {
             setBuildError(err instanceof Error ? err.message : 'Request failed')
@@ -491,8 +500,21 @@ export default function LookupTableBuilder() {
                     </svg>
                     <span>
                         Lookup table created —{' '}
-                        <span className="font-mono">{buildResult.public_address}</span>
-                        {buildResult.address_count > 0 && ` · ${buildResult.address_count} addresses added`}
+                        <span className="font-mono">{buildResult.altAddress}</span>
+                        {buildResult.addressCount > 0 && ` · ${buildResult.addressCount} addresses added`}
+                        {buildResult.explorerUrl && (
+                            <>
+                                {' · '}
+                                <a
+                                    href={buildResult.explorerUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="underline underline-offset-2 hover:opacity-80"
+                                >
+                                    View on Explorer
+                                </a>
+                            </>
+                        )}
                     </span>
                 </div>
             )}

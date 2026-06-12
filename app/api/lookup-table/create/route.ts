@@ -3,10 +3,8 @@
 import { NextRequest, NextResponse }   from 'next/server'
 import { requireSuperAdmin }           from '@/lib/auth/require-super-admin'
 import { createClient }                from '@/lib/supabase/server'
-import { createAdminClient }           from '@/lib/supabase/admin'
 import { getWalletKeypairById }        from '@/lib/wallet/keypair'
 import {
-  Connection,
   PublicKey,
   Keypair,
   AddressLookupTableProgram,
@@ -33,7 +31,6 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = await createClient()
-  const admin    = createAdminClient()
 
   // ── 2. Parse + validate ────────────────────────────────────
   let body: CreateAltBody
@@ -75,20 +72,20 @@ export async function POST(req: NextRequest) {
   const authorityPubkey = authority.publicKey.toBase58()
 
   // ── 4. Create the ALT on-chain ─────────────────────────────
-  let altAddress: string
-  let signature:  string
+  let altAddress = ''
+  let signature  = ''
+
+  const connection = initializeQuickNodeSolana().connection
 
   try {
-    const quicknodeSolana = initializeQuickNodeSolana()
+    // 'finalized' avoids the "invalid instruction data" preflight error that
+    // occurs when the confirmed slot hasn't propagated to all validators yet.
+    const slot = await connection.getSlot('finalized')
 
-    const slot = await quicknodeSolana.connection.getSlot('confirmed')
-
-    // Build the create-ALT instruction
-    // Returns both the instruction and the derived ALT address
     const [createIx, lookupTableAddress] =
       AddressLookupTableProgram.createLookupTable({
-        authority: authority.publicKey,
-        payer:     authority.publicKey,
+        authority:  authority.publicKey,
+        payer:      authority.publicKey,
         recentSlot: slot
       })
 
@@ -96,18 +93,17 @@ export async function POST(req: NextRequest) {
 
     const instructions = [createIx]
 
-    // Optionally extend with initial addresses in the same tx
     if (addresses.length > 0) {
       const extendIx = AddressLookupTableProgram.extendLookupTable({
-        payer:          authority.publicKey,
-        authority:      authority.publicKey,
-        lookupTable:    lookupTableAddress,
-        addresses:      addresses.map(a => new PublicKey(a))
+        payer:       authority.publicKey,
+        authority:   authority.publicKey,
+        lookupTable: lookupTableAddress,
+        addresses:   addresses.map(a => new PublicKey(a))
       })
       instructions.push(extendIx)
     }
 
-    const { blockhash } = await quicknodeSolana.connection.getLatestBlockhash('confirmed')
+    const { blockhash } = await connection.getLatestBlockhash('confirmed')
 
     const message = new TransactionMessage({
       payerKey:        authority.publicKey,
@@ -118,46 +114,46 @@ export async function POST(req: NextRequest) {
     const tx = new VersionedTransaction(message)
     tx.sign([authority])
 
-    try {
-      signature = await quicknodeSolana.connection.sendTransaction(tx, {
-        skipPreflight:       false,
-        preflightCommitment: 'confirmed',
-        maxRetries:          3
-      })
-    
-      const latest = await quicknodeSolana.connection.getLatestBlockhash('confirmed')
-      await quicknodeSolana.connection.confirmTransaction(
-        {
-          signature,
-          blockhash:            latest.blockhash,
-          lastValidBlockHeight: latest.lastValidBlockHeight
-        },
-        'confirmed'
-      )
-    } catch (error) {
-      if (error instanceof SendTransactionError) {
-        // This will print the actual program logs from the simulation failure
-        console.error("Simulation Logs:", await error);
-      } else {
-        console.error("Unknown error:", error);
-      }
-    }
+    signature = await connection.sendTransaction(tx, {
+      skipPreflight:       false,
+      preflightCommitment: 'confirmed',
+      maxRetries:          3
+    })
+
+    const latest = await connection.getLatestBlockhash('confirmed')
+    await connection.confirmTransaction(
+      {
+        signature,
+        blockhash:            latest.blockhash,
+        lastValidBlockHeight: latest.lastValidBlockHeight
+      },
+      'confirmed'
+    )
 
   } catch (err) {
-    authority?.secretKey.fill(0)
+    if (err instanceof SendTransactionError) {
+      console.error('[create-alt] Simulation logs:', err.logs)
+    }
+    authority.secretKey.fill(0)
     return NextResponse.json(
       { error: `ALT creation failed: ${(err as Error).message}` },
       { status: 500 }
     )
 
   } finally {
-
-
-    // ── Always wipe keypair ──────────────────────────────────
-    authority?.secretKey.fill(0)
+    authority.secretKey.fill(0)
   }
 
-  // ── 5. Register the ALT reference in DB ────────────────────
+  // ── 5. Guard: confirm the transaction was actually sent ────
+  if (!signature) {
+    console.error('[create-alt] sendTransaction completed without a signature')
+    return NextResponse.json(
+      { error: 'ALT creation failed: no transaction signature returned' },
+      { status: 500 }
+    )
+  }
+
+  // ── 6. Register the ALT reference in DB ────────────────────
   const { data, error: rpcError } = await supabase
     .rpc('create_lookup_table', {
       p_public_address:    altAddress,
