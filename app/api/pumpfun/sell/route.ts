@@ -6,14 +6,8 @@ import BN from 'bn.js';
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { getWalletKeypairById } from "@/lib/vault/get-wallet-by-id";
 import { Executor } from "@/lib/pumpfun/executor";
+import { SellTokenBody } from "@/lib/types/trades";
 
-
-interface SellTokenBody {
-    walletId: string
-    mintAddress: string
-    tokenAmount: string
-    slippage: number
-}
 
 const quicknodeSolana = initializeQuickNodeSolana();
 

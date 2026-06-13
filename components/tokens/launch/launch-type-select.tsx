@@ -12,7 +12,7 @@ const cards = [
     {
         type: LaunchType.block0,
         title: 'Block0 Launch',
-        description: 'Allows a basic non-funded buy, a dev buy into block 0 and an option to bundle up to additional wallet addresses in the Jito bundle for block 0.',
+        description: 'Allows either 1) a basic non-funded buy, 2) dev buy into block 0 and, 3) an option to bundle up to additional wallet addresses in the Jito bundle for block 0.',
     },
     {
         type: LaunchType.swarm,
@@ -22,7 +22,7 @@ const cards = [
     {
         type: LaunchType.staggered,
         title: 'Staggered Launch',
-        description: 'Organic-style launch with optional dev buy and block 0 bundles. Uses associated wallets for staggered buys at randomised intervals to appear more human.',
+        description: 'Organic-style launch with optional dev buy and block 0 bundles. Uses associated wallets for staggered buys at randomized intervals to appear more human.',
     },
 ]
 

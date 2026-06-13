@@ -542,7 +542,6 @@ export default function LookupTableBuilder() {
                     Build Lookup Table
                 </button>
             </div>
-
         </div>
     )
 }

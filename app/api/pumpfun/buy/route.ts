@@ -7,14 +7,9 @@ import BN from 'bn.js';
 import { Keypair, PublicKey } from '@solana/web3.js';
 import { getWalletKeypairById } from "@/lib/vault/get-wallet-by-id";
 import { Executor } from "@/lib/pumpfun/executor";
+import { BuyTokenBody } from "@/lib/types/trades";
 
 
-interface BuyTokenBody {
-    walletId:    string
-    mintAddress: string
-    amountInSol: string   // lamports as decimal string — BN can't cross JSON
-    slippage:    number
-}
 
 // initialize connection
 const quicknodeSolana = initializeQuickNodeSolana();

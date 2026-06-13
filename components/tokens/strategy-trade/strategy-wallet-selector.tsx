@@ -19,6 +19,8 @@ type Props = {
     onTradeAmountChange: (walletId: string, amount: string) => void
     onTradeAmountReset: () => void
     defaultTypeName?: string
+    tradeAmounts?: Record<string, string>
+    errorIds?: Set<string>
 }
 
 function maskPubKey(key: string) {
@@ -43,12 +45,15 @@ export default function StrategyWalletSelector({
     onTradeAmountChange,
     onTradeAmountReset,
     defaultTypeName,
+    tradeAmounts: controlledTradeAmounts,
+    errorIds,
 }: Props) {
-    const [wallets, setWallets]             = useState<WalletRecord[]>([])
-    const [walletTypes, setWalletTypes]     = useState<WalletTypeRow[]>([])
-    const [loading, setLoading]             = useState(true)
-    const [activeFilters, setActiveFilters] = useState<string[]>([])
-    const [tradeAmounts, setTradeAmounts]   = useState<Record<string, string>>({})
+    const [wallets, setWallets]               = useState<WalletRecord[]>([])
+    const [walletTypes, setWalletTypes]       = useState<WalletTypeRow[]>([])
+    const [loading, setLoading]               = useState(true)
+    const [activeFilters, setActiveFilters]   = useState<string[]>([])
+    const [localTradeAmounts, setLocalTradeAmounts] = useState<Record<string, string>>({})
+    const tradeAmounts = controlledTradeAmounts ?? localTradeAmounts
     const didInit                           = useRef(false)
 
     useEffect(() => {
@@ -158,11 +163,11 @@ export default function StrategyWalletSelector({
 
     function setTradeAmount(walletId: string, amount: string) {
         onTradeAmountChange(walletId, amount)
-        setTradeAmounts((prev) => ({ ...prev, [walletId]: amount }))
+        if (!controlledTradeAmounts) setLocalTradeAmounts((prev) => ({ ...prev, [walletId]: amount }))
     }
 
     function clearTradeAmounts() {
-        setTradeAmounts({})
+        setLocalTradeAmounts({})
         onTradeAmountReset()
     }
 
@@ -210,14 +215,19 @@ export default function StrategyWalletSelector({
     }
 
     function renderRow(wallet: WalletRecord, n: number) {
-        const checked = selectedIds.has(wallet.id)
+        const checked  = selectedIds.has(wallet.id)
+        const hasError = errorIds?.has(wallet.id) ?? false
         return (
             <tr
                 key={wallet.id}
                 onClick={() => toggleWallet(wallet.id)}
                 className={[
                     'border-b cursor-pointer transition-colors',
-                    checked ? 'bg-blue-500/5 hover:bg-blue-500/10' : 'hover:bg-muted/30',
+                    hasError
+                        ? 'bg-destructive/5 hover:bg-destructive/10 outline-1 outline-destructive/40 -outline-offset-1'
+                        : checked
+                        ? 'bg-blue-500/5 hover:bg-blue-500/10'
+                        : 'hover:bg-muted/30',
                 ].join(' ')}
             >
                 <td className="px-3 py-2.5 text-muted-foreground tabular-nums text-xs">{n}</td>

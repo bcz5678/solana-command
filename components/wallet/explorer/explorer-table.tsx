@@ -23,7 +23,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { Copy } from 'lucide-react'
+import { Copy, ExternalLink } from 'lucide-react'
 import { WalletRecord } from '@/lib/types/wallet';
 
 type Token = { symbol: string; name: string }
@@ -202,6 +202,23 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
                       <TooltipContent side="top">
                         {copiedId === wallet.id ? 'Copied to clipboard' : 'Copy address'}
                       </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <a
+                          href={`https://solscan.io/account/${wallet.public_key}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+                          aria-label="View on Solscan"
+                        >
+                          <ExternalLink className="size-3" />
+                        </a>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">View on Solscan</TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 </span>

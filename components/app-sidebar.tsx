@@ -187,7 +187,7 @@ export function AppSidebar() {
                 >
                   <a href="/protected/tokens/lookup-table">
                     <Table />
-                    <span>Build Lookup Table</span>
+                    <span>Lookup Tables</span>
                   </a>
                 </SidebarMenuButton>
               </SidebarMenuItem>
