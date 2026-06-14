@@ -97,7 +97,6 @@ export default function BundleTradesWizard() {
     const [tokenSymbol, setTokenSymbol]           = useState('')
     const [tokenBalances, setTokenBalances]       = useState<Record<string, string>>({})
     const [tokenDecimals, setTokenDecimals]       = useState(6)
-    const [tokenBalancesLoading, setTokenBalancesLoading] = useState(false)
     const [nextError, setNextError]               = useState<{ id: string; label: string }[]>([])
     const [errorWalletIds, setErrorWalletIds]     = useState<Set<string>>(new Set())
 
@@ -178,35 +177,6 @@ export default function BundleTradesWizard() {
     useEffect(() => {
         if (tipMode === 'floor') fetchTipFloor()
     }, [tipMode])
-
-    // Fetch token balances when in sell mode with a resolved token and loaded wallets
-    useEffect(() => {
-        if (tradeType !== 'sell' || !tokenResolved || !tokenMint || wallets.length === 0) {
-            setTokenBalances({})
-            return
-        }
-        setTokenBalancesLoading(true)
-        const addresses = wallets.map((w) => w.public_key)
-        fetch('/api/wallet/token-balances', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mintAddress: tokenMint, walletAddresses: addresses }),
-        })
-            .then((r) => r.ok ? r.json() : null)
-            .then((data) => {
-                if (!data) return
-                setTokenDecimals(data.decimals ?? 6)
-                // Map from public key → wallet id
-                const byId: Record<string, string> = {}
-                for (const w of wallets) {
-                    const bal = data.balances[w.public_key]
-                    if (bal !== undefined) byId[w.id] = bal
-                }
-                setTokenBalances(byId)
-            })
-            .catch(() => {})
-            .finally(() => setTokenBalancesLoading(false))
-    }, [tradeType, tokenResolved, tokenMint, wallets])
 
     // Clear trade amounts when trade type switches (SOL amounts ≠ token amounts)
     useEffect(() => {
@@ -678,9 +648,11 @@ export default function BundleTradesWizard() {
                             tradeAmounts={tradeAmounts}
                             errorIds={errorWalletIds}
                             tradeType={tradeType}
-                            tokenBalances={tokenBalances}
-                            tokenBalancesLoading={tokenBalancesLoading}
-                            tokenDecimals={tokenDecimals}
+                            tokenMint={tokenMint}
+                            onBalancesLoaded={(balances, decimals) => {
+                                setTokenBalances(balances)
+                                setTokenDecimals(decimals)
+                            }}
                         />
 
                         {nextError.length > 0 && (

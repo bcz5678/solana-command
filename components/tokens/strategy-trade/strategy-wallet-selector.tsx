@@ -22,9 +22,8 @@ type Props = {
     tradeAmounts?: Record<string, string>
     errorIds?: Set<string>
     tradeType?: 'buy' | 'sell'
-    tokenBalances?: Record<string, string>
-    tokenBalancesLoading?: boolean
-    tokenDecimals?: number
+    tokenMint?: string
+    onBalancesLoaded?: (balances: Record<string, string>, decimals: number) => void
 }
 
 function maskPubKey(key: string) {
@@ -52,19 +51,27 @@ export default function StrategyWalletSelector({
     tradeAmounts: controlledTradeAmounts,
     errorIds,
     tradeType = 'buy',
-    tokenBalances,
-    tokenBalancesLoading,
-    tokenDecimals = 6,
+    tokenMint,
+    onBalancesLoaded,
 }: Props) {
     const [wallets, setWallets]               = useState<WalletRecord[]>([])
     const [walletTypes, setWalletTypes]       = useState<WalletTypeRow[]>([])
     const [loading, setLoading]               = useState(true)
+    const [refreshing, setRefreshing]         = useState(false)
     const [activeFilters, setActiveFilters]   = useState<string[]>([])
     const [localTradeAmounts, setLocalTradeAmounts] = useState<Record<string, string>>({})
     const tradeAmounts = controlledTradeAmounts ?? localTradeAmounts
-    const didInit                           = useRef(false)
+    const didInit                             = useRef(false)
 
-    useEffect(() => {
+    const [tokenBalances, setTokenBalances]               = useState<Record<string, string>>({})
+    const [tokenBalancesLoading, setTokenBalancesLoading] = useState(false)
+    const [tokenDecimals, setTokenDecimals]               = useState(6)
+    const onBalancesLoadedRef = useRef(onBalancesLoaded)
+    useEffect(() => { onBalancesLoadedRef.current = onBalancesLoaded })
+
+    function fetchWallets(isRefresh = false) {
+        if (isRefresh) setRefreshing(true)
+        else setLoading(true)
         fetch('/api/wallets/explorer')
             .then((r) => {
                 if (!r.ok) {
@@ -83,13 +90,15 @@ export default function StrategyWalletSelector({
                 }))
                 setWallets(parsed)
                 setWalletTypes(data.walletTypes ?? [])
-                setLoading(false)
             })
-            .catch(err => {
-                console.error('[wallets] fetch failed', err)
+            .catch(err => console.error('[wallets] fetch failed', err))
+            .finally(() => {
                 setLoading(false)
+                setRefreshing(false)
             })
-    }, [])
+    }
+
+    useEffect(() => { fetchWallets() }, [])
 
     // Auto-activate defaultTypeName filter once walletTypes load
     useEffect(() => {
@@ -102,6 +111,34 @@ export default function StrategyWalletSelector({
             didInit.current = true
         }
     }, [walletTypes, defaultTypeName])
+
+    // Fetch token balances for sell mode — runs on the selector's own wallet list
+    useEffect(() => {
+        if (tradeType !== 'sell' || !tokenMint || wallets.length === 0) {
+            setTokenBalances({})
+            return
+        }
+        setTokenBalancesLoading(true)
+        fetch('/api/wallet/token-balances', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mintAddress: tokenMint, walletAddresses: wallets.map((w) => w.public_key) }),
+        })
+            .then((r) => r.ok ? r.json() : null)
+            .then((data) => {
+                if (!data) return
+                setTokenDecimals(data.decimals ?? 6)
+                const byId: Record<string, string> = {}
+                for (const w of wallets) {
+                    const bal = data.balances[w.public_key]
+                    if (bal !== undefined) byId[w.id] = bal
+                }
+                setTokenBalances(byId)
+                onBalancesLoadedRef.current?.(byId, data.decimals ?? 6)
+            })
+            .catch(() => {})
+            .finally(() => setTokenBalancesLoading(false))
+    }, [tradeType, tokenMint, wallets])
 
     const visibleWallets = useMemo(() => {
         if (activeFilters.length === 0) return wallets
@@ -294,7 +331,7 @@ export default function StrategyWalletSelector({
     return (
         <div className="flex flex-col gap-4">
             {/* Type filter chips */}
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
                 <button
                     onClick={() => setActiveFilters([])}
                     className={[
@@ -320,6 +357,22 @@ export default function StrategyWalletSelector({
                         {type.name}
                     </button>
                 ))}
+                <button
+                    onClick={() => fetchWallets(true)}
+                    disabled={refreshing}
+                    title="Refresh wallets & balances"
+                    className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border border-border text-muted-foreground hover:text-foreground hover:border-foreground/40 transition-colors disabled:opacity-40"
+                >
+                    <svg
+                        className={['size-3', refreshing ? 'animate-spin' : ''].join(' ')}
+                        viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                        strokeLinecap="round" strokeLinejoin="round"
+                    >
+                        <path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                        <path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                    </svg>
+                    {refreshing ? 'Refreshing…' : 'Refresh'}
+                </button>
             </div>
 
             {/* Table */}

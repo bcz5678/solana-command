@@ -1,5 +1,5 @@
 import { PublicKey } from '@solana/web3.js';
-import { getAssociatedTokenAddressSync, AccountLayout, getMint } from '@solana/spl-token';
+import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
 import { initializeConnection } from '@/app/api/utils/helpers';
 
 export const dynamic = 'force-dynamic';
@@ -25,32 +25,35 @@ export async function POST(request: Request) {
 
     try {
         const connection = initializeConnection()
-        const mintPubkey = new PublicKey(mintAddress)
 
-        // Derive associated token addresses for all wallets
-        const ownerPubkeys = walletAddresses.map((a) => new PublicKey(a))
-        const ataAddresses = ownerPubkeys.map((owner) =>
-            getAssociatedTokenAddressSync(mintPubkey, owner),
+        // Fetch all parsed token accounts for each wallet in parallel.
+        // Querying both SPL Token and Token-2022 program to cover all token types.
+        const walletResults = await Promise.all(
+            walletAddresses.map(async (addr) => {
+                const owner = new PublicKey(addr)
+                const [v1, v2] = await Promise.all([
+                    connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID }),
+                    connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_2022_PROGRAM_ID }),
+                ])
+                return { addr, accounts: [...v1.value, ...v2.value] }
+            })
         )
 
-        // Single batch fetch: mint info + all ATAs in parallel
-        const [mintInfo, accountInfos] = await Promise.all([
-            getMint(connection, mintPubkey),
-            connection.getMultipleAccountsInfo(ataAddresses),
-        ])
-
-        const { decimals } = mintInfo
         const balances: Record<string, string> = {}
+        let decimals = 6
 
-        for (let i = 0; i < walletAddresses.length; i++) {
-            const info = accountInfos[i]
-            if (!info?.data || info.data.length < AccountLayout.span) {
-                balances[walletAddresses[i]] = '0'
-                continue
+        for (const { addr, accounts } of walletResults) {
+            const match = accounts.find(({ account }) => {
+                const info = (account.data as any).parsed?.info
+                return info?.mint === mintAddress
+            })
+            if (match) {
+                const info = (match.account.data as any).parsed.info
+                balances[addr] = info.tokenAmount.amount as string
+                decimals = info.tokenAmount.decimals as number
+            } else {
+                balances[addr] = '0'
             }
-            const decoded = AccountLayout.decode(info.data as Buffer)
-            // Return raw integer amount (like lamports) — callers apply decimals themselves
-            balances[walletAddresses[i]] = decoded.amount.toString()
         }
 
         return new Response(JSON.stringify({ balances, decimals }), {
