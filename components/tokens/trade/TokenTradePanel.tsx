@@ -3,9 +3,9 @@
 import { useState, useEffect, useRef } from 'react'
 import BN from 'bn.js'
 import { cn }                           from '@/lib/utils'
-import { Input }                        from '@/components/ui/input'
 import { Label }                        from '@/components/ui/label'
 import { TokenSnapshot } from '@/lib/types/token-pumpfun'
+import { TokenMintInput }               from '@/components/tokens/strategy-trade/TokenMintInput'
 import { PublicKey } from '@solana/web3.js'
 import { solStringToLamports, lamportsBNToSolDisplay, lamportsStringToBN } from '@/lib/lamports'
 import { TradeType }                    from './hooks/useTrade'
@@ -157,6 +157,11 @@ export function TokenTradePanel() {
     } finally {
       setHoldingLoading(false)
     }
+  }
+
+  function handleTokenChange(mint: string, resolved: boolean) {
+    setMintAddress(resolved ? mint : '')
+    reset()
   }
 
   function handleWalletSelect(wallet: WalletRecord) {
@@ -342,31 +347,12 @@ export function TokenTradePanel() {
         ))}
       </div>
 
-      {/* ── Token Address ──────────────────────────────────── */}
+      {/* ── Token ─────────────────────────────────────────── */}
       <div className="flex flex-col gap-1.5">
         <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Token Address
+          Token
         </Label>
-        <div className="relative flex items-center">
-          <Input
-            value={mintAddress}
-            onChange={e => setMintAddress(e.target.value)}
-            placeholder="Enter pump.fun token mint address…"
-            spellCheck={false}
-            autoComplete="off"
-            className="pr-9 font-mono text-xs"
-          />
-          {tokenLoading ? (
-            <span className="absolute right-3 size-3.5 rounded-full border-2 border-border border-t-primary animate-spin" />
-          ) : mintAddress ? (
-            <button
-              onClick={() => { setMintAddress(''); clearToken(); reset() }}
-              className="absolute right-3 text-sm leading-none text-muted-foreground hover:text-destructive transition-colors duration-150 cursor-pointer"
-            >
-              ✕
-            </button>
-          ) : null}
-        </div>
+        <TokenMintInput onTokenChange={handleTokenChange} />
         {tokenError && (
           <p className="flex items-center gap-1.5 text-xs text-destructive">
             <span>⚠</span> {tokenError}
@@ -375,6 +361,12 @@ export function TokenTradePanel() {
       </div>
 
       {/* ── Token Card ─────────────────────────────────────── */}
+      {tokenLoading && !tokenInfo && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="size-3.5 rounded-full border-2 border-border border-t-primary animate-spin" />
+          Loading token…
+        </div>
+      )}
       {tokenInfo && <TokenCard tokenInfo={tokenInfo} priceImpact={priceImpact} />}
 
       {/* ── Graduated Warning ──────────────────────────────── */}

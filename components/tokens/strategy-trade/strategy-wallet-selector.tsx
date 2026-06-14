@@ -21,6 +21,10 @@ type Props = {
     defaultTypeName?: string
     tradeAmounts?: Record<string, string>
     errorIds?: Set<string>
+    tradeType?: 'buy' | 'sell'
+    tokenBalances?: Record<string, string>
+    tokenBalancesLoading?: boolean
+    tokenDecimals?: number
 }
 
 function maskPubKey(key: string) {
@@ -47,6 +51,10 @@ export default function StrategyWalletSelector({
     defaultTypeName,
     tradeAmounts: controlledTradeAmounts,
     errorIds,
+    tradeType = 'buy',
+    tokenBalances,
+    tokenBalancesLoading,
+    tokenDecimals = 6,
 }: Props) {
     const [wallets, setWallets]               = useState<WalletRecord[]>([])
     const [walletTypes, setWalletTypes]       = useState<WalletTypeRow[]>([])
@@ -240,7 +248,18 @@ export default function StrategyWalletSelector({
                         ? lamportsBNToSolDisplay(wallet.solana_balance_in_lamports)
                         : '—'}
                 </td>
-                <td className="px-3 py-2.5 text-right text-muted-foreground text-xs">—</td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-xs text-muted-foreground">
+                    {tradeType === 'sell'
+                        ? tokenBalancesLoading
+                            ? <span className="inline-block size-3 rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground animate-spin" />
+                            : (() => {
+                                const raw = tokenBalances?.[wallet.id]
+                                if (!raw) return '—'
+                                const ui = Number(raw) / Math.pow(10, tokenDecimals)
+                                return ui.toLocaleString(undefined, { maximumFractionDigits: Math.min(tokenDecimals, 6) })
+                            })()
+                        : '—'}
+                </td>
                 <td className="px-3 py-2.5 text-right text-muted-foreground text-xs">—</td>
                 <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                     <input
@@ -316,7 +335,7 @@ export default function StrategyWalletSelector({
                             <th className="px-3 py-2.5 text-right">% Supply</th>
                             <th className="px-3 py-2.5 text-right">
                                 <div className="flex items-center justify-end gap-2">
-                                    SOL to Trade
+                                    {tradeType === 'sell' ? 'Token to Trade' : 'SOL to Trade'}
                                     <button
                                         onClick={clearTradeAmounts}
                                         className="normal-case tracking-normal font-normal text-[10px] border border-border rounded px-1.5 py-0.5 text-muted-foreground hover:text-destructive hover:border-destructive transition-colors"

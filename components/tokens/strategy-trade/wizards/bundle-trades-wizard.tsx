@@ -93,6 +93,11 @@ export default function BundleTradesWizard() {
     const [sellPct, setSellPct]                   = useState('')
     const [tokenMint, setTokenMint]               = useState('')
     const [tokenResolved, setTokenResolved]       = useState(false)
+    const [tokenName, setTokenName]               = useState('')
+    const [tokenSymbol, setTokenSymbol]           = useState('')
+    const [tokenBalances, setTokenBalances]       = useState<Record<string, string>>({})
+    const [tokenDecimals, setTokenDecimals]       = useState(6)
+    const [tokenBalancesLoading, setTokenBalancesLoading] = useState(false)
     const [nextError, setNextError]               = useState<{ id: string; label: string }[]>([])
     const [errorWalletIds, setErrorWalletIds]     = useState<Set<string>>(new Set())
 
@@ -174,6 +179,66 @@ export default function BundleTradesWizard() {
         if (tipMode === 'floor') fetchTipFloor()
     }, [tipMode])
 
+    // Fetch token balances when in sell mode with a resolved token and loaded wallets
+    useEffect(() => {
+        if (tradeType !== 'sell' || !tokenResolved || !tokenMint || wallets.length === 0) {
+            setTokenBalances({})
+            return
+        }
+        setTokenBalancesLoading(true)
+        const addresses = wallets.map((w) => w.public_key)
+        fetch('/api/wallet/token-balances', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mintAddress: tokenMint, walletAddresses: addresses }),
+        })
+            .then((r) => r.ok ? r.json() : null)
+            .then((data) => {
+                if (!data) return
+                setTokenDecimals(data.decimals ?? 6)
+                // Map from public key → wallet id
+                const byId: Record<string, string> = {}
+                for (const w of wallets) {
+                    const bal = data.balances[w.public_key]
+                    if (bal !== undefined) byId[w.id] = bal
+                }
+                setTokenBalances(byId)
+            })
+            .catch(() => {})
+            .finally(() => setTokenBalancesLoading(false))
+    }, [tradeType, tokenResolved, tokenMint, wallets])
+
+    // Clear trade amounts when trade type switches (SOL amounts ≠ token amounts)
+    useEffect(() => {
+        setTradeAmounts({})
+        setSellPct('')
+    }, [tradeType])
+
+    function rawPctAmount(rawBalance: string, pct: number): string {
+        if (!rawBalance || rawBalance === '0' || pct <= 0) return '0'
+        // Scale pct × 1000 to handle up to 1 decimal place (e.g. 33.5%)
+        const pctScaled = BigInt(Math.round(pct * 1000))
+        return (BigInt(rawBalance) * pctScaled / 100_000n).toString()
+    }
+
+    function applyPctToWallets(pct: number, ids: Set<string>) {
+        if (ids.size === 0 || pct <= 0) return
+        const newAmounts = { ...tradeAmounts }
+        ids.forEach((id) => {
+            const raw = tokenBalances[id]
+            if (raw && raw !== '0') newAmounts[id] = rawPctAmount(raw, pct)
+        })
+        setTradeAmounts(newAmounts)
+    }
+
+    function handleSellPctChange(value: string) {
+        setSellPct(value)
+        const pct = parseFloat(value)
+        if (!isNaN(pct) && pct > 0 && selectedWallets.size > 0) {
+            applyPctToWallets(pct, selectedWallets)
+        }
+    }
+
     function validRange(): { min: number; max: number } | null {
         const min = parseFloat(rangeMin)
         const max = parseFloat(rangeMax)
@@ -224,6 +289,16 @@ export default function BundleTradesWizard() {
             if (range) {
                 newIds.forEach((id) => {
                     if (!selectedWallets.has(id)) newAmounts[id] = randomInRange(range.min, range.max)
+                })
+            }
+        } else if (tradeType === 'sell' && sellPct) {
+            const pct = parseFloat(sellPct)
+            if (!isNaN(pct) && pct > 0) {
+                newIds.forEach((id) => {
+                    if (!selectedWallets.has(id)) {
+                        const raw = tokenBalances[id]
+                        if (raw && raw !== '0') newAmounts[id] = rawPctAmount(raw, pct)
+                    }
                 })
             }
         }
@@ -324,9 +399,11 @@ export default function BundleTradesWizard() {
                             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Token</span>
                             <div className="w-96">
                                 <TokenMintInput
-                                    onTokenChange={(mint, resolved) => {
+                                    onTokenChange={(mint, resolved, name, symbol) => {
                                         setTokenMint(mint)
                                         setTokenResolved(resolved)
+                                        setTokenName(name ?? '')
+                                        setTokenSymbol(symbol ?? '')
                                     }}
                                 />
                             </div>
@@ -448,7 +525,7 @@ export default function BundleTradesWizard() {
                                             <button
                                                 key={p}
                                                 type="button"
-                                                onClick={() => setSellPct(String(p))}
+                                                onClick={() => handleSellPctChange(String(p))}
                                                 className={[
                                                     'px-3 py-1.5 rounded-md text-xs font-medium border transition-colors',
                                                     sellPct === String(p)
@@ -468,7 +545,7 @@ export default function BundleTradesWizard() {
                                             step={1}
                                             placeholder="0"
                                             value={sellPct}
-                                            onChange={(e) => setSellPct(e.target.value)}
+                                            onChange={(e) => handleSellPctChange(e.target.value)}
                                             className="w-16 bg-transparent text-xs outline-none placeholder:text-muted-foreground [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                         />
                                         <span className="text-xs text-muted-foreground shrink-0">%</span>
@@ -600,6 +677,10 @@ export default function BundleTradesWizard() {
                             defaultTypeName="Trader"
                             tradeAmounts={tradeAmounts}
                             errorIds={errorWalletIds}
+                            tradeType={tradeType}
+                            tokenBalances={tokenBalances}
+                            tokenBalancesLoading={tokenBalancesLoading}
+                            tokenDecimals={tokenDecimals}
                         />
 
                         {nextError.length > 0 && (
@@ -624,12 +705,139 @@ export default function BundleTradesWizard() {
 
                     </div>
                 )}
-                {step === 1 && (
-                    <StepPlaceholder
-                        title="Review Bundle"
-                        description="Review all wallet trades, estimated costs, and bundle composition before submitting"
-                    />
-                )}
+                {step === 1 && (() => {
+                    const tipPayerWallet = wallets.find((w) => w.id === tipPayerWalletId)
+                    const selectedArr = [...selectedWallets]
+                    const totalBuySol = selectedArr.reduce((s, id) => s + (parseFloat(tradeAmounts[id] ?? '0') || 0), 0)
+                    const floorLabel = FLOOR_OPTIONS.find((f) => f.key === floorPercentile)?.label
+
+                    return (
+                        <div className="flex flex-col gap-5">
+                            {/* Parameters summary */}
+                            <div className="rounded-lg border border-border overflow-hidden divide-y divide-border text-xs">
+                                <div className="flex items-center gap-3 px-4 py-2.5 bg-muted/20">
+                                    <span className="w-28 shrink-0 font-medium text-muted-foreground">Token</span>
+                                    <span className="flex items-center gap-1.5 text-foreground">
+                                        {tokenName && <span className="font-medium">{tokenName}</span>}
+                                        {tokenSymbol && <span className="text-muted-foreground">({tokenSymbol})</span>}
+                                        <span className="font-mono text-[11px] text-muted-foreground">{maskPubKey(tokenMint)}</span>
+                                    </span>
+                                </div>
+                                <div className="flex items-center gap-3 px-4 py-2.5">
+                                    <span className="w-28 shrink-0 font-medium text-muted-foreground">Trade Type</span>
+                                    <span className={tradeType === 'buy' ? 'font-medium text-green-500 capitalize' : 'font-medium text-red-500 capitalize'}>
+                                        {tradeType}
+                                    </span>
+                                </div>
+                                {tradeType === 'sell' && (
+                                    <div className="flex items-center gap-3 px-4 py-2.5 bg-muted/20">
+                                        <span className="w-28 shrink-0 font-medium text-muted-foreground">Sell Amount</span>
+                                        <span className="tabular-nums text-foreground">{sellPct}%</span>
+                                    </div>
+                                )}
+                                {tradeType === 'buy' && randomRange && (
+                                    <div className="flex items-center gap-3 px-4 py-2.5 bg-muted/20">
+                                        <span className="w-28 shrink-0 font-medium text-muted-foreground">Trade Range</span>
+                                        <span className="tabular-nums text-foreground">{rangeMin} – {rangeMax} SOL</span>
+                                    </div>
+                                )}
+                                {tradeType === 'buy' && maxSolEnabled && maxSolTotal && (
+                                    <div className="flex items-center gap-3 px-4 py-2.5 bg-muted/20">
+                                        <span className="w-28 shrink-0 font-medium text-muted-foreground">Max SOL Split</span>
+                                        <span className="tabular-nums text-foreground">
+                                            {maxSolTotal} SOL ÷ {selectedWallets.size} wallets = {(parseFloat(maxSolTotal) / selectedWallets.size).toFixed(4)} SOL each
+                                        </span>
+                                    </div>
+                                )}
+                                <div className="flex items-center gap-3 px-4 py-2.5">
+                                    <span className="w-28 shrink-0 font-medium text-muted-foreground">Slippage</span>
+                                    <span className="tabular-nums text-foreground">{(slippage * 100).toFixed(1)}%</span>
+                                </div>
+                                <div className="flex items-center gap-3 px-4 py-2.5 bg-muted/20">
+                                    <span className="w-28 shrink-0 font-medium text-muted-foreground">Jito Tip</span>
+                                    <span className="text-foreground">
+                                        {tipMode === 'fixed'
+                                            ? <span className="tabular-nums">{jitoTipSol} SOL</span>
+                                            : <span>{floorLabel} percentile</span>
+                                        }
+                                        {jitoTipLamports !== null && tipMode === 'floor' && (
+                                            <span className="ml-1 tabular-nums text-muted-foreground">
+                                                ({lamportsBNToSolDisplay(jitoTipLamports)} SOL)
+                                            </span>
+                                        )}
+                                    </span>
+                                </div>
+                                {tipPayerWallet && (
+                                    <div className="flex items-center gap-3 px-4 py-2.5">
+                                        <span className="w-28 shrink-0 font-medium text-muted-foreground">Tip Payer</span>
+                                        <span className="font-mono text-foreground text-[11px]">
+                                            {tipPayerWallet.label && (
+                                                <span className="font-sans text-xs">{tipPayerWallet.label} · </span>
+                                            )}
+                                            {maskPubKey(tipPayerWallet.public_key)}
+                                            {' · '}
+                                            <span className="tabular-nums">{lamportsBNToSolDisplay(tipPayerWallet.solana_balance_in_lamports!)} SOL</span>
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Wallet table */}
+                            <div className="flex flex-col gap-2">
+                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                                    Wallets ({selectedWallets.size})
+                                </span>
+                                <div className="rounded-lg border border-border overflow-hidden">
+                                    <table className="w-full text-xs">
+                                        <thead>
+                                            <tr className="bg-muted/30 border-b border-border">
+                                                <th className="px-3 py-2 text-left font-medium text-muted-foreground">Wallet</th>
+                                                <th className="px-3 py-2 text-right font-medium text-muted-foreground">Balance</th>
+                                                {tradeType === 'buy' && (
+                                                    <th className="px-3 py-2 text-right font-medium text-muted-foreground">Buy Amount</th>
+                                                )}
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-border">
+                                            {selectedArr.map((id) => {
+                                                const w = wallets.find((wl) => wl.id === id)
+                                                if (!w) return null
+                                                return (
+                                                    <tr key={id}>
+                                                        <td className="px-3 py-2 font-mono text-[11px]">
+                                                            {w.label && <span className="font-sans text-xs text-foreground">{w.label} · </span>}
+                                                            {maskPubKey(w.public_key)}
+                                                        </td>
+                                                        <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                                                            {w.solana_balance_in_lamports
+                                                                ? `${lamportsBNToSolDisplay(w.solana_balance_in_lamports)} SOL`
+                                                                : '—'}
+                                                        </td>
+                                                        {tradeType === 'buy' && (
+                                                            <td className="px-3 py-2 text-right tabular-nums font-medium text-green-500">
+                                                                {tradeAmounts[id] ? `${tradeAmounts[id]} SOL` : '—'}
+                                                            </td>
+                                                        )}
+                                                    </tr>
+                                                )
+                                            })}
+                                        </tbody>
+                                        {tradeType === 'buy' && selectedWallets.size > 0 && (
+                                            <tfoot>
+                                                <tr className="border-t border-border bg-muted/20">
+                                                    <td className="px-3 py-2 font-medium text-muted-foreground" colSpan={2}>Total</td>
+                                                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-green-500">
+                                                        {totalBuySol.toFixed(4)} SOL
+                                                    </td>
+                                                </tr>
+                                            </tfoot>
+                                        )}
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    )
+                })()}
                 {step === 2 && (
                     <StepPlaceholder
                         title="Execute Bundle"

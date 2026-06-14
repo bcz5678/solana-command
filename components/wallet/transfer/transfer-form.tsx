@@ -225,25 +225,42 @@ export default function TransferForm() {
         setPending(null)
 
         const initial: Record<string, TransferStatus> = {}
-        transfer.receivers.forEach((r) => { initial[r.walletId] = 'pending' })
+        transfer.receivers.forEach((r) => { initial[r.walletId] = 'loading' })
         setReceiverStatuses(initial)
         setActiveTransfer(transfer)
         setTransfersDone(false)
         setShowProgress(true)
 
-        for (const receiver of transfer.receivers) {
-            setReceiverStatuses((prev) => ({ ...prev, [receiver.walletId]: 'loading' }))
-            try {
-                const params = new URLSearchParams({
-                    senderWalletId:        transfer.senderWalletId,
-                    receiverWalletAddress: receiver.publicKey,
-                    amountSOL:             receiver.amount,
-                })
-                const res = await fetch(`/api/wallet/transfer?${params}`)
-                setReceiverStatuses((prev) => ({ ...prev, [receiver.walletId]: res.ok ? 'success' : 'error' }))
-            } catch {
-                setReceiverStatuses((prev) => ({ ...prev, [receiver.walletId]: 'error' }))
+        try {
+            const res = await fetch('/api/wallet/transfer/batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    senderWalletId: transfer.senderWalletId,
+                    receivers: transfer.receivers.map((r) => ({
+                        walletId:  r.walletId,
+                        publicKey: r.publicKey,
+                        amountSOL: parseFloat(r.amount),
+                    })),
+                }),
+            })
+
+            if (res.ok) {
+                const { results } = await res.json()
+                const updated: Record<string, TransferStatus> = {}
+                for (const result of results as { walletId: string; success: boolean }[]) {
+                    updated[result.walletId] = result.success ? 'success' : 'error'
+                }
+                setReceiverStatuses(updated)
+            } else {
+                const failed: Record<string, TransferStatus> = {}
+                transfer.receivers.forEach((r) => { failed[r.walletId] = 'error' })
+                setReceiverStatuses(failed)
             }
+        } catch {
+            const failed: Record<string, TransferStatus> = {}
+            transfer.receivers.forEach((r) => { failed[r.walletId] = 'error' })
+            setReceiverStatuses(failed)
         }
 
         setTransfersDone(true)

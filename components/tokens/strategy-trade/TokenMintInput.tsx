@@ -6,7 +6,7 @@ import { TokenMint } from '@/lib/types/token-mint'
 type ResolvedToken = { name: string; symbol: string; mintAddress: string }
 
 type Props = {
-    onTokenChange: (mint: string, resolved: boolean) => void
+    onTokenChange: (mint: string, resolved: boolean, name?: string, symbol?: string) => void
 }
 
 export function TokenMintInput({ onTokenChange }: Props) {
@@ -43,7 +43,7 @@ export function TokenMintInput({ onTokenChange }: Props) {
         if (ownMatch) {
             const r: ResolvedToken = { name: ownMatch.token_name, symbol: ownMatch.token_symbol, mintAddress: query }
             setResolved(r)
-            callbackRef.current(query, true)
+            callbackRef.current(query, true, ownMatch.token_name, ownMatch.token_symbol)
             return
         }
 
@@ -56,7 +56,7 @@ export function TokenMintInput({ onTokenChange }: Props) {
                 const { body: { snapshot } } = await res.json()
                 const r: ResolvedToken = { name: snapshot.name, symbol: snapshot.symbol, mintAddress: query }
                 setResolved(r)
-                callbackRef.current(query, true)
+                callbackRef.current(query, true, snapshot.name, snapshot.symbol)
             } catch {
                 setError('Token not found')
                 callbackRef.current('', false)
@@ -92,7 +92,7 @@ export function TokenMintInput({ onTokenChange }: Props) {
         setResolved(r)
         setError('')
         setOpen(false)
-        callbackRef.current(token.mint_public_key, true)
+        callbackRef.current(token.mint_public_key, true, token.token_name, token.token_symbol)
     }
 
     function clear() {
