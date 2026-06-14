@@ -4,15 +4,9 @@ import {
   PUMP_SDK,
   OnlinePumpSdk,
   getBuyTokenAmountFromSolAmount,
-  maxSafeSellAmount,
+  getSellSolAmountFromTokenAmount,
 } from '@nirholas/pump-sdk';
 import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
-
-// Max on-chain transactions per sell API call.
-// For a fresh 30-SOL curve, chunkSize ≈ 550 raw tokens (6 decimals) so
-// 50 chunks ≈ 27,500 tokens per call. As real SOL buys accumulate the
-// virtualSolReserves grow, the safe chunk size grows, and fewer calls are needed.
-const MAX_CHUNKS_PER_CALL = 50;
 
 const ZERO = new BN(0);
 
@@ -22,7 +16,7 @@ export interface ExecuteResult {
   error?: string;
   solAmount: BN;
   tokenAmount: BN;        // raw token units sold (6 decimals for pump.fun tokens)
-  tokensRemaining: BN;    // raw token units not yet sold; retry with this amount if non-zero
+  tokensRemaining: BN;    // always ZERO — kept for API compatibility
   price: number;
 }
 
@@ -117,17 +111,7 @@ export class Executor {
     }
   }
 
-  /**
-   * Sell tokens on the bonding curve.
-   *
-   * Pump.fun's on-chain program uses u64 arithmetic:
-   *   overflow when  tokenAmount_raw × virtualSolReserves_lamports > u64::MAX
-   *
-   * To stay within that bound, large sells are capped at MAX_CHUNKS_PER_CALL
-   * safe chunks per call. If the requested amount exceeds the cap, the sold
-   * portion is returned in `tokenAmount` and the unsold portion in
-   * `tokensRemaining`. The caller should retry with `tokensRemaining`.
-   */
+  /** Sell a specific token amount on the bonding curve (or AMM if graduated) */
   async sell(mint: PublicKey, tokenAmount?: BN, slippage?: number): Promise<ExecuteResult> {
     const slip = slippage ?? this.defaultSlippage;
     try {
@@ -144,32 +128,39 @@ export class Executor {
         return this.ammSell(mint, tokenAmount, slippage);
       }
 
-      // Cap to MAX_CHUNKS_PER_CALL to stay within API timeout.
-      // virtualSolReserves is in lamports; maxSafeSellAmount returns raw token units.
-      const chunkSize     = maxSafeSellAmount(initialSellState.bondingCurve.virtualSolReserves);
-      const callCap       = chunkSize.gtn(0) ? chunkSize.muln(MAX_CHUNKS_PER_CALL) : tokenAmount;
-      const amountToSell  = tokenAmount.gt(callCap) ? callCap : tokenAmount;
-      const tokensRemaining = tokenAmount.sub(amountToSell);
+      const buildInstructions = async (): Promise<TransactionInstruction[]> => {
+        const [sellState, global, feeConfig] = await Promise.all([
+          this.onlineSdk.fetchSellState(mint, this.wallet.publicKey),
+          this.onlineSdk.fetchGlobal(),
+          this.onlineSdk.fetchFeeConfig(),
+        ]);
 
-      console.log(
-        `[sell] chunkSize=${chunkSize.toString()} cap=${callCap.toString()} ` +
-        `selling=${amountToSell.toString()} remaining=${tokensRemaining.toString()}`
-      );
+        const { bondingCurveAccountInfo, bondingCurve } = sellState;
 
-      // sellChunked re-fetches curve state between chunks and splits
-      // automatically when the amount would overflow the u64 multiply.
-      const signatures = await this.onlineSdk.sellChunked({
-        mint,
-        user: this.wallet.publicKey,
-        totalAmount:  amountToSell,     // raw token units, capped
-        slippage:     slip * 100,       // SDK expects percent (5 = 5%), not decimal
-        tokenProgram,
-        sendTx: (ixs) => this.sendTransaction(() => Promise.resolve(ixs)),
-      });
+        const solAmount = getSellSolAmountFromTokenAmount({
+          global,
+          feeConfig,
+          mintSupply: bondingCurve.tokenTotalSupply,
+          bondingCurve,
+          amount: tokenAmount,
+        });
 
-      const signature = signatures[signatures.length - 1];
-      console.log(`SELL ${mint.toBase58().slice(0, 8)}… | ${amountToSell.toString()} tokens | ${signatures.length} chunk(s) | remaining=${tokensRemaining.toString()} | sig=${signature.slice(0, 16)}…`);
-      return { success: true, signature, solAmount: ZERO, tokenAmount: amountToSell, tokensRemaining, price: 0 };
+        return PUMP_SDK.sellInstructions({
+          global,
+          bondingCurveAccountInfo,
+          bondingCurve,
+          mint,
+          user: this.wallet.publicKey,
+          amount: tokenAmount,
+          solAmount,
+          slippage: slip * 100,   // SDK expects percent (5 = 5%), not decimal
+          tokenProgram,
+        });
+      };
+
+      const signature = await this.sendTransaction(buildInstructions);
+      console.log(`SELL ${mint.toBase58().slice(0, 8)}… | ${tokenAmount.toString()} tokens | sig=${signature.slice(0, 16)}…`);
+      return { success: true, signature, solAmount: ZERO, tokenAmount, tokensRemaining: ZERO, price: 0 };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.log(`SELL FAILED ${mint.toBase58().slice(0, 8)}…: ${msg}`);
@@ -177,13 +168,21 @@ export class Executor {
     }
   }
 
-  /** Sell entire token balance */
+  /** Sell entire token balance (bonding curve or AMM) */
   async sellAll(mint: PublicKey, slippage?: number, tokenProgram?: PublicKey): Promise<ExecuteResult> {
     try {
       const resolvedTokenProgram = tokenProgram ?? await this.resolveTokenProgram(mint);
-      const balance = await this.onlineSdk.getTokenBalance(mint, this.wallet.publicKey, resolvedTokenProgram);
+      const [balance, initialSellState] = await Promise.all([
+        this.onlineSdk.getTokenBalance(mint, this.wallet.publicKey, resolvedTokenProgram),
+        this.onlineSdk.fetchSellState(mint, this.wallet.publicKey),
+      ]);
+
       if (balance.isZero()) {
         return { success: false, error: 'Zero balance', solAmount: ZERO, tokenAmount: ZERO, tokensRemaining: ZERO, price: 0 };
+      }
+
+      if (initialSellState.bondingCurve.complete) {
+        return this.ammSell(mint, balance, slippage);
       }
 
       const slip = slippage ?? this.defaultSlippage;

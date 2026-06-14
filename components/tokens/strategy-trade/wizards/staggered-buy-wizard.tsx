@@ -389,10 +389,11 @@ export default function StaggeredBuyWizard() {
                     apiResult = await res.json()
                 } else {
                     const tokenAmt = tradeAmounts[entry.walletId] ?? '0'
+                    const pct      = parseFloat(sellPct)
                     const res      = await fetch('/api/trade/staggered/sell', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ walletId: entry.walletId, mintAddress: tokenMint, tokenAmount: tokenAmt, slippage }),
+                        body: JSON.stringify({ walletId: entry.walletId, mintAddress: tokenMint, tokenAmount: tokenAmt, slippage, sellPct: isNaN(pct) ? undefined : pct }),
                     })
                     apiResult = await res.json()
                 }

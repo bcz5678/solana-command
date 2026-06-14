@@ -175,7 +175,7 @@ export function TokenTradePanel() {
     console.log(`button test - selectedWallet: ${selectedWallet?.id}`);
     console.log(`button test - tokenInfo: ${tokenInfo}`);
 
-    if (!selectedWallet || !tokenInfo || tokenInfo.complete) return
+    if (!selectedWallet || !tokenInfo) return
 
 
     try {
@@ -378,7 +378,7 @@ export function TokenTradePanel() {
               Token Graduated
             </strong>
             <p className="m-0 text-xs text-amber-700 leading-relaxed">
-              This token has moved to Raydium. Use Jupiter route instead.
+              This token has moved to Raydium AMM. Trades will be routed via the AMM automatically.
             </p>
           </div>
         </div>

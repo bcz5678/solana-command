@@ -9,7 +9,7 @@ export const dynamic    = 'force-dynamic';
 export const maxDuration = 120;
 
 export async function POST(request: Request) {
-    let body: { walletId: string; mintAddress: string; tokenAmount: string; slippage: number }
+    let body: { walletId: string; mintAddress: string; tokenAmount: string; slippage: number; sellPct?: number }
     try {
         body = await request.json()
     } catch {
@@ -19,7 +19,7 @@ export async function POST(request: Request) {
         })
     }
 
-    const { walletId, mintAddress, tokenAmount, slippage } = body
+    const { walletId, mintAddress, tokenAmount, slippage, sellPct } = body
     if (!walletId || !mintAddress || !tokenAmount) {
         return new Response(JSON.stringify({ error: 'walletId, mintAddress, and tokenAmount are required.' }), {
             status: 400,
@@ -33,6 +33,25 @@ export async function POST(request: Request) {
         const connection = initializeConnection()
         const executor   = new Executor({ connection, wallet: keypair, defaultSlippage: slippage ?? 0.01 })
         const mint       = new PublicKey(mintAddress)
+
+        // Use sellAll for 100% sells — reads live on-chain balance and uses the
+        // close-account instruction, avoiding rounding errors from the UI's
+        // integer percentage calculation.
+        if (sellPct === 100) {
+            const result = await executor.sellAll(mint, slippage)
+            if (!result.success) {
+                return new Response(JSON.stringify({
+                    success: false,
+                    error:   parsePumpError(result.error) ?? 'Sell all failed.',
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+            }
+            return new Response(JSON.stringify({
+                success:         true,
+                signature:       result.signature,
+                tokenAmount:     result.tokenAmount.toString(),
+                tokensRemaining: '0',
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        }
 
         // Loop to handle chunked sells (executor caps large amounts per call)
         let remaining  = new BN(tokenAmount)
