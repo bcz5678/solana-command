@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import BN from 'bn.js'
-import WizardShell, { StepPlaceholder, WizardStep } from './wizard-shell'
+import WizardShell, { WizardStep } from './wizard-shell'
 import StrategyWalletSelector from '@/components/tokens/strategy-trade/strategy-wallet-selector'
 import { solStringToLamports, lamportsBNToSolDisplay, lamportsStringToBN } from '@/lib/lamports'
 import { WalletRecord } from '@/lib/types/wallet'
@@ -63,6 +63,14 @@ const FLOOR_OPTIONS: { key: FloorKey; label: string }[] = [
     { key: 'ema50', label: 'EMA 50' },
 ]
 
+function formatTokenAmount(raw: string, decimals: number): string {
+    if (!raw || raw === '0') return '0'
+    const padded = raw.padStart(decimals + 1, '0')
+    const intPart = padded.slice(0, padded.length - decimals) || '0'
+    const fracPart = padded.slice(padded.length - decimals)
+    return `${intPart}.${fracPart}`.replace(/\.?0+$/, '')
+}
+
 function maskPubKey(key: string) {
     return `${key.slice(0, 7)}....${key.slice(-7)}`
 }
@@ -99,6 +107,9 @@ export default function BundleTradesWizard() {
     const [tokenDecimals, setTokenDecimals]       = useState(6)
     const [nextError, setNextError]               = useState<{ id: string; label: string }[]>([])
     const [errorWalletIds, setErrorWalletIds]     = useState<Set<string>>(new Set())
+    const [executing, setExecuting]               = useState(false)
+    const [bundleResult, setBundleResult]         = useState<{ bundleId: string; status: string } | null>(null)
+    const [executeError, setExecuteError]         = useState<string | null>(null)
 
     useEffect(() => {
         fetch('/api/wallets/explorer')
@@ -139,8 +150,15 @@ export default function BundleTradesWizard() {
 
     const canProceed = useMemo(() => {
         if (step !== 0) return true
+        if (!tokenResolved) return false
+        if (slippage <= 0) return false
+        const tipOk = tipMode === 'fixed'
+            ? jitoTipLamports !== null && jitoTipLamports.gtn(0)
+            : tipFloorData !== null
+        if (!tipOk) return false
+        if (!tipPayerWalletId) return false
+        if (selectedWallets.size === 0) return false
         if (tradeType === 'buy') {
-            if (!tokenResolved) return false
             if (randomRange) {
                 const min = parseFloat(rangeMin), max = parseFloat(rangeMax)
                 if (isNaN(min) || isNaN(max) || max < min || min < 0) return false
@@ -149,13 +167,6 @@ export default function BundleTradesWizard() {
                 const total = parseFloat(maxSolTotal)
                 if (isNaN(total) || total <= 0) return false
             }
-            if (slippage <= 0) return false
-            const tipOk = tipMode === 'fixed'
-                ? jitoTipLamports !== null && jitoTipLamports.gtn(0)
-                : tipFloorData !== null
-            if (!tipOk) return false
-            if (!tipPayerWalletId) return false
-            if (selectedWallets.size === 0) return false
         }
         return true
     }, [step, tradeType, tokenResolved, randomRange, rangeMin, rangeMax, maxSolEnabled, maxSolTotal, slippage, tipMode, jitoTipLamports, tipFloorData, tipPayerWalletId, selectedWallets])
@@ -188,7 +199,7 @@ export default function BundleTradesWizard() {
         if (!rawBalance || rawBalance === '0' || pct <= 0) return '0'
         // Scale pct × 1000 to handle up to 1 decimal place (e.g. 33.5%)
         const pctScaled = BigInt(Math.round(pct * 1000))
-        return (BigInt(rawBalance) * pctScaled / 100_000n).toString()
+        return (BigInt(rawBalance) * pctScaled / BigInt(100000)).toString()
     }
 
     function applyPctToWallets(pct: number, ids: Set<string>) {
@@ -348,10 +359,63 @@ export default function BundleTradesWizard() {
         setStep((s) => s + 1)
     }
 
+    async function handleExecute() {
+        if (!jitoTipLamports || executing) return
+        setExecuting(true)
+        setExecuteError(null)
+        setBundleResult(null)
+
+        try {
+            const endpoint = tradeType === 'buy'
+                ? '/api/trade/bundle/buy'
+                : '/api/trade/bundle/sell'
+
+            const tradesList = [...selectedWallets].map((id) => {
+                if (tradeType === 'buy') {
+                    return {
+                        walletId:    id,
+                        mintAddress: tokenMint,
+                        amountInSol: solStringToLamports(tradeAmounts[id] ?? '0').toString(),
+                        slippage,
+                    }
+                }
+                return {
+                    walletId:    id,
+                    mintAddress: tokenMint,
+                    tokenAmount: tradeAmounts[id] ?? '0',
+                    slippage,
+                }
+            })
+
+            const res  = await fetch(endpoint, {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({
+                    feePayerWalletId:  tipPayerWalletId,
+                    jitoTipInLamports: jitoTipLamports.toString(),
+                    tradesList,
+                }),
+            })
+
+            const data = await res.json()
+
+            if (!res.ok || !data.success) {
+                setExecuteError(data.error ?? 'Bundle submission failed')
+                return
+            }
+
+            setBundleResult({ bundleId: data.bundleId, status: data.status })
+        } catch (err) {
+            setExecuteError(err instanceof Error ? err.message : 'Network error')
+        } finally {
+            setExecuting(false)
+        }
+    }
+
     return (
         <div className="flex flex-col gap-4">
             <p className="text-xs text-muted-foreground">
-                Bundle multiple buy orders into a single atomic transaction. All selected wallets execute simultaneously in one block via Jito.
+                Bundle multiple {tradeType} orders into a single atomic transaction. All selected wallets execute simultaneously in one block via Jito.
             </p>
             <WizardShell
                 steps={steps}
@@ -682,6 +746,10 @@ export default function BundleTradesWizard() {
                     const selectedArr = [...selectedWallets]
                     const totalBuySol = selectedArr.reduce((s, id) => s + (parseFloat(tradeAmounts[id] ?? '0') || 0), 0)
                     const floorLabel = FLOOR_OPTIONS.find((f) => f.key === floorPercentile)?.label
+                    const totalSellRaw = selectedArr.reduce((s, id) => {
+                        const raw = tradeAmounts[id]
+                        return raw && raw !== '0' ? s + Number(raw) : s
+                    }, 0)
 
                     return (
                         <div className="flex flex-col gap-5">
@@ -764,10 +832,10 @@ export default function BundleTradesWizard() {
                                         <thead>
                                             <tr className="bg-muted/30 border-b border-border">
                                                 <th className="px-3 py-2 text-left font-medium text-muted-foreground">Wallet</th>
-                                                <th className="px-3 py-2 text-right font-medium text-muted-foreground">Balance</th>
-                                                {tradeType === 'buy' && (
-                                                    <th className="px-3 py-2 text-right font-medium text-muted-foreground">Buy Amount</th>
-                                                )}
+                                                <th className="px-3 py-2 text-right font-medium text-muted-foreground">SOL Balance</th>
+                                                <th className="px-3 py-2 text-right font-medium text-muted-foreground">
+                                                    {tradeType === 'buy' ? 'Buy Amount' : 'Sell Amount'}
+                                                </th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-border">
@@ -785,22 +853,34 @@ export default function BundleTradesWizard() {
                                                                 ? `${lamportsBNToSolDisplay(w.solana_balance_in_lamports)} SOL`
                                                                 : '—'}
                                                         </td>
-                                                        {tradeType === 'buy' && (
+                                                        {tradeType === 'buy' ? (
                                                             <td className="px-3 py-2 text-right tabular-nums font-medium text-green-500">
                                                                 {tradeAmounts[id] ? `${tradeAmounts[id]} SOL` : '—'}
+                                                            </td>
+                                                        ) : (
+                                                            <td className="px-3 py-2 text-right tabular-nums font-medium text-red-500">
+                                                                {tradeAmounts[id]
+                                                                    ? `${formatTokenAmount(tradeAmounts[id], tokenDecimals)} ${tokenSymbol || 'tokens'}`
+                                                                    : '—'}
                                                             </td>
                                                         )}
                                                     </tr>
                                                 )
                                             })}
                                         </tbody>
-                                        {tradeType === 'buy' && selectedWallets.size > 0 && (
+                                        {selectedWallets.size > 0 && (
                                             <tfoot>
                                                 <tr className="border-t border-border bg-muted/20">
                                                     <td className="px-3 py-2 font-medium text-muted-foreground" colSpan={2}>Total</td>
-                                                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-green-500">
-                                                        {totalBuySol.toFixed(4)} SOL
-                                                    </td>
+                                                    {tradeType === 'buy' ? (
+                                                        <td className="px-3 py-2 text-right tabular-nums font-semibold text-green-500">
+                                                            {totalBuySol.toFixed(4)} SOL
+                                                        </td>
+                                                    ) : (
+                                                        <td className="px-3 py-2 text-right tabular-nums font-semibold text-red-500">
+                                                            {formatTokenAmount(String(Math.round(totalSellRaw)), tokenDecimals)} {tokenSymbol || 'tokens'}
+                                                        </td>
+                                                    )}
                                                 </tr>
                                             </tfoot>
                                         )}
@@ -811,10 +891,75 @@ export default function BundleTradesWizard() {
                     )
                 })()}
                 {step === 2 && (
-                    <StepPlaceholder
-                        title="Execute Bundle"
-                        description="Submit bundle to Jito and monitor confirmation status in real time"
-                    />
+                    <div className="flex flex-col gap-5">
+                        {/* Ready state */}
+                        {!executing && !bundleResult && !executeError && (
+                            <div className="flex flex-col gap-4">
+                                <p className="text-xs text-muted-foreground">
+                                    Ready to submit {selectedWallets.size} {tradeType} transaction{selectedWallets.size !== 1 ? 's' : ''} as a Jito bundle.
+                                    All trades execute atomically in a single block.
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={handleExecute}
+                                    className={[
+                                        'self-start px-6 py-2 rounded-lg text-sm font-semibold text-white transition-colors',
+                                        tradeType === 'buy'
+                                            ? 'bg-green-500 hover:bg-green-600'
+                                            : 'bg-red-500 hover:bg-red-600',
+                                    ].join(' ')}
+                                >
+                                    Execute Bundle
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Loading */}
+                        {executing && (
+                            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                                <svg className="size-4 animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                                </svg>
+                                Submitting bundle to Jito and waiting for confirmation…
+                            </div>
+                        )}
+
+                        {/* Success */}
+                        {bundleResult && (
+                            <div className="flex flex-col gap-3">
+                                <div className="flex items-center gap-2 text-green-500 text-sm font-semibold">
+                                    <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
+                                    </svg>
+                                    Bundle {bundleResult.status}
+                                </div>
+                                <div className="rounded-lg border border-border bg-muted/20 px-4 py-3 text-xs">
+                                    <span className="text-muted-foreground">Bundle ID </span>
+                                    <span className="font-mono break-all text-foreground">{bundleResult.bundleId}</span>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Error */}
+                        {executeError && (
+                            <div className="flex flex-col gap-3">
+                                <div role="alert" className="flex gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-destructive">
+                                    <svg className="mt-0.5 size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                        <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+                                    </svg>
+                                    <span className="text-xs">{executeError}</span>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={handleExecute}
+                                    className="self-start px-4 py-1.5 rounded-md text-xs font-medium border border-border text-muted-foreground hover:text-foreground transition-colors"
+                                >
+                                    Retry
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 )}
             </WizardShell>
         </div>

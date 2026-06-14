@@ -22,7 +22,6 @@ import {
 } from "@solana/web3.js";
 import { searcher, bundle } from "jito-ts";
 import type { SearcherClient } from "jito-ts/dist/sdk/block-engine/searcher";
-import { initializeQuickNodeSolana } from "@/app/api/utils/helpers";
 import { LookupTable } from "@/lib/types/lookup-table";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -47,8 +46,8 @@ const MAX_BUNDLE_TXS = 5;
 export interface JitoExecutorConfig {
   /** Full gRPC block-engine URL, e.g. "mainnet.block-engine.jito.wtf" */
   blockEngineUrl: string;
-  /** Solana RPC endpoint */
-  rpcUrl: string;
+  /** Pre-initialised Solana connection (use initializeQuickNodeSolana().connection) */
+  connection: Connection;
   /** Fee payer / signer keypair */
   payer: Keypair;
   /**
@@ -84,13 +83,13 @@ export class JitoExecutor {
   constructor(config: JitoExecutorConfig) {
     const {
       blockEngineUrl,
-      rpcUrl,
+      connection,
       payer,
       tipLamports = 10_000,
       useStaticTipAccounts = true,
     } = config;
 
-    this.connection = initializeQuickNodeSolana().connection;
+    this.connection = connection;
     // searcherClient handles the gRPC connection to the block-engine.
     // No auth keypair is required for the public HTTP-based bundle submission.
     this.searcherClient = searcher.searcherClient(blockEngineUrl);
@@ -195,6 +194,31 @@ export class JitoExecutor {
   }
 
   /**
+   * Send a bundle from already-built, already-signed VersionedTransactions.
+   * Use this when each transaction has its own signer (e.g. multi-wallet bundle
+   * trades where every wallet signs its own buy/sell tx). The executor appends
+   * a tip transaction signed by the fee payer and submits the bundle.
+   *
+   * @param txs - Pre-signed VersionedTransactions (max 4; last slot is the tip tx)
+   */
+  async sendPrebuiltTransactions(txs: VersionedTransaction[]): Promise<BundleResult> {
+    if (txs.length === 0) throw new Error("txs array is empty");
+    if (txs.length > MAX_BUNDLE_TXS - 1) {
+      throw new Error(
+        `Max ${MAX_BUNDLE_TXS - 1} transactions per bundle (last slot is the tip tx)`,
+      );
+    }
+
+    const [{ blockhash }, tipAccount] = await Promise.all([
+      this.connection.getLatestBlockhash("confirmed"),
+      this.resolveTipAccount(),
+    ]);
+
+    const tipTx = this.buildTipTx(tipAccount, blockhash);
+    return this.submitBundle([...txs, tipTx]);
+  }
+
+  /**
    * Send a bundle from pre-built instruction sets without an ALT.
    * Useful when you've already assembled your instructions and just
    * want the executor to handle tip injection + submission.
@@ -232,30 +256,62 @@ export class JitoExecutor {
    * @param maxAttempts - Max polling iterations before giving up (@default 20)
    * @param intervalMs  - Delay between polls in ms (@default 1500)
    */
-  async waitForBundleLanding(
-    bundleId: string,
-    maxAttempts = 20,
-    intervalMs = 1500,
-  ): Promise<string> {
-    for (let i = 0; i < maxAttempts; i++) {
-      await sleep(intervalMs);
+  async waitForBundleLanding(bundleId: string, timeoutMs = 30_000): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`Bundle ${bundleId} did not land within timeout`)),
+        timeoutMs,
+      );
 
-      const statuses = await this.searcherClient.getBundleStatuses([bundleId]);
-      const entry = statuses.value?.[0];
+      const cancel = this.searcherClient.onBundleResult(
+        (result) => {
+          if (result.bundleId !== bundleId) return;
+          clearTimeout(timer);
+          cancel();
 
-      if (!entry) continue;
+          if (result.finalized) return resolve("finalized");
+          if (result.processed) return resolve("processed");
+          if (result.dropped)   return reject(new Error(`Bundle ${bundleId} dropped`));
+          if (result.rejected) {
+            const reason =
+              result.rejected.simulationFailure?.msg ??
+              result.rejected.internalError?.msg ??
+              result.rejected.droppedBundle?.msg ??
+              JSON.stringify(result.rejected);
+            return reject(new Error(`Bundle ${bundleId} rejected: ${reason}`));
+          }
+        },
+        (err) => {
+          clearTimeout(timer);
+          cancel();
+          reject(err);
+        },
+      );
+    });
+  }
 
-      const status = entry.confirmation_status ?? entry.err?.toString() ?? "unknown";
-      console.log(`[JitoExecutor] Bundle ${bundleId} status: ${status}`);
+  // ─── Public Helpers ────────────────────────────────────────────────────────
 
-      // "finalized" or "confirmed" means it landed
-      if (status === "finalized" || status === "confirmed") return status;
-
-      // "Failed" means it was dropped — no point polling further
-      if (status === "Failed") throw new Error(`Bundle ${bundleId} failed: ${JSON.stringify(entry.err)}`);
-    }
-
-    throw new Error(`Bundle ${bundleId} did not land within timeout`);
+  /**
+   * Fetch all ALTs, score them against the provided instructions, and return
+   * the optimal subset (≤4 tables, each covering ≥2 addresses).
+   * Returns an empty array if altRecords is empty or no table matches.
+   */
+  async resolveOptimalLookupTables(
+    altRecords: LookupTable[],
+    instructions: TransactionInstruction[],
+  ): Promise<AddressLookupTableAccount[]> {
+    if (altRecords.length === 0) return [];
+    const altAccounts = await this.fetchALTs(altRecords);
+    const { lookupTables, addressesForLookupTable, lookupTablesForAddress } =
+      this.buildLookupTableIndexes(altAccounts);
+    const allAddresses = extractAddressesFromInstructions(instructions);
+    return this.computeIdealLookupTablesForAddresses(
+      allAddresses,
+      lookupTables,
+      addressesForLookupTable,
+      lookupTablesForAddress,
+    );
   }
 
   // ─── Private Helpers ───────────────────────────────────────────────────────
@@ -402,9 +458,10 @@ export class JitoExecutor {
     }
 
     // Dynamic: fetch from block-engine (adds ~1 RPC round-trip)
-    const accounts = await this.searcherClient.getTipAccounts();
-    if (!accounts.length) throw new Error("No tip accounts returned from block-engine");
-    return new PublicKey(accounts[Math.floor(Math.random() * accounts.length)]);
+    const result = await this.searcherClient.getTipAccounts();
+    if (!result.ok) throw result.error;
+    if (!result.value.length) throw new Error("No tip accounts returned from block-engine");
+    return new PublicKey(result.value[Math.floor(Math.random() * result.value.length)]);
   }
 
   /**
@@ -414,16 +471,15 @@ export class JitoExecutor {
   private async submitBundle(txs: VersionedTransaction[]): Promise<BundleResult> {
     const jitoBundle = new bundle.Bundle(txs, MAX_BUNDLE_TXS);
 
-    const bundleId = await this.searcherClient.sendBundle(jitoBundle);
-    console.log(`[JitoExecutor] Bundle submitted: ${bundleId}`);
+    const result = await this.searcherClient.sendBundle(jitoBundle);
+    if (!result.ok) throw result.error;
+    console.log(`[JitoExecutor] Bundle submitted: ${result.value}`);
 
-    return { bundleId };
+    return { bundleId: result.value };
   }
 }
 
 // ─── Utility ─────────────────────────────────────────────────────────────────
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function extractAddressesFromInstructions(instructions: TransactionInstruction[]): PublicKey[] {
   const seen = new Set<string>();

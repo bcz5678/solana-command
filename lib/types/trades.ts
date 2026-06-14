@@ -1,5 +1,3 @@
-import BN from 'bn.js'
-
 export interface BuyTokenBody {
     walletId:    string
     mintAddress: string
@@ -7,27 +5,21 @@ export interface BuyTokenBody {
     slippage:    number
 }
 
-
-
 export interface SellTokenBody {
-    walletId: string
+    walletId:    string
     mintAddress: string
-    tokenAmount: string
-    slippage: number
+    tokenAmount: string   // raw token units — BN can't cross JSON
+    slippage:    number
 }
 
-
 export interface BundleBuyBody {
-  feePayerWalletId: string
-  jitoTipInLamports: BN
-  tradesList: BuyTokenBody[]
-  lookupTables: 
-    // optional initial addresses to add
+  feePayerWalletId:  string
+  jitoTipInLamports: string   // lamports as decimal string — BN can't cross JSON
+  tradesList:        BuyTokenBody[]
 }
 
 export interface BundleSellBody {
-  feePayerWalletId: string
-  jitoTipInLamports: BN
-  tradesList: BuyTokenBody[]
-    // optional initial addresses to add
+  feePayerWalletId:  string
+  jitoTipInLamports: string   // lamports as decimal string — BN can't cross JSON
+  tradesList:        SellTokenBody[]
 }
