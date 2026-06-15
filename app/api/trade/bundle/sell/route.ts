@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSuperAdmin } from '@/lib/auth/require-super-admin'
-import { AddressLookupTableAccount, PublicKey, TransactionMessage, VersionedTransaction } from '@solana/web3.js'
+import { AddressLookupTableAccount, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction } from '@solana/web3.js'
 import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token'
 import BN from 'bn.js'
 import {
@@ -10,7 +10,7 @@ import {
 } from '@nirholas/pump-sdk'
 import { JitoExecutor } from '@/lib/jito/clients/jitoExecutor'
 import { getWalletKeypairById } from '@/lib/vault/get-wallet-by-id'
-import { initializeConnection, initializeQuickNodeSolana } from '@/app/api/utils/helpers'
+import { initializeQuickNodeSolana } from '@/app/api/utils/helpers'
 import { createClient } from '@/lib/supabase/server'
 import type { BundleSellBody } from '@/lib/types/trades'
 import type { Keypair } from '@solana/web3.js'
@@ -19,7 +19,7 @@ import type { LookupTable } from '@/lib/types/lookup-table'
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 120
 
-const BLOCK_ENGINE_URL = process.env.JITO_BLOCK_ENGINE_URL ?? 'mainnet.block-engine.jito.wtf'
+const BLOCK_ENGINE_URL = process.env.JITO_BLOCK_ENGINE_URL ?? 'ny.mainnet.block-engine.jito.wtf'
 const MAX_BUNDLE_TRADES = 4
 
 export async function POST(req: NextRequest) {
@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
   const tradeKeypairs: Keypair[] = []
 
   try {
-    const connection = initializeConnection()
+    const connection = initializeQuickNodeSolana().connection
     const onlineSdk  = new OnlinePumpSdk(connection)
 
     // Fetch all keypairs in parallel
@@ -66,8 +66,6 @@ export async function POST(req: NextRequest) {
     ])
     feePayerKeypair = feePayer
     tradeKeypairs.push(...walletKps)
-
-    const { blockhash } = await connection.getLatestBlockhash('confirmed')
 
     // Build instruction sets per trade (each wallet signs its own tx)
     const tradeData = await Promise.all(
@@ -113,7 +111,8 @@ export async function POST(req: NextRequest) {
           user: tradeWallet.publicKey,
           amount: tokenAmount,
           solAmount,
-          slippage: trade.slippage * 100,
+          // SDK internally multiplies slippage by 100 then divides by 10000.
+          slippage: trade.slippage,
           tokenProgram,
         })
 
@@ -123,7 +122,7 @@ export async function POST(req: NextRequest) {
 
     const executor = new JitoExecutor({
       blockEngineUrl: BLOCK_ENGINE_URL,
-      connection:     initializeQuickNodeSolana().connection,
+      connection,
       payer:          feePayerKeypair,
       tipLamports:    Number(jitoTipInLamports),
     })
@@ -145,12 +144,30 @@ export async function POST(req: NextRequest) {
       console.warn('[bundle/sell] ALT resolution failed, proceeding without lookup tables:', altErr)
     }
 
-    // Build v0 txs: each wallet signs its own tx, ALTs applied where they help
-    const tradeTxs: VersionedTransaction[] = tradeData.map(({ instructions, wallet }) => {
+    const [{ blockhash }, tipAccount] = await Promise.all([
+      connection.getLatestBlockhash('confirmed'),
+      executor.resolveTipAccount(),
+    ])
+
+    // Embed the tip as a SystemProgram.transfer in the last trade tx (inline-tip
+    // approach) — avoids a separate tip tx that Jito's block engine was rejecting.
+    const tradeTxs: VersionedTransaction[] = tradeData.map(({ instructions, wallet }, i) => {
+      const isLast = i === tradeData.length - 1
+      const ixs = isLast
+        ? [
+            ...instructions,
+            SystemProgram.transfer({
+              fromPubkey: wallet.publicKey,
+              toPubkey:   tipAccount,
+              lamports:   Number(jitoTipInLamports),
+            }),
+          ]
+        : instructions
+
       const message = new TransactionMessage({
         payerKey:        wallet.publicKey,
         recentBlockhash: blockhash,
-        instructions,
+        instructions:    ixs,
       }).compileToV0Message(idealALTs)
 
       const tx = new VersionedTransaction(message)
@@ -158,8 +175,8 @@ export async function POST(req: NextRequest) {
       return tx
     })
 
-    const { bundleId } = await executor.sendPrebuiltTransactions(tradeTxs)
-    const status       = await executor.waitForBundleLanding(bundleId)
+    const { bundleId, signatures } = await executor.sendPrebuiltTransactionsWithInlineTip(tradeTxs)
+    const status = await executor.waitForBundleLanding(bundleId, signatures)
 
     return NextResponse.json({ success: true, bundleId, status }, { status: 200 })
   } catch (err) {

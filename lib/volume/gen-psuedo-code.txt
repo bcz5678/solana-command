@@ -1,0 +1,293 @@
+================================================================================
+  VOLUME GENERATOR — PSEUDO-CODE
+  Mechanism: Rolling multi-wallet buy/sell on pump.fun bonding curve via Jito
+================================================================================
+
+
+────────────────────────────────────────────────────────────────────────────────
+ CONSTANTS / CONFIG
+────────────────────────────────────────────────────────────────────────────────
+
+  POOL_SIZE            = 20          // total wallets in rotation
+  BUY_AMOUNT_SOL       = 0.05–0.10  // randomized per-wallet buy (in SOL)
+  JITO_TIP_LAMPORTS    = 1_000_000  // 0.001 SOL per bundle tip
+  MIN_HOLD_CYCLES      = 2          // wallet must survive at least N cycles before eligible to sell
+  MAX_HOLD_CYCLES      = 8          // force sell if wallet has held this many cycles
+  SELL_PERCENT         = 60–100%    // random portion of tokens to sell (looks organic)
+  CYCLE_INTERVAL_MS    = 6_000      // base delay between bundles
+  CYCLE_JITTER_MS      = 2_000      // ± random jitter added to each interval
+  MIN_WALLET_SOL       = 0.02       // top-up threshold — fund wallet if below this
+  FUNDING_WALLET       = <master keypair with SOL reserve>
+  TOKEN_MINT           = <target pump.fun token mint>
+
+
+────────────────────────────────────────────────────────────────────────────────
+ WALLET STATE MACHINE
+────────────────────────────────────────────────────────────────────────────────
+
+  Each wallet has one of three states:
+
+    IDLE     — holds no token position, available to buy
+    HOLDING  — has an active token position, counting hold cycles
+    SELLING  — sell bundle submitted, awaiting confirmation
+
+  Wallet record:
+    {
+      id:            string          // wallet identifier
+      keypair:       Keypair         // loaded from vault
+      state:         IDLE | HOLDING | SELLING
+      tokenBalance:  bigint          // raw token units currently held
+      solSpent:      number          // lamports spent on the buy
+      boughtAtCycle: number          // cycle index when position was opened
+      holdCycles:    number          // how many cycles this wallet has held
+    }
+
+
+────────────────────────────────────────────────────────────────────────────────
+ INITIALIZATION
+────────────────────────────────────────────────────────────────────────────────
+
+  FUNCTION initialize():
+
+    pool = []
+
+    FOR i = 0 to POOL_SIZE - 1:
+      keypair  = loadKeypairFromVault(walletIds[i])
+      balance  = getSOLBalance(keypair.publicKey)
+
+      IF balance < MIN_WALLET_SOL:
+        topUpWallet(keypair.publicKey, targetAmount = BUY_AMOUNT_SOL + 0.01)
+        // sends SOL from FUNDING_WALLET to cover next buy + fees
+
+      pool.push({
+        id:            walletIds[i],
+        keypair:       keypair,
+        state:         IDLE,
+        tokenBalance:  0,
+        solSpent:      0,
+        boughtAtCycle: 0,
+        holdCycles:    0,
+      })
+
+    RETURN pool
+
+
+────────────────────────────────────────────────────────────────────────────────
+ MAIN LOOP
+────────────────────────────────────────────────────────────────────────────────
+
+  FUNCTION runVolumeLoop(pool, totalCycles):
+
+    cycleIndex = 0
+
+    WHILE cycleIndex < totalCycles (or loop forever):
+
+      // ── STEP 1: Check if any HOLDING wallet should exit ──────────────────
+
+      holdingWallets = pool.filter(w => w.state == HOLDING)
+      sellCandidate  = selectSellCandidate(holdingWallets, cycleIndex)
+
+      IF sellCandidate != null:
+        submitSellBundle(sellCandidate)
+        // marks wallet state = SELLING during confirmation wait
+
+      // ── STEP 2: Select next IDLE wallet to buy ───────────────────────────
+
+      idleWallets  = pool.filter(w => w.state == IDLE)
+      buyCandidate = selectBuyCandidate(idleWallets)
+
+      IF buyCandidate != null:
+        checkAndTopUp(buyCandidate)
+        submitBuyBundle(buyCandidate, cycleIndex)
+        // marks wallet state = HOLDING
+
+      // ── STEP 3: Increment hold counters on all HOLDING wallets ───────────
+
+      FOR each wallet in pool WHERE state == HOLDING:
+        wallet.holdCycles += 1
+
+      // ── STEP 4: Wait before next cycle (with jitter) ─────────────────────
+
+      delay = CYCLE_INTERVAL_MS + random(-CYCLE_JITTER_MS, +CYCLE_JITTER_MS)
+      sleep(delay)
+
+      cycleIndex += 1
+
+
+────────────────────────────────────────────────────────────────────────────────
+ SELL CANDIDATE SELECTION
+────────────────────────────────────────────────────────────────────────────────
+
+  FUNCTION selectSellCandidate(holdingWallets, cycleIndex):
+
+    // Force-exit any wallet that has held too long
+    overdue = holdingWallets.filter(w => w.holdCycles >= MAX_HOLD_CYCLES)
+    IF overdue.length > 0:
+      RETURN overdue[0]   // sell the longest-held wallet first
+
+    // Otherwise only sell if at least MIN_HOLD_CYCLES have passed
+    eligible = holdingWallets.filter(w => w.holdCycles >= MIN_HOLD_CYCLES)
+    IF eligible.length == 0:
+      RETURN null         // nobody ready to sell yet
+
+    // Pick randomly from eligible to avoid predictable ordering
+    RETURN randomPick(eligible)
+
+
+────────────────────────────────────────────────────────────────────────────────
+ BUY CANDIDATE SELECTION
+────────────────────────────────────────────────────────────────────────────────
+
+  FUNCTION selectBuyCandidate(idleWallets):
+
+    IF idleWallets.length == 0:
+      RETURN null         // all wallets are holding — skip this buy cycle
+
+    // Pick randomly (not FIFO) so wallet sequence is unpredictable on-chain
+    RETURN randomPick(idleWallets)
+
+
+────────────────────────────────────────────────────────────────────────────────
+ BUY BUNDLE SUBMISSION
+────────────────────────────────────────────────────────────────────────────────
+
+  FUNCTION submitBuyBundle(wallet, cycleIndex):
+
+    amount   = randomInRange(BUY_AMOUNT_SOL_MIN, BUY_AMOUNT_SOL_MAX)  // in lamports
+    slippage = randomInRange(5, 15)   // % slippage, varies to look organic
+
+    // Fetch on-chain state
+    bondingCurve = fetchBondingCurve(TOKEN_MINT)
+    IF bondingCurve.complete:
+      ABORT "token graduated to AMM"
+
+    tokenAmount  = getBuyTokenAmountFromSolAmount(bondingCurve, amount)
+    tipAccount   = randomPick(JITO_TIP_ACCOUNTS)
+    blockhash    = getLatestBlockhash()
+
+    // Build transaction
+    instructions = [
+      createIdempotent(wallet.publicKey, TOKEN_MINT),   // ATA (no-op if exists)
+      pumpfun.Buy(mint, tokenAmount, amount, slippage),
+      SystemProgram.transfer(wallet.publicKey, tipAccount, JITO_TIP_LAMPORTS),
+    ]
+
+    tx = buildVersionedTransaction(instructions, wallet.keypair, blockhash)
+    tx.sign(wallet.keypair)
+
+    // Submit as Jito bundle
+    bundleId = jitoRest.sendBundle([tx])
+    result   = waitForBundleLanding(bundleId, timeout = 30s)
+
+    IF result == LANDED:
+      wallet.state         = HOLDING
+      wallet.tokenBalance  = tokenAmount
+      wallet.solSpent      = amount
+      wallet.boughtAtCycle = cycleIndex
+      wallet.holdCycles    = 0
+      log("BUY LANDED: wallet=" + wallet.id + " tokens=" + tokenAmount)
+
+    ELSE:
+      wallet.state = IDLE   // return to pool, retry next cycle
+      log("BUY FAILED: wallet=" + wallet.id + " status=" + result)
+
+
+────────────────────────────────────────────────────────────────────────────────
+ SELL BUNDLE SUBMISSION
+────────────────────────────────────────────────────────────────────────────────
+
+  FUNCTION submitSellBundle(wallet):
+
+    wallet.state = SELLING
+
+    // Read actual on-chain balance (don't trust cached value)
+    actualBalance = getTokenBalance(wallet.publicKey, TOKEN_MINT)
+
+    IF actualBalance == 0:
+      wallet.state        = IDLE    // already sold somehow, just recycle
+      wallet.tokenBalance = 0
+      RETURN
+
+    // Sell a random portion to avoid always dumping 100%
+    sellPortion  = randomInRange(SELL_PERCENT_MIN, SELL_PERCENT_MAX)
+    sellAmount   = actualBalance * sellPortion / 100
+
+    bondingCurve = fetchBondingCurve(TOKEN_MINT)
+    solExpected  = getSellSolAmountFromTokenAmount(bondingCurve, sellAmount)
+    slippage     = randomInRange(5, 15)
+    tipAccount   = randomPick(JITO_TIP_ACCOUNTS)
+    blockhash    = getLatestBlockhash()
+
+    instructions = [
+      pumpfun.Sell(mint, sellAmount, solExpected, slippage),
+      SystemProgram.transfer(wallet.publicKey, tipAccount, JITO_TIP_LAMPORTS),
+    ]
+
+    tx = buildVersionedTransaction(instructions, wallet.keypair, blockhash)
+    tx.sign(wallet.keypair)
+
+    bundleId = jitoRest.sendBundle([tx])
+    result   = waitForBundleLanding(bundleId, timeout = 30s)
+
+    IF result == LANDED:
+      remainingBalance     = actualBalance - sellAmount
+      wallet.tokenBalance  = remainingBalance
+      wallet.state         = IF remainingBalance == 0 THEN IDLE ELSE HOLDING
+      log("SELL LANDED: wallet=" + wallet.id + " sold=" + sellAmount)
+
+    ELSE:
+      wallet.state = HOLDING   // stay in holding, retry sell next eligible cycle
+      log("SELL FAILED: wallet=" + wallet.id + " status=" + result)
+
+
+────────────────────────────────────────────────────────────────────────────────
+ WALLET TOP-UP
+────────────────────────────────────────────────────────────────────────────────
+
+  FUNCTION checkAndTopUp(wallet):
+
+    balance = getSOLBalance(wallet.publicKey)
+
+    IF balance < MIN_WALLET_SOL:
+      needed = BUY_AMOUNT_SOL + JITO_TIP_LAMPORTS + TX_FEE_BUFFER - balance
+      sendSOL(from = FUNDING_WALLET, to = wallet.publicKey, amount = needed)
+      waitForConfirmation(timeout = 15s)
+      log("TOPPED UP: wallet=" + wallet.id + " added=" + needed)
+
+
+────────────────────────────────────────────────────────────────────────────────
+ EXAMPLE STATE SNAPSHOT (cycle 7, pool of 8 wallets shown)
+────────────────────────────────────────────────────────────────────────────────
+
+  Cycle  | Wallet A | Wallet B | Wallet C | Wallet D | Wallet E | ...
+  -------|----------|----------|----------|----------|----------|---------
+    0    | BUY →    | IDLE     | IDLE     | IDLE     | IDLE     |
+    1    | HOLD(1)  | BUY →    | IDLE     | IDLE     | IDLE     |
+    2    | HOLD(2)  | HOLD(1)  | BUY →    | IDLE     | IDLE     |
+    3    | SELL(A)  | HOLD(2)  | HOLD(1)  | BUY →    | IDLE     |  ← A exits after 2 cycles
+    4    | IDLE     | HOLD(3)  | HOLD(2)  | HOLD(1)  | BUY →    |
+    5    | BUY →    | SELL(B)  | HOLD(3)  | HOLD(2)  | HOLD(1)  |  ← B exits, A re-enters
+    6    | HOLD(1)  | IDLE     | SELL(C)  | HOLD(3)  | HOLD(2)  |  ← C exits
+    7    | HOLD(2)  | BUY →    | IDLE     | SELL(D)  | HOLD(3)  |  ← D exits, B re-enters
+
+  On-chain view of the bonding curve: a continuous stream of mixed buys and sells
+  from apparently unrelated wallets at irregular intervals — indistinguishable
+  from organic trading activity.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ GRACEFUL SHUTDOWN
+────────────────────────────────────────────────────────────────────────────────
+
+  FUNCTION shutdown(pool):
+
+    log("Shutdown initiated — draining all positions")
+
+    FOR each wallet in pool WHERE state == HOLDING:
+      submitSellBundle(wallet)   // sell 100% on shutdown
+      waitForConfirmation()
+
+    FOR each wallet in pool WHERE state != IDLE:
+      consolidateSOL(wallet.publicKey → FUNDING_WALLET)
+
+    log("All positions closed. SOL consolidated.")

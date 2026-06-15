@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSuperAdmin } from '@/lib/auth/require-super-admin'
-import { AddressLookupTableAccount, PublicKey, TransactionMessage, VersionedTransaction } from '@solana/web3.js'
+import { AddressLookupTableAccount, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction } from '@solana/web3.js'
 import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token'
 import BN from 'bn.js'
 import {
@@ -10,7 +10,7 @@ import {
 } from '@nirholas/pump-sdk'
 import { JitoExecutor } from '@/lib/jito/clients/jitoExecutor'
 import { getWalletKeypairById } from '@/lib/vault/get-wallet-by-id'
-import { initializeConnection, initializeQuickNodeSolana } from '@/app/api/utils/helpers'
+import { initializeQuickNodeSolana } from '@/app/api/utils/helpers'
 import { createClient } from '@/lib/supabase/server'
 import type { BundleBuyBody } from '@/lib/types/trades'
 import type { Keypair } from '@solana/web3.js'
@@ -19,7 +19,7 @@ import type { LookupTable } from '@/lib/types/lookup-table'
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 120
 
-const BLOCK_ENGINE_URL = process.env.JITO_BLOCK_ENGINE_URL ?? 'mainnet.block-engine.jito.wtf'
+const BLOCK_ENGINE_URL = process.env.JITO_BLOCK_ENGINE_URL ?? 'ny.mainnet.block-engine.jito.wtf'
 const MAX_BUNDLE_TRADES = 4
 
 export async function POST(req: NextRequest) {
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { feePayerWalletId, jitoTipInLamports, tradesList } = body
+  const { feePayerWalletId, jitoTipInLamports, tradesList, useJito = true } = body
 
   if (!feePayerWalletId || !jitoTipInLamports || !tradesList?.length) {
     return NextResponse.json(
@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
   const tradeKeypairs: Keypair[] = []
 
   try {
-    const connection = initializeConnection()
+    const connection = initializeQuickNodeSolana().connection
     const onlineSdk  = new OnlinePumpSdk(connection)
 
     // Fetch all keypairs in parallel
@@ -66,8 +66,6 @@ export async function POST(req: NextRequest) {
     ])
     feePayerKeypair = feePayer
     tradeKeypairs.push(...walletKps)
-
-    const { blockhash } = await connection.getLatestBlockhash('confirmed')
 
     // Build instruction sets per trade (each wallet signs its own tx)
     const tradeData = await Promise.all(
@@ -112,7 +110,9 @@ export async function POST(req: NextRequest) {
           user: tradeWallet.publicKey,
           amount: tokenAmount,
           solAmount,
-          slippage: trade.slippage * 100,
+          // SDK internally multiplies slippage by 100 then divides by 10000, so
+          // pass the raw percentage value (e.g. 5 for 5%), not basis points.
+          slippage: trade.slippage,
           tokenProgram,
         })
 
@@ -120,47 +120,118 @@ export async function POST(req: NextRequest) {
       }),
     )
 
-    const executor = new JitoExecutor({
-      blockEngineUrl: BLOCK_ENGINE_URL,
-      connection:     initializeQuickNodeSolana().connection,
-      payer:          feePayerKeypair,
-      tipLamports:    Number(jitoTipInLamports),
-    })
-
     // Resolve the best ALTs across all instruction sets.
     // Falls back to no compression if the DB fetch fails or no tables are active.
     let idealALTs: AddressLookupTableAccount[] = []
-    try {
-      const supabase = await createClient()
-      const { data, error } = await supabase.rpc('get_lookup_tables', { target_user_id: null })
-      if (!error && data) {
-        const activeTables = (data as unknown as LookupTable[]).filter(t => t.status === 'active')
-        if (activeTables.length > 0) {
-          const allInstructions = tradeData.flatMap(d => d.instructions)
-          idealALTs = await executor.resolveOptimalLookupTables(activeTables, allInstructions)
+
+    if (useJito) {
+      const executor = new JitoExecutor({
+        blockEngineUrl: BLOCK_ENGINE_URL,
+        connection:     connection,
+        payer:          feePayerKeypair,
+        tipLamports:    Number(jitoTipInLamports),
+      })
+
+      try {
+        const supabase = await createClient()
+        const { data, error } = await supabase.rpc('get_lookup_tables', { target_user_id: null })
+        if (!error && data) {
+          const activeTables = (data as unknown as LookupTable[]).filter(t => t.status === 'active')
+          if (activeTables.length > 0) {
+            const allInstructions = tradeData.flatMap(d => d.instructions)
+            idealALTs = await executor.resolveOptimalLookupTables(activeTables, allInstructions)
+          }
         }
+      } catch (altErr) {
+        console.warn('[bundle/buy] ALT resolution failed, proceeding without lookup tables:', altErr)
       }
-    } catch (altErr) {
-      console.warn('[bundle/buy] ALT resolution failed, proceeding without lookup tables:', altErr)
+
+      const [{ blockhash }, tipAccount] = await Promise.all([
+        connection.getLatestBlockhash('confirmed'),
+        executor.resolveTipAccount(),
+      ])
+
+      // Embed the tip as a SystemProgram.transfer in the last trade tx so the
+      // bundle is a single transaction — eliminating the separate tip tx that
+      // was consistently returning "Invalid" from Jito's block engine.
+      const tradeTxs: VersionedTransaction[] = tradeData.map(({ instructions, wallet }, i) => {
+        const isLast = i === tradeData.length - 1
+        const ixs = isLast
+          ? [
+              ...instructions,
+              SystemProgram.transfer({
+                fromPubkey: wallet.publicKey,
+                toPubkey:   tipAccount,
+                lamports:   Number(jitoTipInLamports),
+              }),
+            ]
+          : instructions
+
+        const message = new TransactionMessage({
+          payerKey:        wallet.publicKey,
+          recentBlockhash: blockhash,
+          instructions:    ixs,
+        }).compileToV0Message(idealALTs)
+        const tx = new VersionedTransaction(message)
+        tx.sign([wallet])
+        return tx
+      })
+
+      const { bundleId, signatures } = await executor.sendPrebuiltTransactionsWithInlineTip(tradeTxs)
+      const status = await executor.waitForBundleLanding(bundleId, signatures)
+
+      return NextResponse.json({ success: true, bundleId, status }, { status: 200 })
     }
 
-    // Build v0 txs: each wallet signs its own tx, ALTs applied where they help
-    const tradeTxs: VersionedTransaction[] = tradeData.map(({ instructions, wallet }) => {
+    // ── Direct submission (diagnostic / non-Jito path) ────────────────────────
+    // useJito=false: skip the bundle executor and send each trade tx directly via
+    // sendRawTransaction. Use this to verify the pump.fun instruction itself is
+    // valid on mainnet independent of any Jito-specific validation.
+    console.log('[bundle/buy] useJito=false — submitting directly via sendRawTransaction')
+
+    const { blockhash: directBlockhash } = await connection.getLatestBlockhash('confirmed')
+
+    const directTxs: VersionedTransaction[] = tradeData.map(({ instructions, wallet }) => {
       const message = new TransactionMessage({
         payerKey:        wallet.publicKey,
-        recentBlockhash: blockhash,
+        recentBlockhash: directBlockhash,
         instructions,
       }).compileToV0Message(idealALTs)
-
       const tx = new VersionedTransaction(message)
       tx.sign([wallet])
       return tx
     })
 
-    const { bundleId } = await executor.sendPrebuiltTransactions(tradeTxs)
-    const status       = await executor.waitForBundleLanding(bundleId)
+    const directSignatures: string[] = []
+    for (const tx of directTxs) {
+      const sig = await connection.sendRawTransaction(tx.serialize(), {
+        skipPreflight:        false,
+        preflightCommitment:  'confirmed',
+        maxRetries:           3,
+      })
+      console.log(`[bundle/buy] direct tx sent: ${sig}`)
+      directSignatures.push(sig)
+    }
 
-    return NextResponse.json({ success: true, bundleId, status }, { status: 200 })
+    // Poll for confirmation (up to 60 s)
+    const deadline = Date.now() + 60_000
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 2_000))
+      const statuses = await connection.getSignatureStatuses(directSignatures)
+      const confirmed = statuses.value.find(
+        s => s && (s.confirmationStatus === 'confirmed' || s.confirmationStatus === 'finalized'),
+      )
+      if (confirmed) {
+        const level = confirmed.confirmationStatus!
+        console.log(`[bundle/buy] direct tx confirmed: ${level}`)
+        return NextResponse.json({ success: true, signatures: directSignatures, status: level }, { status: 200 })
+      }
+    }
+
+    return NextResponse.json(
+      { success: false, signatures: directSignatures, error: 'Direct tx not confirmed within 60s' },
+      { status: 200 },
+    )
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Bundle buy failed'
     return NextResponse.json({ error: message }, { status: 500 })

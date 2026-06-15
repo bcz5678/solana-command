@@ -393,7 +393,7 @@ export default function BundleTradesWizard() {
                 body:    JSON.stringify({
                     feePayerWalletId:  tipPayerWalletId,
                     jitoTipInLamports: jitoTipLamports.toString(),
-                    tradesList,
+                    tradesList: tradesList,
                 }),
             })
 

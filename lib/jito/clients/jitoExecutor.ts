@@ -20,7 +20,9 @@ import {
   TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
-import { searcher, bundle } from "jito-ts";
+import { ed25519 } from "@noble/curves/ed25519";
+import bs58 from "bs58";
+import { searcher, bundle as jitoBundle } from "jito-ts";
 import type { SearcherClient } from "jito-ts/dist/sdk/block-engine/searcher";
 import { LookupTable } from "@/lib/types/lookup-table";
 
@@ -66,6 +68,7 @@ export interface JitoExecutorConfig {
 
 export interface BundleResult {
   bundleId: string;
+  signatures: string[];
   status?: string;
 }
 
@@ -77,8 +80,7 @@ export class JitoExecutor {
   private readonly payer: Keypair;
   private readonly tipLamports: number;
   private readonly useStaticTipAccounts: boolean;
-  
-
+  private readonly blockEngineUrl: string;
 
   constructor(config: JitoExecutorConfig) {
     const {
@@ -86,24 +88,15 @@ export class JitoExecutor {
       connection,
       payer,
       tipLamports = 10_000,
-      useStaticTipAccounts = true,
+      useStaticTipAccounts = false,
     } = config;
 
+    this.blockEngineUrl = blockEngineUrl;
     this.connection = connection;
-    // searcherClient handles the gRPC connection to the block-engine.
-    // No auth keypair is required for the public HTTP-based bundle submission.
     this.searcherClient = searcher.searcherClient(blockEngineUrl);
     this.payer = payer;
     this.tipLamports = tipLamports;
     this.useStaticTipAccounts = useStaticTipAccounts;
-
-
-    // Subscribe to async bundle results (fire-and-forget logging).
-    // Replace this handler with your own persistence/alerting logic.
-    this.searcherClient.onBundleResult(
-      (result) => console.log("[JitoExecutor] Bundle result:", result),
-      (err) => console.error("[JitoExecutor] Bundle result error:", err),
-    );
   }
 
   // ─── Public API ────────────────────────────────────────────────────────────
@@ -119,6 +112,8 @@ export class JitoExecutor {
    * @param addresses - Public keys to include; max 4 (last slot reserved for tip tx)
    */
   async sendBundleFromAddresses(addresses: PublicKey[]): Promise<BundleResult> {
+    console.log(`sendBundleFromAddresses`);
+
     if (addresses.length === 0) throw new Error("addresses array is empty");
     // Reserve last tx slot for the tip transaction
     if (addresses.length > MAX_BUNDLE_TXS - 1) {
@@ -141,10 +136,6 @@ export class JitoExecutor {
       return this.buildVersionedTx([ix], blockhash);
     });
 
-    // Append a standalone tip transaction as the last tx in the bundle
-    const tipTx = this.buildTipTx(tipAccount, blockhash);
-    txs.push(tipTx);
-
     return this.submitBundle(txs);
   }
 
@@ -160,7 +151,11 @@ export class JitoExecutor {
   async sendBundleFromLookupTables(
     altAddresses: LookupTable[],
     instructionSets: TransactionInstruction[][],
-  ): Promise<BundleResult> {
+  ): Promise<BundleResult> { 
+    
+    console.log(`sendBundleFromLookupTables`);
+
+
     if (instructionSets.length === 0) throw new Error("instructionSets is empty");
     if (instructionSets.length > MAX_BUNDLE_TXS - 1) {
       throw new Error(
@@ -173,22 +168,20 @@ export class JitoExecutor {
       this.buildLookupTableIndexes(altAccounts);
 
     const allAddresses = extractAddressesFromInstructions(instructionSets.flat());
-    const idealTables = this.computeIdealLookupTablesForAddresses(
+    const rawIdealTables = this.computeIdealLookupTablesForAddresses(
       allAddresses,
       lookupTables,
       addressesForLookupTable,
       lookupTablesForAddress,
     );
+    // Tip accounts must be static (not ALT-resolved) or Jito rejects the bundle
+    const idealTables = this.filterTipAccountsFromALTs(rawIdealTables);
 
-    const [{ blockhash }, tipAccount] = await Promise.all([
-      this.connection.getLatestBlockhash("confirmed"),
-      this.resolveTipAccount(),
-    ]);
+    const { blockhash } = await this.connection.getLatestBlockhash("confirmed");
 
     const txs: VersionedTransaction[] = instructionSets.map((ixs) =>
       this.buildVersionedTx(ixs, blockhash, idealTables),
     );
-    txs.push(this.buildTipTx(tipAccount, blockhash, idealTables));
 
     return this.submitBundle(txs);
   }
@@ -202,6 +195,8 @@ export class JitoExecutor {
    * @param txs - Pre-signed VersionedTransactions (max 4; last slot is the tip tx)
    */
   async sendPrebuiltTransactions(txs: VersionedTransaction[]): Promise<BundleResult> {
+    console.log(`sendPrebuiltTransactions`);
+
     if (txs.length === 0) throw new Error("txs array is empty");
     if (txs.length > MAX_BUNDLE_TXS - 1) {
       throw new Error(
@@ -209,13 +204,112 @@ export class JitoExecutor {
       );
     }
 
-    const [{ blockhash }, tipAccount] = await Promise.all([
-      this.connection.getLatestBlockhash("confirmed"),
-      this.resolveTipAccount(),
-    ]);
 
-    const tipTx = this.buildTipTx(tipAccount, blockhash);
-    return this.submitBundle([...txs, tipTx]);
+    // sigVerify:true + replaceRecentBlockhash:false gives the closest possible
+    // match to what Jito's block engine runs: actual sig check + actual blockhash.
+    // Routes now use a 'finalized' blockhash so the node is guaranteed to have it.
+    // If this produces BlockhashNotFound, fall back to replaceRecentBlockhash:true
+    // so we still catch program errors without blocking on a lagging simulation node.
+    for (let i = 0; i < txs.length; i++) {
+      let sim = await this.connection.simulateTransaction(txs[i], {
+        sigVerify: true,
+        replaceRecentBlockhash: false,
+      });
+
+      if (sim.value.err) {
+        const errStr = JSON.stringify(sim.value.err);
+
+        if (errStr.includes('BlockhashNotFound')) {
+          console.warn(`[JitoExecutor] Tx[${i}] simulation node lacks blockhash — retrying with replaceRecentBlockhash:true`);
+          sim = await this.connection.simulateTransaction(txs[i], {
+            sigVerify: false,
+            replaceRecentBlockhash: true,
+          });
+        }
+
+        if (sim.value.err) {
+          const logs = sim.value.logs?.join('\n') ?? '(no logs)';
+          throw new Error(`Tx[${i}] simulation failed: ${JSON.stringify(sim.value.err)}\n${logs}`);
+        }
+      }
+
+      // Log simulation output so we can see CU usage and any program warnings
+      const cuUsed = sim.value.unitsConsumed ?? '?';
+      const simLogs = sim.value.logs ?? [];
+      console.log(`[JitoExecutor] Tx[${i}] simulation OK | CU=${cuUsed}`);
+      if (simLogs.length > 0) {
+        // Print last 10 log lines to avoid flooding — enough to catch program errors
+        const tail = simLogs.slice(-10);
+        console.log(`[JitoExecutor] Tx[${i}] sim logs (last ${tail.length}):\n  ${tail.join('\n  ')}`);
+      }
+    }
+
+    return this.submitBundle(txs);
+  }
+
+  /**
+   * Like sendPrebuiltTransactions, but the tip is already embedded as a
+   * SystemProgram.transfer instruction inside the last trade tx. No separate
+   * tip transaction is added — the bundle contains only the supplied txs.
+   *
+   * The last trade wallet is responsible for the tip payment, which means:
+   * - Single-wallet bundle: that wallet pays for both the trade and the tip.
+   * - Multi-wallet bundle: the last wallet in the list pays the tip.
+   *
+   * @param txs - Pre-signed VersionedTransactions (max 5; tip is inline)
+   */
+  async sendPrebuiltTransactionsWithInlineTip(txs: VersionedTransaction[]): Promise<BundleResult> {
+    console.log(`sendPrebuiltTransactionsWithInlineTip`);
+
+    if (txs.length === 0) throw new Error("txs array is empty");
+    if (txs.length > MAX_BUNDLE_TXS) {
+      throw new Error(`Max ${MAX_BUNDLE_TXS} transactions per bundle`);
+    }
+
+    for (let i = 0; i < txs.length; i++) {
+      let sim = await this.connection.simulateTransaction(txs[i], {
+        sigVerify: true,
+        replaceRecentBlockhash: false,
+      });
+
+      if (sim.value.err) {
+        const errStr = JSON.stringify(sim.value.err);
+
+        if (errStr.includes('BlockhashNotFound')) {
+          console.warn(`[JitoExecutor] Tx[${i}] simulation node lacks blockhash — retrying with replaceRecentBlockhash:true`);
+          sim = await this.connection.simulateTransaction(txs[i], {
+            sigVerify: false,
+            replaceRecentBlockhash: true,
+          });
+        }
+
+        if (sim.value.err) {
+          const logs = sim.value.logs?.join('\n') ?? '(no logs)';
+          throw new Error(`Tx[${i}] simulation failed: ${JSON.stringify(sim.value.err)}\n${logs}`);
+        }
+      }
+
+      const cuUsed = sim.value.unitsConsumed ?? '?';
+      const simLogs = sim.value.logs ?? [];
+      console.log(`[JitoExecutor] Tx[${i}] simulation OK | CU=${cuUsed}`);
+      if (simLogs.length > 0) {
+        const tail = simLogs.slice(-10);
+        console.log(`[JitoExecutor] Tx[${i}] sim logs (last ${tail.length}):\n  ${tail.join('\n  ')}`);
+      }
+    }
+
+    // Verify each signature cryptographically before submission.
+    // Jito's block engine runs the same check and returns "Invalid" if any sig fails.
+    for (let i = 0; i < txs.length; i++) {
+      const msgBytes = txs[i].message.serialize();
+      const sig      = txs[i].signatures[0];
+      const pubkey   = txs[i].message.staticAccountKeys[0].toBytes();
+      const valid    = ed25519.verify(sig, msgBytes, pubkey);
+      console.log(`[JitoExecutor] Tx[${i}] sig verify: ${valid ? 'VALID' : 'INVALID'} | signer: ${txs[i].message.staticAccountKeys[0].toBase58()}`);
+      if (!valid) throw new Error(`Tx[${i}] has an invalid signature — re-sign before submitting`);
+    }
+
+    return this.submitBundle(txs, 5, true);
   }
 
   /**
@@ -228,6 +322,8 @@ export class JitoExecutor {
   async sendBundleFromInstructions(
     instructionSets: TransactionInstruction[][],
   ): Promise<BundleResult> {
+    console.log(`sendBundleFromInstructions`);;
+
     if (instructionSets.length === 0) throw new Error("instructionSets is empty");
     if (instructionSets.length > MAX_BUNDLE_TXS - 1) {
       throw new Error(
@@ -236,58 +332,93 @@ export class JitoExecutor {
     }
 
     const { blockhash } = await this.connection.getLatestBlockhash("confirmed");
-    const tipAccount = await this.resolveTipAccount();
+
+    console.log(`sendBundleFromInstructions -> blockhash: ${blockhash}`);
 
     const txs: VersionedTransaction[] = instructionSets.map((ixs) =>
       this.buildVersionedTx(ixs, blockhash),
     );
 
-    const tipTx = this.buildTipTx(tipAccount, blockhash);
-    txs.push(tipTx);
+    console.log(`sendBundleFromInstructions -> txs: ${txs}`);
 
     return this.submitBundle(txs);
   }
 
   /**
    * Poll Jito for the final status of a submitted bundle.
-   * Call this after sendBundle* resolves if you need on-chain confirmation.
    *
-   * @param bundleId - The bundle ID returned by a send* method
-   * @param maxAttempts - Max polling iterations before giving up (@default 20)
-   * @param intervalMs  - Delay between polls in ms (@default 1500)
+   * Strategy:
+   * 1. getInflightBundleStatuses — reflects Pending/Failed/Landed while in-flight
+   *    (getBundleStatuses returns value:[] for pending bundles, so it can't be used alone).
+   * 2. Signature-status fallback — confirms on-chain even if Jito API lags.
+   *
+   * @param bundleId   - The bundle ID returned by a send* method
+   * @param signatures - Trade-tx signatures for the on-chain fallback check
+   * @param timeoutMs  - Total time to wait before giving up (@default 60_000)
+   * @param intervalMs - Delay between polls (@default 2_000)
    */
-  async waitForBundleLanding(bundleId: string, timeoutMs = 30_000): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(
-        () => reject(new Error(`Bundle ${bundleId} did not land within timeout`)),
-        timeoutMs,
-      );
+  async waitForBundleLanding(
+    bundleId: string,
+    signatures: string[] = [],
+    timeoutMs = 60_000,
+    intervalMs = 2_000,
+  ): Promise<string> {
+    const endpoint = `https://${this.blockEngineUrl}/api/v1/bundles`;
+    const deadline = Date.now() + timeoutMs;
 
-      const cancel = this.searcherClient.onBundleResult(
-        (result) => {
-          if (result.bundleId !== bundleId) return;
-          clearTimeout(timer);
-          cancel();
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, intervalMs));
 
-          if (result.finalized) return resolve("finalized");
-          if (result.processed) return resolve("processed");
-          if (result.dropped)   return reject(new Error(`Bundle ${bundleId} dropped`));
-          if (result.rejected) {
-            const reason =
-              result.rejected.simulationFailure?.msg ??
-              result.rejected.internalError?.msg ??
-              result.rejected.droppedBundle?.msg ??
-              JSON.stringify(result.rejected);
-            return reject(new Error(`Bundle ${bundleId} rejected: ${reason}`));
+      // ── 1. getInflightBundleStatuses (Pending / Failed / Landed) ──
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0', id: 1,
+            method: 'getInflightBundleStatuses',
+            params: [[bundleId]],
+          }),
+        });
+        const text = await res.text();
+        console.log(`[JitoExecutor] inflight HTTP ${res.status}:`, text);
+        if (res.ok) {
+          const json = JSON.parse(text);
+          const entry = json?.result?.value?.[0];
+          if (entry) {
+            const s = entry.status as string;
+            if (s === 'Failed' || s === 'Invalid') throw new Error(`Bundle ${bundleId} status: ${s} — check https://explorer.jito.wtf/bundle/${bundleId}`);
+            if (s === 'Landed') {
+              console.log(`[JitoExecutor] Bundle landed (slot ${entry.landed_slot})`);
+              return 'confirmed';
+            }
+            // s === 'Pending' → keep polling
           }
-        },
-        (err) => {
-          clearTimeout(timer);
-          cancel();
-          reject(err);
-        },
-      );
-    });
+        }
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith('Bundle ')) throw err;
+        console.warn(`[JitoExecutor] inflight poll error:`, err);
+      }
+
+      // ── 2. Signature fallback — confirms on-chain even if Jito API lags ──
+      if (signatures.length > 0) {
+        try {
+          const statuses = await this.connection.getSignatureStatuses(signatures);
+          const landed = statuses.value.find(
+            (s) => s && (s.confirmationStatus === 'confirmed' || s.confirmationStatus === 'finalized'),
+          );
+          if (landed) {
+            const level = landed.confirmationStatus!;
+            console.log(`[JitoExecutor] Confirmed via signature check: ${level}`);
+            return level;
+          }
+        } catch (e) {
+          console.warn(`[JitoExecutor] signature status check failed:`, e);
+        }
+      }
+    }
+
+    throw new Error(`Bundle ${bundleId} did not land within ${timeoutMs}ms`);
   }
 
   // ─── Public Helpers ────────────────────────────────────────────────────────
@@ -306,12 +437,14 @@ export class JitoExecutor {
     const { lookupTables, addressesForLookupTable, lookupTablesForAddress } =
       this.buildLookupTableIndexes(altAccounts);
     const allAddresses = extractAddressesFromInstructions(instructions);
-    return this.computeIdealLookupTablesForAddresses(
+    const ideal = this.computeIdealLookupTablesForAddresses(
       allAddresses,
       lookupTables,
       addressesForLookupTable,
       lookupTablesForAddress,
     );
+    // Tip accounts must never be resolved via ALT — Jito requires a static write lock
+    return this.filterTipAccountsFromALTs(ideal);
   }
 
   // ─── Private Helpers ───────────────────────────────────────────────────────
@@ -430,52 +563,182 @@ export class JitoExecutor {
     return tx;
   }
 
-  /**
-   * Build the tip transaction that pays the Jito validator.
-   * This is always the LAST transaction in the bundle.
-   */
-  private buildTipTx(
-    tipAccount: PublicKey,
-    recentBlockhash: string,
-    lookupTables: AddressLookupTableAccount[] = [],
-  ): VersionedTransaction {
-    const tipIx = SystemProgram.transfer({
-      fromPubkey: this.payer.publicKey,
-      toPubkey: tipAccount,
-      lamports: this.tipLamports,
-    });
-    return this.buildVersionedTx([tipIx], recentBlockhash, lookupTables);
+  /** Strip any known Jito tip accounts out of ALT results before use in trade txs. */
+  private filterTipAccountsFromALTs(
+    alts: AddressLookupTableAccount[],
+  ): AddressLookupTableAccount[] {
+    const tipSet = new Set(JITO_TIP_ACCOUNTS);
+    return alts.map((alt) => ({
+      ...alt,
+      state: {
+        ...alt.state,
+        addresses: alt.state.addresses.filter((a) => !tipSet.has(a.toBase58())),
+      },
+    })) as AddressLookupTableAccount[];
   }
 
   /**
-   * Resolve a tip account address, either from the static list or by
-   * querying the block-engine for currently active tip accounts.
+   * Resolve a tip account address. Always attempts a live gRPC lookup first
+   * so we use the current epoch's accounts; falls back to the static list if
+   * the gRPC call fails or useStaticTipAccounts is true.
+   *
+   * Public so routes can resolve the account before building transactions
+   * (needed for the inline-tip approach where the tip instruction is
+   * embedded in the trade tx itself rather than in a separate tip tx).
    */
-  private async resolveTipAccount(): Promise<PublicKey> {
-    if (this.useStaticTipAccounts) {
-      const idx = Math.floor(Math.random() * JITO_TIP_ACCOUNTS.length);
-      return new PublicKey(JITO_TIP_ACCOUNTS[idx]);
+  async resolveTipAccount(): Promise<PublicKey> {
+    if (!this.useStaticTipAccounts) {
+      try {
+        const result = await this.searcherClient.getTipAccounts();
+        if (result.ok && result.value.length > 0) {
+          const addr = result.value[Math.floor(Math.random() * result.value.length)];
+          console.log(`[JitoExecutor] tip account (dynamic): ${addr}`);
+          return new PublicKey(addr);
+        }
+        if (!result.ok) console.warn('[JitoExecutor] getTipAccounts error:', result.error.message);
+      } catch (e) {
+        console.warn('[JitoExecutor] getTipAccounts gRPC failed, using static list:', e);
+      }
     }
 
-    // Dynamic: fetch from block-engine (adds ~1 RPC round-trip)
-    const result = await this.searcherClient.getTipAccounts();
-    if (!result.ok) throw result.error;
-    if (!result.value.length) throw new Error("No tip accounts returned from block-engine");
-    return new PublicKey(result.value[Math.floor(Math.random() * result.value.length)]);
+    const idx = Math.floor(Math.random() * JITO_TIP_ACCOUNTS.length);
+    const addr = JITO_TIP_ACCOUNTS[idx];
+    console.log(`[JitoExecutor] tip account (static): ${addr}`);
+    return new PublicKey(addr);
   }
 
   /**
-   * Wrap transactions in a Bundle and submit to Jito.
-   * jito-ts Bundle constructor validates the 5-tx hard cap internally.
+   * Build and submit a bundle to Jito via gRPC (the native interface).
+   *
+   * Uses the jito-ts Bundle class and searcherClient.sendBundle() so the
+   * bundle is transmitted over the same gRPC channel that getTipAccounts()
+   * already uses — avoiding any REST encoding ambiguity.
+   * addTipTx() internally creates a SystemProgram.transfer that write-locks
+   * the tip account as Jito requires.
+   *
+   * Status polling remains over REST (getInflightBundleStatuses).
+   * Retries on gRPC resource-exhausted / rate-limit errors.
    */
-  private async submitBundle(txs: VersionedTransaction[]): Promise<BundleResult> {
-    const jitoBundle = new bundle.Bundle(txs, MAX_BUNDLE_TXS);
+  /**
+   * @param tipInTxs - When true, the tip instruction is already embedded in one
+   *   of the trade txs (inline-tip mode). No separate tip tx is added and the
+   *   fee-payer balance check is skipped.
+   */
+  private async submitBundle(tradeTxs: VersionedTransaction[], maxRetries = 5, tipInTxs = false): Promise<BundleResult> {
+    let tipAccount: PublicKey | null = null;
 
-    const result = await this.searcherClient.sendBundle(jitoBundle);
-    if (!result.ok) throw result.error;
-    console.log(`[JitoExecutor] Bundle submitted: ${result.value}`);
+    if (!tipInTxs) {
+      tipAccount = await this.resolveTipAccount();
 
-    return { bundleId: result.value };
+      // Verify fee payer can cover the tip before building the bundle
+      const payerBalance = await this.connection.getBalance(this.payer.publicKey);
+      const minRequired  = this.tipLamports + 5_000;
+      if (payerBalance < minRequired) {
+        throw new Error(
+          `Fee payer ${this.payer.publicKey.toBase58()} has insufficient balance: ` +
+          `${payerBalance} lamports < ${minRequired} required for tip + fee`,
+        );
+      }
+    }
+
+    const tradeBlockhash = tradeTxs[0].message.recentBlockhash;
+
+    const b = new jitoBundle.Bundle([], MAX_BUNDLE_TXS);
+    const b2 = b.addTransactions(...tradeTxs);
+    if (b2 instanceof Error) throw b2;
+
+    let finalBundle = b2;
+    if (!tipInTxs) {
+      const b3 = b2.addTipTx(this.payer, this.tipLamports, tipAccount!, tradeBlockhash);
+      if (b3 instanceof Error) throw b3;
+      finalBundle = b3;
+    }
+
+    const signatures = tradeTxs.map((tx) => bs58.encode(tx.signatures[0]));
+
+    for (let i = 0; i < tradeTxs.length; i++) {
+      const msg = tradeTxs[i].message;
+      const txBytes = tradeTxs[i].serialize();
+      console.log(
+        `[JitoExecutor] tradeTx[${i}] blockhash:${msg.recentBlockhash}` +
+        ` staticAccounts:${msg.staticAccountKeys.length}` +
+        ` alts:${msg.addressTableLookups?.length ?? 0}` +
+        ` reqSigs:${msg.header.numRequiredSignatures}` +
+        ` sig:${bs58.encode(tradeTxs[i].signatures[0])}` +
+        ` size:${txBytes.length}b`,
+      );
+      for (let j = 0; j < msg.compiledInstructions.length; j++) {
+        const ix = msg.compiledInstructions[j];
+        const prog = msg.staticAccountKeys[ix.programIdIndex].toBase58();
+        console.log(`[JitoExecutor] tradeTx[${i}] ix[${j}] prog=${prog} accounts=${ix.accountKeyIndexes.length} data=${ix.data.length}b`);
+      }
+      console.log(`[JitoExecutor] tradeTx[${i}] b58=${bs58.encode(txBytes)}`);
+    }
+
+    // Inline-tip bundles use the REST sendBundle endpoint so we can isolate
+    // whether the gRPC submission path (not the transactions themselves) is
+    // causing the "Invalid" status. The REST endpoint is the same host we
+    // already poll for getInflightBundleStatuses.
+    if (tipInTxs) {
+      console.log(
+        `[JitoExecutor] submitBundle (REST): ${tradeTxs.length} tx(s) | inline tip | blockhash: ${tradeBlockhash}`,
+      );
+      return this.sendBundleViaRest(tradeTxs, signatures);
+    }
+
+    const tipDesc = `separate tip tx → ${tipAccount!.toBase58()} (${this.tipLamports} lamports)`;
+    console.log(
+      `[JitoExecutor] submitBundle (gRPC): ${tradeTxs.length} tx(s) | ${tipDesc} | blockhash: ${tradeBlockhash}`,
+    );
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const result = await this.searcherClient.sendBundle(finalBundle);
+
+      if (result.ok) {
+        console.log(`[JitoExecutor] Bundle submitted: ${result.value}`);
+        return { bundleId: result.value, signatures };
+      }
+
+      const msg = result.error.message;
+      const isRateLimited = msg.includes('rate limit') || msg.includes('Resource exhausted') || msg.includes('RESOURCE_EXHAUSTED');
+
+      if (!isRateLimited || attempt === maxRetries) throw new Error(`gRPC sendBundle: ${msg}`);
+
+      const delayMs = 1100 * (attempt + 1);
+      console.warn(`[JitoExecutor] Rate limited — retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})`);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+
+    throw new Error('Bundle submission failed after max retries');
+  }
+
+  /** Submit a bundle via the Jito REST JSON-RPC endpoint (same host as status polling). */
+  private async sendBundleViaRest(tradeTxs: VersionedTransaction[], signatures: string[]): Promise<BundleResult> {
+    const endpoint = `https://${this.blockEngineUrl}/api/v1/bundles`;
+    const b58Txs = tradeTxs.map((tx) => bs58.encode(tx.serialize()));
+
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'sendBundle',
+        params: [b58Txs],
+      }),
+    });
+
+    const text = await res.text();
+    console.log(`[JitoExecutor] REST sendBundle HTTP ${res.status}:`, text);
+
+    if (!res.ok) throw new Error(`REST sendBundle failed: HTTP ${res.status} — ${text}`);
+
+    const json = JSON.parse(text);
+    if (json.error) throw new Error(`REST sendBundle RPC error: ${JSON.stringify(json.error)}`);
+
+    const bundleId = json.result as string;
+    console.log(`[JitoExecutor] Bundle submitted (REST): ${bundleId}`);
+    return { bundleId, signatures };
   }
 }
 
