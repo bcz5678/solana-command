@@ -353,8 +353,26 @@ export class QuicknodeJitoExecutor {
 
                 if (status === 'Landed') return;
 
-                if (status === 'Failed' || status === 'Invalid') {
-                    throw new Error(`Bundle ${bundleId} status: ${status}`);
+                if (status === 'Failed') {
+                    throw new Error(`Bundle ${bundleId} status: Failed`);
+                }
+
+                if (status === 'Invalid') {
+                    // "Invalid" from getInflightBundleStatuses is ambiguous: it means
+                    // the bundle is not currently in-flight, which is true for both
+                    // bundles that were rejected AND bundles that already landed and
+                    // exited the inflight window. Check the finalized ledger first.
+                    try {
+                        const finalRes = await this.lilJitRpc.getBundleStatuses([bundleId]).send();
+                        const entry = finalRes.value[0];
+                        if (entry && (entry.confirmationStatus === 'confirmed' || entry.confirmationStatus === 'finalized' || entry.confirmationStatus === 'processed')) {
+                            console.log(`[QuicknodeJitoExecutor] bundle ${bundleId} already landed (${entry.confirmationStatus})`);
+                            return;
+                        }
+                    } catch {
+                        // getBundleStatuses failed — fall through to throw
+                    }
+                    throw new Error(`Bundle ${bundleId} status: Invalid`);
                 }
             } catch (err) {
                 if (

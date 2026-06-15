@@ -26,4 +26,8 @@ export interface BundleSellBody {
   feePayerWalletId:  string
   jitoTipInLamports: string   // lamports as decimal string — BN can't cross JSON
   tradesList:        SellTokenBody[]
+  /** Set false to bypass Jito entirely and submit via sendRawTransaction (diagnostic mode) */
+  useJito?:          boolean
+  /** Set true to use the QuickNode Lil Jito addon executor with sequential curve simulation */
+  useQuicknodeJito?: boolean
 }
