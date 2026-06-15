@@ -9,12 +9,28 @@ import {
   getBuyTokenAmountFromSolAmount,
 } from '@nirholas/pump-sdk'
 import { JitoExecutor } from '@/lib/jito/clients/jitoExecutor'
+import { QuicknodeJitoExecutor, type WalletBundle } from '@/lib/jito/clients/quicknode-jito-executor'
+import { AccountRole, type Address, type Instruction } from '@solana/kit'
 import { getWalletKeypairById } from '@/lib/vault/get-wallet-by-id'
 import { initializeQuickNodeSolana } from '@/app/api/utils/helpers'
 import { createClient } from '@/lib/supabase/server'
 import type { BundleBuyBody } from '@/lib/types/trades'
 import type { Keypair } from '@solana/web3.js'
 import type { LookupTable } from '@/lib/types/lookup-table'
+
+// Convert a web3.js v1 TransactionInstruction to a @solana/kit Instruction
+function toKitInstruction(ix: import('@solana/web3.js').TransactionInstruction): Instruction {
+  return {
+    programAddress: ix.programId.toBase58() as Address,
+    accounts: ix.keys.map((key) => ({
+      address: key.pubkey.toBase58() as Address,
+      role: key.isSigner
+        ? (key.isWritable ? AccountRole.WRITABLE_SIGNER : AccountRole.READONLY_SIGNER)
+        : (key.isWritable ? AccountRole.WRITABLE : AccountRole.READONLY),
+    })),
+    data: ix.data.length ? new Uint8Array(ix.data) : undefined,
+  }
+}
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 120
@@ -36,7 +52,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { feePayerWalletId, jitoTipInLamports, tradesList, useJito = true } = body
+  const { feePayerWalletId, jitoTipInLamports, tradesList, useJito = true, useQuicknodeJito = true } = body
 
   if (!feePayerWalletId || !jitoTipInLamports || !tradesList?.length) {
     return NextResponse.json(
@@ -59,7 +75,7 @@ export async function POST(req: NextRequest) {
     const connection = initializeQuickNodeSolana().connection
     const onlineSdk  = new OnlinePumpSdk(connection)
 
-    // Fetch all keypairs in parallel
+    // Fetch all keypairs in parallel (shared by all paths)
     const [feePayer, ...walletKps] = await Promise.all([
       getWalletKeypairById(feePayerWalletId),
       ...tradesList.map((t) => getWalletKeypairById(t.walletId)),
@@ -67,7 +83,107 @@ export async function POST(req: NextRequest) {
     feePayerKeypair = feePayer
     tradeKeypairs.push(...walletKps)
 
-    // Build instruction sets per trade (each wallet signs its own tx)
+    // ── QuickNode Lil Jito path (1–4 wallet bundle) ─────────────────────────
+    //
+    // All wallets must buy the same mint. We fetch shared on-chain data once,
+    // then thread the bonding curve state sequentially through each wallet's
+    // calculation so every wallet gets an exact price — no slippage inflation needed.
+    if (useQuicknodeJito) {
+      const mintAddress = tradesList[0].mintAddress
+      if (tradesList.some((t) => t.mintAddress !== mintAddress)) {
+        throw new Error('useQuicknodeJito requires all trades to buy the same mint')
+      }
+
+      const mint = new PublicKey(mintAddress)
+
+      // Fetch global config, fee config, mint info, and each wallet's ATA state
+      // all in a single parallel round-trip.
+      const [global, feeConfig, mintInfo, ...buyStates] = await Promise.all([
+        onlineSdk.fetchGlobal(),
+        onlineSdk.fetchFeeConfig(),
+        connection.getAccountInfo(mint),
+        ...tradeKeypairs.map((kp) => onlineSdk.fetchBuyState(mint, kp.publicKey)),
+      ])
+
+      const { bondingCurveAccountInfo, bondingCurve } = buyStates[0]
+
+      if (bondingCurve.complete) {
+        throw new Error(`Token ${mintAddress} has graduated to AMM — use staggered trade`)
+      }
+
+      const tokenProgram = mintInfo?.owner.equals(TOKEN_2022_PROGRAM_ID)
+        ? TOKEN_2022_PROGRAM_ID
+        : TOKEN_PROGRAM_ID
+
+      // Sequential curve simulation.
+      // Each wallet's buy is calculated against the curve state left by the
+      // wallet before it, matching the order transactions execute on-chain.
+      // After each buy we advance the virtual reserves using the constant
+      // product invariant: k = virtualSol × virtualToken.
+      let currentCurve = { ...bondingCurve }
+      const wallets: WalletBundle[] = []
+
+      for (let i = 0; i < tradesList.length; i++) {
+        const trade      = tradesList[i]
+        const tradeWallet = tradeKeypairs[i]
+        const solAmount  = new BN(trade.amountInSol)
+        const { associatedUserAccountInfo } = buyStates[i]
+
+        const tokenAmount = getBuyTokenAmountFromSolAmount({
+          global,
+          feeConfig,
+          mintSupply: currentCurve.tokenTotalSupply,
+          bondingCurve: currentCurve,
+          amount: solAmount,
+        })
+
+        if (tokenAmount.isZero()) {
+          throw new Error(`Zero token output for wallet ${trade.walletId}`)
+        }
+
+        const rawIxs = await PUMP_SDK.buyInstructions({
+          global,
+          bondingCurveAccountInfo,
+          bondingCurve: currentCurve,
+          associatedUserAccountInfo,
+          mint,
+          user:        tradeWallet.publicKey,
+          amount:      tokenAmount,
+          solAmount,
+          slippage:    trade.slippage, // exact price per position — original slippage is sufficient
+          tokenProgram,
+        })
+
+        // Advance curve: constant product formula gives the pre-fee SOL delta
+        // that maintains k = virtualSol × virtualToken.
+        const virtualSolCost = currentCurve.virtualSolReserves
+          .mul(tokenAmount)
+          .div(currentCurve.virtualTokenReserves.sub(tokenAmount))
+
+        currentCurve = {
+          ...currentCurve,
+          virtualSolReserves:   currentCurve.virtualSolReserves.add(virtualSolCost),
+          virtualTokenReserves: currentCurve.virtualTokenReserves.sub(tokenAmount),
+          realTokenReserves:    currentCurve.realTokenReserves.sub(tokenAmount),
+          tokenTotalSupply:     currentCurve.tokenTotalSupply.sub(tokenAmount),
+        }
+
+        wallets.push({
+          secretKey:    tradeWallet.secretKey,
+          instructions: rawIxs.map(toKitInstruction),
+        })
+      }
+
+      const executor = await QuicknodeJitoExecutor.create({
+        endpoint:    process.env.SOLANA_RPC_URL!,
+        tipLamports: Number(jitoTipInLamports),
+      })
+
+      const result = await executor.sendMultiWalletBundle(wallets)
+      return NextResponse.json({ success: true, ...result }, { status: 200 })
+    }
+
+    // ── Legacy paths: parallel tradeData build ───────────────────────────────
     const tradeData = await Promise.all(
       tradesList.map(async (trade, i) => {
         const tradeWallet = tradeKeypairs[i]
@@ -107,12 +223,10 @@ export async function POST(req: NextRequest) {
           bondingCurve,
           associatedUserAccountInfo,
           mint,
-          user: tradeWallet.publicKey,
-          amount: tokenAmount,
+          user:      tradeWallet.publicKey,
+          amount:    tokenAmount,
           solAmount,
-          // SDK internally multiplies slippage by 100 then divides by 10000, so
-          // pass the raw percentage value (e.g. 5 for 5%), not basis points.
-          slippage: trade.slippage,
+          slippage:  trade.slippage,
           tokenProgram,
         })
 
@@ -121,7 +235,6 @@ export async function POST(req: NextRequest) {
     )
 
     // Resolve the best ALTs across all instruction sets.
-    // Falls back to no compression if the DB fetch fails or no tables are active.
     let idealALTs: AddressLookupTableAccount[] = []
 
     if (useJito) {
@@ -151,9 +264,6 @@ export async function POST(req: NextRequest) {
         executor.resolveTipAccount(),
       ])
 
-      // Embed the tip as a SystemProgram.transfer in the last trade tx so the
-      // bundle is a single transaction — eliminating the separate tip tx that
-      // was consistently returning "Invalid" from Jito's block engine.
       const tradeTxs: VersionedTransaction[] = tradeData.map(({ instructions, wallet }, i) => {
         const isLast = i === tradeData.length - 1
         const ixs = isLast
@@ -183,10 +293,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, bundleId, status }, { status: 200 })
     }
 
-    // ── Direct submission (diagnostic / non-Jito path) ────────────────────────
-    // useJito=false: skip the bundle executor and send each trade tx directly via
-    // sendRawTransaction. Use this to verify the pump.fun instruction itself is
-    // valid on mainnet independent of any Jito-specific validation.
+    // ── Direct submission (diagnostic / non-Jito path) ───────────────────────
     console.log('[bundle/buy] useJito=false — submitting directly via sendRawTransaction')
 
     const { blockhash: directBlockhash } = await connection.getLatestBlockhash('confirmed')
@@ -205,15 +312,14 @@ export async function POST(req: NextRequest) {
     const directSignatures: string[] = []
     for (const tx of directTxs) {
       const sig = await connection.sendRawTransaction(tx.serialize(), {
-        skipPreflight:        false,
-        preflightCommitment:  'confirmed',
-        maxRetries:           3,
+        skipPreflight:       false,
+        preflightCommitment: 'confirmed',
+        maxRetries:          3,
       })
       console.log(`[bundle/buy] direct tx sent: ${sig}`)
       directSignatures.push(sig)
     }
 
-    // Poll for confirmation (up to 60 s)
     const deadline = Date.now() + 60_000
     while (Date.now() < deadline) {
       await new Promise(r => setTimeout(r, 2_000))

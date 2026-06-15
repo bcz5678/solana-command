@@ -18,6 +18,8 @@ export interface BundleBuyBody {
   tradesList:        BuyTokenBody[]
   /** Set false to bypass Jito entirely and submit via sendRawTransaction (diagnostic mode) */
   useJito?:          boolean
+  /** Set true to use the QuickNode Lil Jito addon executor (single-wallet bundles only) */
+  useQuicknodeJito?: boolean
 }
 
 export interface BundleSellBody {
