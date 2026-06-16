@@ -1,7 +1,11 @@
-import { Connection, Keypair, PublicKey } from "@solana/web3.js"
+import { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction, TransactionMessage, VersionedTransaction, sendAndConfirmTransaction } from "@solana/web3.js"
+import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token"
+import { PUMP_SDK, OnlinePumpSdk, getSellSolAmountFromTokenAmount, getBuyTokenAmountFromSolAmount } from "@nirholas/pump-sdk"
 import { getWalletKeypairById } from "@/lib/vault/get-wallet-by-id";
 import { QuicknodeJitoExecutor } from "@/lib/jito/clients/quicknode-jito-executor";
 import BN from 'bn.js';
+
+
 
 
 
@@ -285,9 +289,228 @@ export class HumanVolumeBot<T = void> {
         return this.randomPick(idleWallets); 
     }
 
-    async submitSellBundle(sellCandidate: WalletRecord): Promise<boolean> {}
+    async submitSellBundle(wallet: WalletRecord): Promise<boolean> {
+        wallet.state = 'SELLING'
+        let walletKeypair: Keypair | null = null
 
-    async submitBuyBundle(buyCandidate: WalletRecord): Promise<boolean> {}
+        try {
+            // ── Step 1: Read actual on-chain token balance ────────────────────
+            const mint = this.tokenMint.publicKey
+            const ata  = getAssociatedTokenAddressSync(mint, wallet.publicKey)
+
+            let actualBalanceRaw: BN
+            try {
+                const resp = await this.connection.getTokenAccountBalance(ata, 'confirmed')
+                actualBalanceRaw = new BN(resp.value.amount)
+            } catch {
+                actualBalanceRaw = new BN(0)
+            }
+
+            if (actualBalanceRaw.isZero()) {
+                wallet.state         = 'IDLE'
+                wallet.tokenBalanceRaw = new BN(0)
+                return true
+            }
+
+            // ── Step 2: Fetch keypair from vault (wiped in finally) ───────────
+            walletKeypair = await getWalletKeypairById(wallet.id)
+
+            // ── Step 3: Randomise sell portion (looks organic) ────────────────
+            const sellPercent  = this.randomPercentInRangeInclusive(60, this.sellPercent)
+            const sellAmount   = actualBalanceRaw.muln(sellPercent).divn(100)
+            const slippage     = this.randomPercentInRangeInclusive(5, 15)
+
+            // ── Step 4: Fetch on-chain state and tip account in parallel ──────
+            const onlineSdk = new OnlinePumpSdk(this.connection)
+            const [global, feeConfig, mintInfo, sellState, tipAccount, { blockhash }] = await Promise.all([
+                onlineSdk.fetchGlobal(),
+                onlineSdk.fetchFeeConfig(),
+                this.connection.getAccountInfo(mint),
+                onlineSdk.fetchSellState(mint, wallet.publicKey),
+                this.executor.getTipAccount(),
+                this.connection.getLatestBlockhash('confirmed'),
+            ])
+
+            // ── Step 5: Build trade instructions (bonding curve or AMM) ─────
+            let tradeIxs: TransactionInstruction[]
+
+            if (sellState.bondingCurve.complete) {
+                // Token graduated — route through AMM (slippage as decimal)
+                tradeIxs = await onlineSdk.ammSellInstructions({
+                    mint,
+                    user:        walletKeypair.publicKey,
+                    tokenAmount: sellAmount,
+                    slippage:    slippage / 100,
+                })
+            } else {
+                const tokenProgram = mintInfo?.owner.equals(TOKEN_2022_PROGRAM_ID)
+                    ? TOKEN_2022_PROGRAM_ID
+                    : TOKEN_PROGRAM_ID
+
+                const solExpected = getSellSolAmountFromTokenAmount({
+                    global,
+                    feeConfig,
+                    mintSupply:   sellState.bondingCurve.tokenTotalSupply,
+                    bondingCurve: sellState.bondingCurve,
+                    amount:       sellAmount,
+                })
+
+                tradeIxs = await PUMP_SDK.sellInstructions({
+                    global,
+                    bondingCurveAccountInfo: sellState.bondingCurveAccountInfo,
+                    bondingCurve:            sellState.bondingCurve,
+                    mint,
+                    user:        walletKeypair.publicKey,
+                    amount:      sellAmount,
+                    solAmount:   solExpected,
+                    slippage,
+                    tokenProgram,
+                })
+            }
+
+            const tipIx = SystemProgram.transfer({
+                fromPubkey: walletKeypair.publicKey,
+                toPubkey:   new PublicKey(tipAccount as string),
+                lamports:   this.jitoTipLamports.toNumber(),
+            })
+
+            // ── Step 6: Build and sign versioned transaction ──────────────────
+            const message = new TransactionMessage({
+                payerKey:        walletKeypair.publicKey,
+                recentBlockhash: blockhash,
+                instructions:    [...tradeIxs, tipIx],
+            }).compileToV0Message()
+
+            const tx = new VersionedTransaction(message)
+            tx.sign([walletKeypair])
+
+            const encoded = Buffer.from(tx.serialize()).toString('base64') as import('@solana/kit').Base64EncodedWireTransaction
+
+            // ── Step 7: Submit as single-tx Jito bundle ───────────────────────
+            await this.executor.sendPrebuiltBundle([encoded], [wallet.publicKey.toBase58()])
+
+            // ── Step 8: Update wallet state ───────────────────────────────────
+            const remaining        = actualBalanceRaw.sub(sellAmount)
+            wallet.tokenBalanceRaw = remaining
+            wallet.state           = remaining.isZero() ? 'IDLE' : 'HOLDING'
+
+            console.log(`[submitSellBundle] LANDED: wallet=${wallet.id} sold=${sellAmount} remaining=${remaining}`)
+            return true
+
+        } catch (err) {
+            wallet.state = 'HOLDING'
+            console.error(`[submitSellBundle] FAILED: wallet=${wallet.id}`, err)
+            return false
+        } finally {
+            walletKeypair?.secretKey.fill(0)
+        }
+    }
+
+    async submitBuyBundle(wallet: WalletRecord): Promise<boolean> {
+        wallet.state = 'BUYING'
+        let walletKeypair: Keypair | null = null
+
+        try {
+            const mint      = this.tokenMint.publicKey
+            const solAmount = this.buyAmountLamports
+            const slippage  = this.randomPercentInRangeInclusive(5, 15)
+
+            // ── Step 1: Fetch keypair from vault (wiped in finally) ───────────
+            walletKeypair = await getWalletKeypairById(wallet.id)
+
+            // ── Step 2: Fetch on-chain state and tip account in parallel ──────
+            const onlineSdk = new OnlinePumpSdk(this.connection)
+            const [global, feeConfig, mintInfo, buyState, tipAccount, { blockhash }] = await Promise.all([
+                onlineSdk.fetchGlobal(),
+                onlineSdk.fetchFeeConfig(),
+                this.connection.getAccountInfo(mint),
+                onlineSdk.fetchBuyState(mint, walletKeypair.publicKey),
+                this.executor.getTipAccount(),
+                this.connection.getLatestBlockhash('confirmed'),
+            ])
+
+            // ── Step 3: Build trade instructions (bonding curve or AMM) ─────
+            let tokenAmount = new BN(0)
+            let tradeIxs: TransactionInstruction[]
+
+            if (buyState.bondingCurve.complete) {
+                // Token graduated — route through AMM (slippage as decimal)
+                tradeIxs = await onlineSdk.ammBuyInstructions({
+                    mint,
+                    user:      walletKeypair.publicKey,
+                    solAmount,
+                    slippage:  slippage / 100,
+                })
+            } else {
+                const tokenProgram = mintInfo?.owner.equals(TOKEN_2022_PROGRAM_ID)
+                    ? TOKEN_2022_PROGRAM_ID
+                    : TOKEN_PROGRAM_ID
+
+                tokenAmount = getBuyTokenAmountFromSolAmount({
+                    global,
+                    feeConfig,
+                    mintSupply:   buyState.bondingCurve.tokenTotalSupply,
+                    bondingCurve: buyState.bondingCurve,
+                    amount:       solAmount,
+                })
+
+                if (tokenAmount.isZero()) {
+                    throw new Error(`Zero token output for wallet ${wallet.id}`)
+                }
+
+                tradeIxs = await PUMP_SDK.buyInstructions({
+                    global,
+                    bondingCurveAccountInfo:   buyState.bondingCurveAccountInfo,
+                    bondingCurve:              buyState.bondingCurve,
+                    associatedUserAccountInfo: buyState.associatedUserAccountInfo,
+                    mint,
+                    user:        walletKeypair.publicKey,
+                    amount:      tokenAmount,
+                    solAmount,
+                    slippage,
+                    tokenProgram,
+                })
+            }
+
+            const tipIx = SystemProgram.transfer({
+                fromPubkey: walletKeypair.publicKey,
+                toPubkey:   new PublicKey(tipAccount as string),
+                lamports:   this.jitoTipLamports.toNumber(),
+            })
+
+            // ── Step 4: Build and sign versioned transaction ──────────────────
+            const message = new TransactionMessage({
+                payerKey:        walletKeypair.publicKey,
+                recentBlockhash: blockhash,
+                instructions:    [...tradeIxs, tipIx],
+            }).compileToV0Message()
+
+            const tx = new VersionedTransaction(message)
+            tx.sign([walletKeypair])
+
+            const encoded = Buffer.from(tx.serialize()).toString('base64') as import('@solana/kit').Base64EncodedWireTransaction
+
+            // ── Step 6: Submit as single-tx Jito bundle ───────────────────────
+            await this.executor.sendPrebuiltBundle([encoded], [wallet.publicKey.toBase58()])
+
+            // ── Step 7: Update wallet state ───────────────────────────────────
+            wallet.state           = 'HOLDING'
+            wallet.tokenBalanceRaw = tokenAmount
+            wallet.lamportsSpent   = solAmount
+            wallet.boughtAtCycle   = this.cycleIndex
+            wallet.holdCycles      = 0
+
+            console.log(`[submitBuyBundle] LANDED: wallet=${wallet.id} tokens=${tokenAmount} lamports=${solAmount}`)
+            return true
+
+        } catch (err) {
+            wallet.state = 'IDLE'
+            console.error(`[submitBuyBundle] FAILED: wallet=${wallet.id}`, err)
+            return false
+        } finally {
+            walletKeypair?.secretKey.fill(0)
+        }
+    }
 
     private async getSOLBalanceLamports(wallet: WalletRecord): Promise<BN> {
         const lamports = await this.connection.getBalance(wallet.publicKey, 'confirmed')
@@ -297,7 +520,7 @@ export class HumanVolumeBot<T = void> {
     async checkAndTopUp(wallet: WalletRecord): Promise<void> {
         let balance: BN = await this.getSOLBalanceLamports(wallet)
         if (balance < this.minWalletLamports) {
-            let needed: BN = 
+            let needed: BN =  this.jitoTipLamports + 
         }
 
     }
@@ -310,8 +533,37 @@ export class HumanVolumeBot<T = void> {
         return Math.floor(Math.random() * (max - min + 1)) + min;
     }
 
-    async sendLamports(sender: Keypair, receiver: PublicKey): Promise<boolean> {
+    async sendLamports(senderWalletId: string, receiver: WalletRecord, amountLamports: BN): Promise<boolean> {
     
+        let senderKeypair: Keypair | null = null
+        try {
+            senderKeypair = await getWalletKeypairById(senderWalletId)
+        } catch {
+            return false
+        }
+
+        try {
+            const { blockhash } = await this.connection.getLatestBlockhash('confirmed')
+
+            const transaction = new Transaction()
+            transaction.recentBlockhash = blockhash
+            transaction.feePayer = senderKeypair.publicKey
+            transaction.add(
+                SystemProgram.transfer({
+                    fromPubkey: senderKeypair.publicKey,
+                    toPubkey:   receiver.publicKey,
+                    lamports:   amountLamports.toNumber(),
+                })
+            )
+
+            await sendAndConfirmTransaction(this.connection, transaction, [senderKeypair], { commitment: 'confirmed' })
+
+            return true
+        } catch {
+            return false
+        } finally {
+            senderKeypair?.secretKey.fill(0)
+        }
     }
 
     async getWalletAccountInfo(publicKey: PublicKey) {
