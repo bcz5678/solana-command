@@ -153,8 +153,15 @@
 
   FUNCTION submitBuyBundle(wallet, cycleIndex):
 
+    wallet.state == 'BUYING'
+
+    try {
     amount   = randomInRange(BUY_AMOUNT_SOL_MIN, BUY_AMOUNT_SOL_MAX)  // in lamports
     slippage = randomInRange(5, 15)   // % slippage, varies to look organic
+
+    // Fetch and place full secretKeypair in memory
+    let walletKeyPair: Keypair = getWalletKeypairById(wallet.id)
+
 
     // Fetch on-chain state
     bondingCurve = fetchBondingCurve(TOKEN_MINT)
@@ -172,8 +179,12 @@
       SystemProgram.transfer(wallet.publicKey, tipAccount, JITO_TIP_LAMPORTS),
     ]
 
-    tx = buildVersionedTransaction(instructions, wallet.keypair, blockhash)
-    tx.sign(wallet.keypair)
+    tx = buildVersionedTransaction(instructions, walletKeypair, blockhash)
+    tx.sign(walletKeypair)
+
+
+    walletKeypair.fill(0)
+
 
     // Submit as Jito bundle
     bundleId = jitoRest.sendBundle([tx])
@@ -183,14 +194,18 @@
       wallet.state         = HOLDING
       wallet.tokenBalance  = tokenAmount
       wallet.solSpent      = amount
-      wallet.boughtAtCycle = cycleIndex
+      wallet.boughtAtCycle = this.cycleIndex
       wallet.holdCycles    = 0
       log("BUY LANDED: wallet=" + wallet.id + " tokens=" + tokenAmount)
 
     ELSE:
       wallet.state = IDLE   // return to pool, retry next cycle
       log("BUY FAILED: wallet=" + wallet.id + " status=" + result)
-
+  catch(error) {
+    
+  } finally {
+    walletkeypair.fill(0)
+  }
 
 ────────────────────────────────────────────────────────────────────────────────
  SELL BUNDLE SUBMISSION
@@ -198,6 +213,7 @@
 
   FUNCTION submitSellBundle(wallet):
 
+  try {
     wallet.state = SELLING
 
     // Read actual on-chain balance (don't trust cached value)
@@ -208,6 +224,11 @@
       wallet.tokenBalance = 0
       RETURN
 
+    // Fetch and place full secretKeypair in memory
+    let walletKeyPair: Keypair = getWalletKeypairById(wallet.id)
+
+
+
     // Sell a random portion to avoid always dumping 100%
     sellPortion  = randomInRange(SELL_PERCENT_MIN, SELL_PERCENT_MAX)
     sellAmount   = actualBalance * sellPortion / 100
@@ -217,7 +238,6 @@
     slippage     = randomInRange(5, 15)
     tipAccount   = randomPick(JITO_TIP_ACCOUNTS)
     blockhash    = getLatestBlockhash()
-
     instructions = [
       pumpfun.Sell(mint, sellAmount, solExpected, slippage),
       SystemProgram.transfer(wallet.publicKey, tipAccount, JITO_TIP_LAMPORTS),
@@ -225,6 +245,8 @@
 
     tx = buildVersionedTransaction(instructions, wallet.keypair, blockhash)
     tx.sign(wallet.keypair)
+
+    walletKeypair.fill(0)
 
     bundleId = jitoRest.sendBundle([tx])
     result   = waitForBundleLanding(bundleId, timeout = 30s)
@@ -239,6 +261,11 @@
       wallet.state = HOLDING   // stay in holding, retry sell next eligible cycle
       log("SELL FAILED: wallet=" + wallet.id + " status=" + result)
 
+  } catch(error) {
+
+  } finally {
+     walletKeypair.fill(0)
+  }
 
 ────────────────────────────────────────────────────────────────────────────────
  WALLET TOP-UP

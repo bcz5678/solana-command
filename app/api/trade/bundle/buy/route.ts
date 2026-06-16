@@ -9,8 +9,7 @@ import {
   getBuyTokenAmountFromSolAmount,
 } from '@nirholas/pump-sdk'
 import { JitoExecutor } from '@/lib/jito/clients/jitoExecutor'
-import { QuicknodeJitoExecutor, type WalletBundle } from '@/lib/jito/clients/quicknode-jito-executor'
-import { AccountRole, type Address, type Instruction } from '@solana/kit'
+import { QuicknodeJitoExecutor } from '@/lib/jito/clients/quicknode-jito-executor'
 import { getWalletKeypairById } from '@/lib/vault/get-wallet-by-id'
 import { initializeQuickNodeSolana } from '@/app/api/utils/helpers'
 import { createClient } from '@/lib/supabase/server'
@@ -18,25 +17,16 @@ import type { BundleBuyBody } from '@/lib/types/trades'
 import type { Keypair } from '@solana/web3.js'
 import type { LookupTable } from '@/lib/types/lookup-table'
 
-// Convert a web3.js v1 TransactionInstruction to a @solana/kit Instruction
-function toKitInstruction(ix: import('@solana/web3.js').TransactionInstruction): Instruction {
-  return {
-    programAddress: ix.programId.toBase58() as Address,
-    accounts: ix.keys.map((key) => ({
-      address: key.pubkey.toBase58() as Address,
-      role: key.isSigner
-        ? (key.isWritable ? AccountRole.WRITABLE_SIGNER : AccountRole.READONLY_SIGNER)
-        : (key.isWritable ? AccountRole.WRITABLE : AccountRole.READONLY),
-    })),
-    data: ix.data.length ? new Uint8Array(ix.data) : undefined,
-  }
-}
-
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 120
 
 const BLOCK_ENGINE_URL = process.env.JITO_BLOCK_ENGINE_URL ?? 'ny.mainnet.block-engine.jito.wtf'
-const MAX_BUNDLE_TRADES = 4
+// QuickNode packed path: 5 txs × 2 wallets each = 10 wallets max
+// pump.fun buy instructions are large (~12 accounts each); 2 per tx stays under the 1232-byte limit
+// Legacy JitoExecutor path: 4 wallets max (one tx per wallet, Jito 5-tx limit minus tip tx)
+const MAX_BUNDLE_TRADES    = 10
+const MAX_LEGACY_TRADES    = 4
+const WALLETS_PER_BATCH    = 2  // wallets packed into each Jito transaction
 
 export async function POST(req: NextRequest) {
   try {
@@ -83,11 +73,14 @@ export async function POST(req: NextRequest) {
     feePayerKeypair = feePayer
     tradeKeypairs.push(...walletKps)
 
-    // ── QuickNode Lil Jito path (1–4 wallet bundle) ─────────────────────────
+    // ── QuickNode Lil Jito path (1–20 wallet bundle, packed via ALTs) ──────────
     //
-    // All wallets must buy the same mint. We fetch shared on-chain data once,
-    // then thread the bonding curve state sequentially through each wallet's
-    // calculation so every wallet gets an exact price — no slippage inflation needed.
+    // All wallets must buy the same mint. Shared pump.fun accounts are compressed
+    // via Address Lookup Tables so up to 4 wallets fit in a single transaction.
+    // Five packed transactions = 20 wallets per bundle submission.
+    //
+    // Sequential curve simulation threads each wallet's buy against the post-
+    // previous-buy state, eliminating SlippageExceeded errors without inflating slippage.
     if (useQuicknodeJito) {
       const mintAddress = tradesList[0].mintAddress
       if (tradesList.some((t) => t.mintAddress !== mintAddress)) {
@@ -96,8 +89,7 @@ export async function POST(req: NextRequest) {
 
       const mint = new PublicKey(mintAddress)
 
-      // Fetch global config, fee config, mint info, and each wallet's ATA state
-      // all in a single parallel round-trip.
+      // Parallel round-trip: shared config + per-wallet ATA state
       const [global, feeConfig, mintInfo, ...buyStates] = await Promise.all([
         onlineSdk.fetchGlobal(),
         onlineSdk.fetchFeeConfig(),
@@ -115,26 +107,23 @@ export async function POST(req: NextRequest) {
         ? TOKEN_2022_PROGRAM_ID
         : TOKEN_PROGRAM_ID
 
-      // Sequential curve simulation.
-      // Each wallet's buy is calculated against the curve state left by the
-      // wallet before it, matching the order transactions execute on-chain.
-      // After each buy we advance the virtual reserves using the constant
-      // product invariant: k = virtualSol × virtualToken.
+      // Sequential curve simulation — each wallet priced against post-previous-buy state.
       let currentCurve = { ...bondingCurve }
-      const wallets: WalletBundle[] = []
+      type WalletIxSet = { wallet: Keypair; ixs: import('@solana/web3.js').TransactionInstruction[] }
+      const walletIxSets: WalletIxSet[] = []
 
       for (let i = 0; i < tradesList.length; i++) {
-        const trade      = tradesList[i]
+        const trade       = tradesList[i]
         const tradeWallet = tradeKeypairs[i]
-        const solAmount  = new BN(trade.amountInSol)
+        const solAmount   = new BN(trade.amountInSol)
         const { associatedUserAccountInfo } = buyStates[i]
 
         const tokenAmount = getBuyTokenAmountFromSolAmount({
           global,
           feeConfig,
-          mintSupply: currentCurve.tokenTotalSupply,
+          mintSupply:   currentCurve.tokenTotalSupply,
           bondingCurve: currentCurve,
-          amount: solAmount,
+          amount:       solAmount,
         })
 
         if (tokenAmount.isZero()) {
@@ -144,18 +133,17 @@ export async function POST(req: NextRequest) {
         const rawIxs = await PUMP_SDK.buyInstructions({
           global,
           bondingCurveAccountInfo,
-          bondingCurve: currentCurve,
+          bondingCurve:              currentCurve,
           associatedUserAccountInfo,
           mint,
           user:        tradeWallet.publicKey,
           amount:      tokenAmount,
           solAmount,
-          slippage:    trade.slippage, // exact price per position — original slippage is sufficient
+          slippage:    trade.slippage,
           tokenProgram,
         })
 
-        // Advance curve: constant product formula gives the pre-fee SOL delta
-        // that maintains k = virtualSol × virtualToken.
+        // Advance curve: constant product k = virtualSol × virtualToken
         const virtualSolCost = currentCurve.virtualSolReserves
           .mul(tokenAmount)
           .div(currentCurve.virtualTokenReserves.sub(tokenAmount))
@@ -168,10 +156,29 @@ export async function POST(req: NextRequest) {
           tokenTotalSupply:     currentCurve.tokenTotalSupply.sub(tokenAmount),
         }
 
-        wallets.push({
-          secretKey:    tradeWallet.secretKey,
-          instructions: rawIxs.map(toKitInstruction),
-        })
+        walletIxSets.push({ wallet: tradeWallet, ixs: rawIxs })
+      }
+
+      // Resolve ALTs to compress shared pump.fun accounts (bondingCurve, global, etc.)
+      let idealALTs: AddressLookupTableAccount[] = []
+      try {
+        const supabase = await createClient()
+        const { data, error } = await supabase.rpc('get_lookup_tables', { target_user_id: null })
+        if (!error && data) {
+          const activeTables = (data as unknown as LookupTable[]).filter(t => t.status === 'active')
+          if (activeTables.length > 0) {
+            const altResolver = new JitoExecutor({
+              blockEngineUrl: BLOCK_ENGINE_URL,
+              connection,
+              payer:          feePayerKeypair!,
+              tipLamports:    Number(jitoTipInLamports),
+            })
+            const allIxs = walletIxSets.flatMap(w => w.ixs)
+            idealALTs = await altResolver.resolveOptimalLookupTables(activeTables, allIxs)
+          }
+        }
+      } catch (altErr) {
+        console.warn('[bundle/buy] ALT resolution failed, proceeding without lookup tables:', altErr)
       }
 
       const executor = await QuicknodeJitoExecutor.create({
@@ -179,11 +186,66 @@ export async function POST(req: NextRequest) {
         tipLamports: Number(jitoTipInLamports),
       })
 
-      const result = await executor.sendMultiWalletBundle(wallets)
+      const [{ blockhash }, tipAccount] = await Promise.all([
+        connection.getLatestBlockhash('confirmed'),
+        executor.getTipAccount(),
+      ])
+
+      const tipPublicKey = new PublicKey(tipAccount as string)
+
+      // Pack wallets into batches — fee payer signs each tx, trade wallets co-sign
+      const batches: WalletIxSet[][] = []
+      for (let i = 0; i < walletIxSets.length; i += WALLETS_PER_BATCH) {
+        batches.push(walletIxSets.slice(i, i + WALLETS_PER_BATCH))
+      }
+
+      const signerAddresses: string[] = []
+      const encodedTxs: string[] = []
+
+      for (let b = 0; b < batches.length; b++) {
+        const batch      = batches[b]
+        const isLastBatch = b === batches.length - 1
+        const batchIxs   = batch.flatMap(({ ixs }) => ixs)
+
+        const txIxs = isLastBatch
+          ? [...batchIxs, SystemProgram.transfer({
+              fromPubkey: feePayerKeypair!.publicKey,
+              toPubkey:   tipPublicKey,
+              lamports:   Number(jitoTipInLamports),
+            })]
+          : batchIxs
+
+        const message = new TransactionMessage({
+          payerKey:        feePayerKeypair!.publicKey,
+          recentBlockhash: blockhash,
+          instructions:    txIxs,
+        }).compileToV0Message(idealALTs)
+
+        const tx      = new VersionedTransaction(message)
+        const signers = [feePayerKeypair!, ...batch.map(({ wallet }) => wallet)]
+        tx.sign(signers)
+
+        for (const { wallet } of batch) signerAddresses.push(wallet.publicKey.toBase58())
+        encodedTxs.push(Buffer.from(tx.serialize()).toString('base64'))
+
+        console.log(`[bundle/buy] batch[${b}] packed ${batch.length} wallets, ALTs: ${idealALTs.length}`)
+      }
+
+      const result = await executor.sendPrebuiltBundle(
+        encodedTxs as import('@solana/kit').Base64EncodedWireTransaction[],
+        signerAddresses,
+      )
       return NextResponse.json({ success: true, ...result }, { status: 200 })
     }
 
-    // ── Legacy paths: parallel tradeData build ───────────────────────────────
+    // ── Legacy JitoExecutor path (≤4 wallets, one tx per wallet) ────────────
+    if (tradesList.length > MAX_LEGACY_TRADES) {
+      return NextResponse.json(
+        { error: `Legacy Jito path supports at most ${MAX_LEGACY_TRADES} wallets — enable useQuicknodeJito for 20` },
+        { status: 400 },
+      )
+    }
+
     const tradeData = await Promise.all(
       tradesList.map(async (trade, i) => {
         const tradeWallet = tradeKeypairs[i]

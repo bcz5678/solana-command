@@ -195,6 +195,49 @@ export class QuicknodeJitoExecutor {
     // ─── Public API ───────────────────────────────────────────────────────────
 
     /**
+     * Returns a random Jito tip account address. Used by callers that build
+     * their own transactions (e.g. packed multi-wallet bundles via sendPrebuiltBundle).
+     */
+    async getTipAccount(): Promise<Address> {
+        const tipAccounts = await this.lilJitRpc.getTipAccounts().send();
+        if (tipAccounts.length === 0) throw new Error('Lil Jito returned no tip accounts');
+        return tipAccounts[Math.floor(Math.random() * tipAccounts.length)];
+    }
+
+    /**
+     * Accepts pre-built, pre-signed, base64-encoded versioned transactions.
+     * Simulates, submits, and polls. The caller is responsible for embedding
+     * the Jito tip transfer in one of the transactions before encoding.
+     *
+     * Max 5 transactions (Jito bundle limit).
+     */
+    async sendPrebuiltBundle(
+        encodedTransactions: Base64EncodedWireTransaction[],
+        signerAddresses: string[] = [],
+    ): Promise<BundleResult> {
+        if (encodedTransactions.length === 0) throw new Error('encodedTransactions array is empty');
+        if (encodedTransactions.length > 5) throw new Error('Jito bundles support at most 5 transactions');
+
+        console.log(`[QuicknodeJitoExecutor] simulating prebuilt bundle (${encodedTransactions.length} txs)`);
+        const simulation = await this.lilJitRpc.simulateBundle([encodedTransactions]).send();
+        this.validateSimulation(simulation);
+        console.log(`[QuicknodeJitoExecutor] simulation succeeded`);
+
+        if (this.simulateOnly) {
+            return { bundleId: '', simulated: true, signerAddresses };
+        }
+
+        const bundleId = await this.lilJitRpc.sendBundle(encodedTransactions).send();
+        console.log(`[QuicknodeJitoExecutor] bundle submitted: ${bundleId}`);
+
+        await this.pollBundleStatus(bundleId);
+        console.log(`[QuicknodeJitoExecutor] bundle landed: ${bundleId}`);
+        console.log(`     https://explorer.jito.wtf/bundle/${bundleId}`);
+
+        return { bundleId, simulated: false, signerAddresses };
+    }
+
+    /**
      * Single-wallet path. Builds one transaction containing the provided
      * instructions + tip transfer, simulates as a bundle, submits, and polls.
      * Requires secretKey to have been passed to create().

@@ -117,6 +117,7 @@ export default function Page() {
                     description: data.description,
                     image: imageUrl,
                     banner: bannerUrl,
+                    showName: true,
                     websiteUrl: data.websiteUrl,
                     twitterUrl: data.twitterUrl,
                     telegramHandle: data.telegramHandle,
