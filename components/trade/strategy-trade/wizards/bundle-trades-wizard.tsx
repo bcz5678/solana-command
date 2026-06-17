@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import BN from 'bn.js'
 import WizardShell, { WizardStep } from './wizard-shell'
-import StrategyWalletSelector from '@/components/tokens/strategy-trade/strategy-wallet-selector'
+import StrategyWalletSelector from '@/components/trade/strategy-trade/strategy-wallet-selector'
 import { solStringToLamports, lamportsBNToSolDisplay, lamportsStringToBN } from '@/lib/lamports'
 import { WalletRecord } from '@/lib/types/wallet'
 import {
@@ -16,8 +16,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select'
-import { SlippageControl } from '@/components/tokens/trade/SlippageControl'
-import { TokenMintInput } from '@/components/tokens/strategy-trade/TokenMintInput'
+import { SlippageControl } from '@/components/trade/trade/SlippageControl'
+import { TokenMintInput } from '@/components/trade/strategy-trade/TokenMintInput'
 
 const steps: WizardStep[] = [
     {

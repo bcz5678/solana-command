@@ -4,7 +4,7 @@
 // Token buy/sell trading interface
 
 import { Suspense } from 'react'
-import { TokenTradePanel } from '@/components/tokens/trade/TokenTradePanel'
+import { TokenTradePanel } from '@/components/trade/trade/TokenTradePanel'
 
 export default function TradePage() {
   return (

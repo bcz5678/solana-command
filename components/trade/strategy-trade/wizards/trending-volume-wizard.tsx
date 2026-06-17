@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import WizardShell, { StepPlaceholder, WizardStep } from './wizard-shell'
-import StrategyWalletSelector from '@/components/tokens/strategy-trade/strategy-wallet-selector'
+import StrategyWalletSelector from '@/components/trade/strategy-trade/strategy-wallet-selector'
 
 const steps: WizardStep[] = [
     {

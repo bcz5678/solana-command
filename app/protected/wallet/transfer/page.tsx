@@ -1,10 +1,13 @@
-import TransferCard from "@/components/wallet/transfer/transfer-card";
+import TransferHub from "@/components/wallet/transfer/transfer-hub";
 
 export default function Page() {
     return (
         <div className="flex-1 w-full flex flex-col gap-6 p-4">
-            <h1 className="text-2xl font-bold text-black">Transfer Solana</h1>
-            <TransferCard />
+            <div>
+                <h1 className="text-lg font-semibold">Transfer SOL</h1>
+                <p className="text-xs text-muted-foreground mt-0.5">Choose a transfer mode to get started</p>
+            </div>
+            <TransferHub />
         </div>
     );
 }

@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { TokenMintInput } from '@/components/tokens/strategy-trade/TokenMintInput'
-import StrategyWalletSelector from '@/components/tokens/strategy-trade/strategy-wallet-selector'
+import { TokenMintInput } from '@/components/trade/strategy-trade/TokenMintInput'
+import StrategyWalletSelector from '@/components/trade/strategy-trade/strategy-wallet-selector'
 import BotConfigPanel, { BotConfigState, DEFAULT_BOT_CONFIG } from '@/components/auto/human/bot-config-panel'
 import BotStatusPanel, { BotStatusResponse } from '@/components/auto/human/bot-status-panel'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'

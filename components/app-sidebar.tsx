@@ -169,28 +169,7 @@ export function AppSidebar() {
                   </a>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-               <SidebarMenuItem>
-                <SidebarMenuButton
-                  className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
-                  asChild
-                >
-                  <a href="/protected/tokens/strategy-trade">
-                    <Computer />
-                    <span>Strategy Trade</span>
-                  </a>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
-                  asChild
-                >
-                  <a href="/protected/tokens/trade">
-                    <Computer />
-                    <span>Trade</span>
-                  </a>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              
                <SidebarMenuItem>
                 <SidebarMenuButton
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
@@ -215,6 +194,36 @@ export function AppSidebar() {
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel>Trade</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
+                  asChild
+                >
+                  <a href="/protected/trade/trade">
+                    <Computer />
+                    <span>Single Trade</span>
+                  </a>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+           <SidebarMenuItem>
+                <SidebarMenuButton
+                  className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
+                  asChild
+                >
+                  <a href="/protected/trade/strategy-trade">
+                    <Computer />
+                    <span>Strategy Trade</span>
+                  </a>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+             
         </SidebarGroup>
         <SidebarGroup>
           <SidebarGroupLabel>Automation</SidebarGroupLabel>
@@ -247,3 +256,4 @@ export function AppSidebar() {
     </Sidebar>
   )
 }
+

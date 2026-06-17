@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect, useMemo, Fragment } from "react";
-import type { WalletRecord } from "@/lib/types/wallet";
-import { lamportsStringToBN, lamportsBNToSolDisplay } from "@/lib/lamports";
-import { Button } from "@/components/ui/button";
-import { FieldLabel } from "@/components/ui/field";
+import { useState, useEffect, useMemo, Fragment } from 'react'
+import type { WalletRecord } from '@/lib/types/wallet'
+import { lamportsStringToBN, lamportsBNToSolDisplay } from '@/lib/lamports'
+import { Button } from '@/components/ui/button'
+import { FieldLabel } from '@/components/ui/field'
 import {
     Select,
     SelectContent,
@@ -14,7 +14,7 @@ import {
     SelectSeparator,
     SelectTrigger,
     SelectValue,
-} from "@/components/ui/select";
+} from '@/components/ui/select'
 import {
     Dialog,
     DialogContent,
@@ -23,35 +23,41 @@ import {
     DialogDescription,
     DialogFooter,
     DialogClose,
-} from "@/components/ui/dialog";
+} from '@/components/ui/dialog'
 import {
     Tooltip,
     TooltipContent,
     TooltipProvider,
     TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { Copy, ExternalLink } from "lucide-react";
+} from '@/components/ui/tooltip'
+import { Copy, ExternalLink } from 'lucide-react'
 
-type WalletTypeRow = { id: string; name: string };
+// Mirrors consolidateSOL's txFeeBufferLamports
+const FEE_BUFFER_LAMPORTS = 10_000
+
+type WalletTypeRow = { id: string; name: string }
 
 type WalletGroup = {
-    id: string
-    name: string
-    color: string | null
+    id:      string
+    name:    string
+    color:   string | null
     wallets: WalletRecord[]
 }
 
 type TransferStatus = 'pending' | 'loading' | 'success' | 'error'
 
-type PendingTransfer = {
-    senderWalletId:  string
-    senderPublicKey: string
-    senderLabel:     string | null
-    receivers:       { walletId: string; publicKey: string; label: string | null; amount: string }[]
+type PendingConsolidate = {
+    receiverPublicKey: string
+    receiverLabel:     string | null
+    senders: { walletId: string; publicKey: string; label: string | null; estimatedSOL: number }[]
 }
 
 function maskPubKey(key: string) {
     return `${key.slice(0, 7)}....${key.slice(-7)}`
+}
+
+function sweepLamports(wallet: WalletRecord): number {
+    return Math.max(0, (wallet.solana_balance_in_lamports?.toNumber() ?? 0) - FEE_BUFFER_LAMPORTS)
 }
 
 function Checkmark() {
@@ -66,48 +72,46 @@ function Dash() {
     return <span className="block w-2.5 h-0.5 bg-white rounded" />
 }
 
-export default function TransferForm() {
-    const [wallets, setWallets]                   = useState<WalletRecord[]>([])
-    const [walletTypes, setWalletTypes]           = useState<WalletTypeRow[]>([])
-    const [loading, setLoading]                   = useState(true)
-    const [activeFilters, setActiveFilters]       = useState<string[]>([])
-    const [senderWalletId, setSenderWalletId]     = useState('')
-    const [selectedReceivers, setSelectedReceivers] = useState<Set<string>>(new Set())
-    const [receiverAmounts, setReceiverAmounts]   = useState<Record<string, string>>({})
-    const [pending, setPending]                   = useState<PendingTransfer | null>(null)
-    const [activeTransfer, setActiveTransfer]     = useState<PendingTransfer | null>(null)
-    const [showProgress, setShowProgress]         = useState(false)
-    const [receiverStatuses, setReceiverStatuses] = useState<Record<string, TransferStatus>>({})
-    const [transfersDone, setTransfersDone]       = useState(false)
-    const [validationError, setValidationError]   = useState('')
-    const [copiedId, setCopiedId]                  = useState<string | null>(null)
+export default function ConsolidateForm() {
+    const [wallets,      setWallets]      = useState<WalletRecord[]>([])
+    const [walletTypes,  setWalletTypes]  = useState<WalletTypeRow[]>([])
+    const [loading,      setLoading]      = useState(true)
+    const [activeFilters, setActiveFilters] = useState<string[]>([])
+    const [receiverWalletId, setReceiverWalletId] = useState('')
+    const [selectedSenders,  setSelectedSenders]  = useState<Set<string>>(new Set())
+    const [pending,      setPending]      = useState<PendingConsolidate | null>(null)
+    const [activeTransfer, setActiveTransfer] = useState<PendingConsolidate | null>(null)
+    const [showProgress, setShowProgress] = useState(false)
+    const [senderStatuses, setSenderStatuses] = useState<Record<string, TransferStatus>>({})
+    const [transfersDone,  setTransfersDone]  = useState(false)
+    const [validationError, setValidationError] = useState('')
+    const [copiedId,     setCopiedId]     = useState<string | null>(null)
 
     useEffect(() => {
         fetch('/api/wallets/explorer')
-            .then((r) => r.ok ? r.json() : null)
-            .then((data) => {
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
                 if (!data) return
-                const parsed: WalletRecord[] = (data.wallets ?? []).map((w: any) => ({
+                setWallets((data.wallets ?? []).map((w: WalletRecord & { solana_balance_in_lamports?: string }) => ({
                     ...w,
                     solana_balance_in_lamports: w.solana_balance_in_lamports != null
                         ? lamportsStringToBN(String(w.solana_balance_in_lamports))
                         : null,
-                }))
-                setWallets(parsed)
+                })))
                 setWalletTypes(data.walletTypes ?? [])
             })
-            .catch(err => console.error('[wallets] fetch failed', err))
+            .catch(() => {})
             .finally(() => setLoading(false))
     }, [])
 
-    // Clear receiver selection when sender changes
+    // Drop receiver from sender selection if accidentally selected first
     useEffect(() => {
-        setSelectedReceivers(new Set())
-        setReceiverAmounts({})
-    }, [senderWalletId])
+        if (receiverWalletId && selectedSenders.has(receiverWalletId)) {
+            setSelectedSenders(prev => { const n = new Set(prev); n.delete(receiverWalletId); return n })
+        }
+    }, [receiverWalletId, selectedSenders])
 
-    // Sender dropdown — all wallets grouped by type
-    const senderGroups = useMemo<[string, WalletRecord[]][]>(() => {
+    const receiverGroups = useMemo<[string, WalletRecord[]][]>(() => {
         const map: Record<string, WalletRecord[]> = {}
         for (const w of wallets) {
             const key = w.wallet_type ?? 'Other'
@@ -116,12 +120,11 @@ export default function TransferForm() {
         return Object.entries(map)
     }, [wallets])
 
-    // Receiver table — all wallets except the sender, filtered by type
     const visibleWallets = useMemo(() => {
-        const withoutSender = wallets.filter((w) => w.id !== senderWalletId)
-        if (activeFilters.length === 0) return withoutSender
-        return withoutSender.filter((w) => w.wallet_type_id != null && activeFilters.includes(w.wallet_type_id))
-    }, [wallets, senderWalletId, activeFilters])
+        const without = wallets.filter(w => w.id !== receiverWalletId)
+        if (activeFilters.length === 0) return without
+        return without.filter(w => w.wallet_type_id != null && activeFilters.includes(w.wallet_type_id))
+    }, [wallets, receiverWalletId, activeFilters])
 
     const walletGroups = useMemo<WalletGroup[]>(() => {
         const map = new Map<string, WalletGroup>()
@@ -135,132 +138,105 @@ export default function TransferForm() {
         return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name))
     }, [visibleWallets])
 
-    const ungrouped = useMemo(
-        () => visibleWallets.filter((w) => !w.wallet_group_id),
-        [visibleWallets],
-    )
+    const ungrouped      = useMemo(() => visibleWallets.filter(w => !w.wallet_group_id), [visibleWallets])
+    const allVisibleIds  = useMemo(() => visibleWallets.map(w => w.id), [visibleWallets])
 
-    const allVisibleIds = useMemo(() => visibleWallets.map((w) => w.id), [visibleWallets])
+    const totalEstimatedSOL = useMemo(() =>
+        [...selectedSenders].reduce((sum, id) => {
+            const w = wallets.find(w => w.id === id)
+            return sum + (w ? sweepLamports(w) / 1_000_000_000 : 0)
+        }, 0),
+    [selectedSenders, wallets])
 
     function toggleFilter(typeId: string) {
-        setActiveFilters((prev) =>
-            prev.includes(typeId) ? prev.filter((id) => id !== typeId) : [...prev, typeId],
-        )
+        setActiveFilters(prev => prev.includes(typeId) ? prev.filter(id => id !== typeId) : [...prev, typeId])
     }
 
     function toggleWallet(id: string) {
-        const next = new Set(selectedReceivers)
-        if (next.has(id)) {
-            next.delete(id)
-            setReceiverAmounts((p) => { const n = { ...p }; delete n[id]; return n })
-        } else {
-            next.add(id)
-        }
-        setSelectedReceivers(next)
+        setSelectedSenders(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
     }
 
     function toggleGroup(groupWallets: WalletRecord[]) {
-        const allSelected = groupWallets.every((w) => selectedReceivers.has(w.id))
-        const next = new Set(selectedReceivers)
-        if (allSelected) {
-            groupWallets.forEach((w) => {
-                next.delete(w.id)
-                setReceiverAmounts((p) => { const n = { ...p }; delete n[w.id]; return n })
-            })
-        } else {
-            groupWallets.forEach((w) => next.add(w.id))
-        }
-        setSelectedReceivers(next)
+        const allSelected = groupWallets.every(w => selectedSenders.has(w.id))
+        setSelectedSenders(prev => {
+            const n = new Set(prev)
+            allSelected ? groupWallets.forEach(w => n.delete(w.id)) : groupWallets.forEach(w => n.add(w.id))
+            return n
+        })
     }
 
     function selectAll() {
-        const next = new Set(selectedReceivers)
-        allVisibleIds.forEach((id) => next.add(id))
-        setSelectedReceivers(next)
+        setSelectedSenders(prev => { const n = new Set(prev); allVisibleIds.forEach(id => n.add(id)); return n })
     }
 
     function clearAll() {
-        const next = new Set(selectedReceivers)
-        allVisibleIds.forEach((id) => {
-            next.delete(id)
-            setReceiverAmounts((p) => { const n = { ...p }; delete n[id]; return n })
-        })
-        setSelectedReceivers(next)
+        setSelectedSenders(prev => { const n = new Set(prev); allVisibleIds.forEach(id => n.delete(id)); return n })
     }
 
     function handleSubmit() {
         setValidationError('')
-        if (!senderWalletId) { setValidationError('Select a sender wallet.'); return }
-        if (selectedReceivers.size === 0) { setValidationError('Select at least one receiver wallet.'); return }
+        if (!receiverWalletId)        { setValidationError('Select a receiver wallet.'); return }
+        if (selectedSenders.size === 0) { setValidationError('Select at least one wallet to sweep.'); return }
 
-        const receivers = [...selectedReceivers].map((id) => {
-            const w = wallets.find((w) => w.id === id)!
-            return { walletId: id, publicKey: w.public_key, label: w.label, amount: receiverAmounts[id] ?? '' }
-        })
+        const receiver = wallets.find(w => w.id === receiverWalletId)!
+        const senders  = [...selectedSenders].map(id => {
+            const w = wallets.find(w => w.id === id)!
+            return { walletId: id, publicKey: w.public_key, label: w.label, estimatedSOL: sweepLamports(w) / 1_000_000_000 }
+        }).filter(s => s.estimatedSOL > 0)
 
-        const missing = receivers.filter((r) => !r.amount || parseFloat(r.amount) <= 0)
-        if (missing.length > 0) {
-            setValidationError(`Enter an amount greater than 0 for all selected wallets.`)
-            return
-        }
+        if (senders.length === 0) { setValidationError('None of the selected wallets have a sweepable balance.'); return }
 
-        const sender = wallets.find((w) => w.id === senderWalletId)!
-        setPending({ senderWalletId, senderPublicKey: sender.public_key, senderLabel: sender.label, receivers })
+        setPending({ receiverPublicKey: receiver.public_key, receiverLabel: receiver.label, senders })
     }
 
     function resetAfterTransfer() {
         setShowProgress(false)
-        setSenderWalletId('')
-        setSelectedReceivers(new Set())
-        setReceiverAmounts({})
+        setReceiverWalletId('')
+        setSelectedSenders(new Set())
         setActiveFilters([])
         setActiveTransfer(null)
-        setReceiverStatuses({})
+        setSenderStatuses({})
         setTransfersDone(false)
     }
 
-    async function executeTransfers() {
+    async function executeConsolidate() {
         if (!pending) return
         const transfer = pending
         setPending(null)
 
         const initial: Record<string, TransferStatus> = {}
-        transfer.receivers.forEach((r) => { initial[r.walletId] = 'loading' })
-        setReceiverStatuses(initial)
+        transfer.senders.forEach(s => { initial[s.walletId] = 'loading' })
+        setSenderStatuses(initial)
         setActiveTransfer(transfer)
         setTransfersDone(false)
         setShowProgress(true)
 
         try {
-            const res = await fetch('/api/wallet/transfer/fund', {
-                method: 'POST',
+            const res = await fetch('/api/wallet/transfer/consolidate', {
+                method:  'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    senderWalletId: transfer.senderWalletId,
-                    receivers: transfer.receivers.map((r) => ({
-                        walletId:  r.walletId,
-                        publicKey: r.publicKey,
-                        amountSOL: parseFloat(r.amount),
-                    })),
+                    receiverPublicKey: transfer.receiverPublicKey,
+                    senders: transfer.senders.map(s => ({ walletId: s.walletId })),
                 }),
             })
 
             if (res.ok) {
                 const { results } = await res.json()
                 const updated: Record<string, TransferStatus> = {}
-                for (const result of results as { walletId: string; success: boolean }[]) {
-                    updated[result.walletId] = result.success ? 'success' : 'error'
+                for (const r of results as { walletId: string; success: boolean }[]) {
+                    updated[r.walletId] = r.success ? 'success' : 'error'
                 }
-                setReceiverStatuses(updated)
+                setSenderStatuses(updated)
             } else {
                 const failed: Record<string, TransferStatus> = {}
-                transfer.receivers.forEach((r) => { failed[r.walletId] = 'error' })
-                setReceiverStatuses(failed)
+                transfer.senders.forEach(s => { failed[s.walletId] = 'error' })
+                setSenderStatuses(failed)
             }
         } catch {
             const failed: Record<string, TransferStatus> = {}
-            transfer.receivers.forEach((r) => { failed[r.walletId] = 'error' })
-            setReceiverStatuses(failed)
+            transfer.senders.forEach(s => { failed[s.walletId] = 'error' })
+            setSenderStatuses(failed)
         }
 
         setTransfersDone(true)
@@ -274,15 +250,15 @@ export default function TransferForm() {
     }
 
     function renderGroupHeader(group: WalletGroup) {
-        const allSelected  = group.wallets.every((w) => selectedReceivers.has(w.id))
-        const someSelected = !allSelected && group.wallets.some((w) => selectedReceivers.has(w.id))
+        const allSelected  = group.wallets.every(w => selectedSenders.has(w.id))
+        const someSelected = !allSelected && group.wallets.some(w => selectedSenders.has(w.id))
         return (
             <tr
                 key={`group-${group.id}`}
                 className="border-b bg-muted/50 cursor-pointer hover:bg-muted/70 transition-colors select-none"
                 onClick={() => toggleGroup(group.wallets)}
             >
-                <td colSpan={5} className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <td colSpan={4} className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     <span className="flex items-center gap-2">
                         {group.color && (
                             <span className="inline-block size-2 rounded-full shrink-0" style={{ backgroundColor: group.color }} />
@@ -294,7 +270,7 @@ export default function TransferForm() {
                 <td className="px-3 py-2 text-right">
                     <span className={[
                         'inline-flex size-5 items-center justify-center rounded border-2 transition-colors',
-                        allSelected  ? 'border-blue-500 bg-blue-500'
+                        allSelected   ? 'border-blue-500 bg-blue-500'
                         : someSelected ? 'border-blue-400 bg-blue-400/30'
                         : 'border-muted-foreground/40 hover:border-blue-400',
                     ].join(' ')}>
@@ -308,7 +284,9 @@ export default function TransferForm() {
     let rowIndex = 0
 
     function renderRow(wallet: WalletRecord, n: number) {
-        const checked = selectedReceivers.has(wallet.id)
+        const checked     = selectedSenders.has(wallet.id)
+        const sweepSOL    = sweepLamports(wallet) / 1_000_000_000
+        const hasSweepable = sweepLamports(wallet) > 0
         return (
             <tr
                 key={wallet.id}
@@ -328,8 +306,8 @@ export default function TransferForm() {
                                     <span
                                         role="button"
                                         tabIndex={0}
-                                        onClick={(e) => copyKey(e, wallet.public_key, wallet.id)}
-                                        onKeyDown={(e) => e.key === 'Enter' && copyKey(e as never, wallet.public_key, wallet.id)}
+                                        onClick={e => copyKey(e, wallet.public_key, wallet.id)}
+                                        onKeyDown={e => e.key === 'Enter' && copyKey(e as never, wallet.public_key, wallet.id)}
                                         className="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer shrink-0"
                                         aria-label="Copy public key"
                                     >
@@ -348,7 +326,7 @@ export default function TransferForm() {
                                         href={`https://solscan.io/account/${wallet.public_key}`}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        onClick={(e) => e.stopPropagation()}
+                                        onClick={e => e.stopPropagation()}
                                         className="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
                                         aria-label="View on Solscan"
                                     >
@@ -363,25 +341,16 @@ export default function TransferForm() {
                 <td className="px-3 py-2.5 text-xs text-muted-foreground">
                     {wallet.label ?? <span className="opacity-40">—</span>}
                 </td>
-                <td className="px-3 py-2.5 text-right text-muted-foreground tabular-nums text-xs">
+                <td className="px-3 py-2.5 text-right tabular-nums text-xs">
                     {wallet.solana_balance_in_lamports
-                        ? lamportsBNToSolDisplay(wallet.solana_balance_in_lamports)
-                        : '—'}
-                </td>
-                <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                    <input
-                        type="number"
-                        min={0}
-                        step={0.000000001}
-                        placeholder="0.00"
-                        value={receiverAmounts[wallet.id] ?? ''}
-                        onChange={(e) => setReceiverAmounts((p) => ({ ...p, [wallet.id]: e.target.value }))}
-                        className="w-24 rounded border border-input bg-transparent px-2 py-1 text-right text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    />
+                        ? <span className={hasSweepable ? 'text-foreground' : 'text-muted-foreground/50'}>
+                            {lamportsBNToSolDisplay(wallet.solana_balance_in_lamports)}
+                          </span>
+                        : <span className="text-muted-foreground">—</span>}
                 </td>
                 <td className="px-3 py-2.5 text-right">
                     <span
-                        onClick={(e) => { e.stopPropagation(); toggleWallet(wallet.id) }}
+                        onClick={e => { e.stopPropagation(); toggleWallet(wallet.id) }}
                         className={[
                             'inline-flex size-5 cursor-pointer items-center justify-center rounded border-2 transition-colors',
                             checked ? 'border-blue-500 bg-blue-500' : 'border-muted-foreground/40 hover:border-blue-400',
@@ -396,28 +365,23 @@ export default function TransferForm() {
 
     if (loading) return <p className="text-sm text-muted-foreground py-4">Loading wallets…</p>
 
-    const totalSOL = [...selectedReceivers].reduce((sum, id) => {
-        const v = parseFloat(receiverAmounts[id] ?? '')
-        return sum + (isNaN(v) ? 0 : v)
-    }, 0)
-
     return (
         <>
             <div className="flex flex-col gap-6">
 
-                {/* Sender */}
+                {/* Receiver */}
                 <div className="flex flex-col gap-1.5 max-w-sm">
-                    <FieldLabel>Sender Wallet</FieldLabel>
-                    <Select value={senderWalletId} onValueChange={setSenderWalletId}>
+                    <FieldLabel>Receiver Wallet</FieldLabel>
+                    <Select value={receiverWalletId} onValueChange={setReceiverWalletId}>
                         <SelectTrigger>
-                            <SelectValue placeholder="Select sender wallet" />
+                            <SelectValue placeholder="Select destination wallet" />
                         </SelectTrigger>
                         <SelectContent>
-                            {senderGroups.map(([typeName, group], i) => (
+                            {receiverGroups.map(([typeName, group], i) => (
                                 <SelectGroup key={typeName}>
                                     {i > 0 && <SelectSeparator />}
                                     <SelectLabel>{typeName}</SelectLabel>
-                                    {group.map((w) => (
+                                    {group.map(w => (
                                         <SelectItem key={w.id} value={w.id}>
                                             {w.label ? `${w.label} · ` : ''}
                                             {maskPubKey(w.public_key)}
@@ -432,9 +396,9 @@ export default function TransferForm() {
                     </Select>
                 </div>
 
-                {/* Receiver table */}
+                {/* Sender table */}
                 <div className="flex flex-col gap-3">
-                    <FieldLabel>Receiver Wallets</FieldLabel>
+                    <FieldLabel>Wallets to Sweep</FieldLabel>
 
                     {/* Type filter chips */}
                     <div className="flex flex-wrap gap-2">
@@ -449,7 +413,7 @@ export default function TransferForm() {
                         >
                             All
                         </button>
-                        {walletTypes.map((type) => (
+                        {walletTypes.map(type => (
                             <button
                                 key={type.id}
                                 onClick={() => toggleFilter(type.id)}
@@ -474,7 +438,6 @@ export default function TransferForm() {
                                     <th className="px-3 py-2.5 text-left">Public Key</th>
                                     <th className="px-3 py-2.5 text-left">Label</th>
                                     <th className="px-3 py-2.5 text-right">SOL Balance</th>
-                                    <th className="px-3 py-2.5 text-right">Amount (SOL)</th>
                                     <th className="px-3 py-2.5 text-right">
                                         <div className="flex items-center justify-end gap-2">
                                             Include
@@ -497,10 +460,10 @@ export default function TransferForm() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {walletGroups.map((group) => (
+                                {walletGroups.map(group => (
                                     <Fragment key={group.id}>
                                         {renderGroupHeader(group)}
-                                        {group.wallets.map((wallet) => renderRow(wallet, ++rowIndex))}
+                                        {group.wallets.map(w => renderRow(w, ++rowIndex))}
                                     </Fragment>
                                 ))}
 
@@ -508,19 +471,19 @@ export default function TransferForm() {
                                     <Fragment>
                                         {walletGroups.length > 0 && (
                                             <tr className="border-b bg-muted/30">
-                                                <td colSpan={6} className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">
+                                                <td colSpan={5} className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">
                                                     Ungrouped
                                                 </td>
                                             </tr>
                                         )}
-                                        {ungrouped.map((wallet) => renderRow(wallet, ++rowIndex))}
+                                        {ungrouped.map(w => renderRow(w, ++rowIndex))}
                                     </Fragment>
                                 )}
 
                                 {visibleWallets.length === 0 && (
                                     <tr>
-                                        <td colSpan={6} className="px-3 py-6 text-center text-sm text-muted-foreground">
-                                            {senderWalletId ? 'No other wallets found.' : 'Select a sender wallet to see receivers.'}
+                                        <td colSpan={5} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                                            {receiverWalletId ? 'No other wallets found.' : 'Select a receiver wallet to see available senders.'}
                                         </td>
                                     </tr>
                                 )}
@@ -528,57 +491,57 @@ export default function TransferForm() {
                         </table>
                     </div>
 
-                    {selectedReceivers.size > 0 && (
+                    {selectedSenders.size > 0 && (
                         <div className="flex items-center justify-between text-xs text-muted-foreground">
-                            <span>{selectedReceivers.size} wallet{selectedReceivers.size !== 1 ? 's' : ''} selected</span>
-                            {totalSOL > 0 && <span>Total: {totalSOL.toFixed(9)} SOL</span>}
+                            <span>{selectedSenders.size} wallet{selectedSenders.size !== 1 ? 's' : ''} selected</span>
+                            {totalEstimatedSOL > 0 && (
+                                <span>Est. total: {totalEstimatedSOL.toFixed(9)} SOL</span>
+                            )}
                         </div>
                     )}
                 </div>
 
-                {/* Validation error */}
                 {validationError && (
                     <p className="text-sm text-destructive">{validationError}</p>
                 )}
 
-                {/* Submit */}
-                <Button size="lg" variant="default" onClick={handleSubmit}>
-                    Transfer
+                <Button size="lg" onClick={handleSubmit}>
+                    Consolidate
                 </Button>
             </div>
 
             {/* Confirmation dialog */}
-            <Dialog open={!!pending} onOpenChange={(open) => { if (!open) setPending(null) }}>
+            <Dialog open={!!pending} onOpenChange={open => { if (!open) setPending(null) }}>
                 <DialogContent className="max-w-md">
                     <DialogHeader>
-                        <DialogTitle>Confirm Transfers</DialogTitle>
-                        <DialogDescription>Review all transfers before sending.</DialogDescription>
+                        <DialogTitle>Confirm Consolidation</DialogTitle>
+                        <DialogDescription>Each wallet will sweep its full balance minus fees.</DialogDescription>
                     </DialogHeader>
 
                     {pending && (
                         <div className="flex flex-col gap-3 text-sm">
                             <div className="flex justify-between text-muted-foreground">
-                                <span>From</span>
+                                <span>To</span>
                                 <span className="font-mono text-foreground">
-                                    {pending.senderLabel ? `${pending.senderLabel} · ` : ''}{maskPubKey(pending.senderPublicKey)}
+                                    {pending.receiverLabel ? `${pending.receiverLabel} · ` : ''}{maskPubKey(pending.receiverPublicKey)}
                                 </span>
                             </div>
 
                             <div className="border-t pt-3 flex flex-col gap-2">
-                                {pending.receivers.map((r) => (
-                                    <div key={r.walletId} className="flex justify-between">
+                                {pending.senders.map(s => (
+                                    <div key={s.walletId} className="flex justify-between">
                                         <span className="font-mono text-muted-foreground">
-                                            {r.label ? `${r.label} · ` : ''}{maskPubKey(r.publicKey)}
+                                            {s.label ? `${s.label} · ` : ''}{maskPubKey(s.publicKey)}
                                         </span>
-                                        <span className="font-semibold tabular-nums">{r.amount} SOL</span>
+                                        <span className="tabular-nums">~{s.estimatedSOL.toFixed(9)} SOL</span>
                                     </div>
                                 ))}
                             </div>
 
                             <div className="border-t pt-3 flex justify-between font-semibold">
-                                <span>Total</span>
+                                <span>Est. Total</span>
                                 <span className="tabular-nums">
-                                    {pending.receivers.reduce((s, r) => s + parseFloat(r.amount), 0).toFixed(9)} SOL
+                                    ~{pending.senders.reduce((s, r) => s + r.estimatedSOL, 0).toFixed(9)} SOL
                                 </span>
                             </div>
                         </div>
@@ -588,38 +551,33 @@ export default function TransferForm() {
                         <DialogClose asChild>
                             <Button variant="outline">Cancel</Button>
                         </DialogClose>
-                        <Button variant="default" onClick={executeTransfers}>
-                            Confirm {pending?.receivers.length ?? 0} Transfer{(pending?.receivers.length ?? 0) !== 1 ? 's' : ''}
+                        <Button onClick={executeConsolidate}>
+                            Confirm {pending?.senders.length ?? 0} Sweep{(pending?.senders.length ?? 0) !== 1 ? 's' : ''}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
 
             {/* Progress dialog */}
-            <Dialog open={showProgress} onOpenChange={(open) => { if (!open && transfersDone) resetAfterTransfer() }}>
+            <Dialog open={showProgress} onOpenChange={open => { if (!open && transfersDone) resetAfterTransfer() }}>
                 <DialogContent className="max-w-md">
                     <DialogHeader>
-                        <DialogTitle>{transfersDone ? 'Transfers Complete' : 'Transferring…'}</DialogTitle>
+                        <DialogTitle>{transfersDone ? 'Consolidation Complete' : 'Sweeping…'}</DialogTitle>
                         <DialogDescription>
-                            From:{' '}
-                            {activeTransfer?.senderLabel ? `${activeTransfer.senderLabel} · ` : ''}
-                            {activeTransfer ? maskPubKey(activeTransfer.senderPublicKey) : ''}
+                            To:{' '}
+                            {activeTransfer?.receiverLabel ? `${activeTransfer.receiverLabel} · ` : ''}
+                            {activeTransfer ? maskPubKey(activeTransfer.receiverPublicKey) : ''}
                         </DialogDescription>
                     </DialogHeader>
 
                     <div className="flex flex-col divide-y">
-                        {activeTransfer?.receivers.map((r) => {
-                            const status = receiverStatuses[r.walletId] ?? 'pending'
+                        {activeTransfer?.senders.map(s => {
+                            const status = senderStatuses[s.walletId] ?? 'pending'
                             return (
-                                <div key={r.walletId} className="flex items-center gap-3 py-3">
-                                    {/* Status icon */}
+                                <div key={s.walletId} className="flex items-center gap-3 py-3">
                                     <div className="size-5 shrink-0 flex items-center justify-center">
-                                        {status === 'pending' && (
-                                            <span className="size-2 rounded-full bg-muted-foreground/30" />
-                                        )}
-                                        {status === 'loading' && (
-                                            <span className="size-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-                                        )}
+                                        {status === 'pending' && <span className="size-2 rounded-full bg-muted-foreground/30" />}
+                                        {status === 'loading' && <span className="size-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />}
                                         {status === 'success' && (
                                             <svg className="size-4 text-green-500" viewBox="0 0 20 20" fill="currentColor">
                                                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
@@ -634,22 +592,24 @@ export default function TransferForm() {
 
                                     <div className="flex-1 min-w-0">
                                         <p className="text-xs font-mono truncate text-foreground">
-                                            {r.label ? `${r.label} · ` : ''}{maskPubKey(r.publicKey)}
+                                            {s.label ? `${s.label} · ` : ''}{maskPubKey(s.publicKey)}
                                         </p>
                                         {status === 'error' && (
-                                            <p className="text-[10px] text-destructive mt-0.5">Transfer failed</p>
+                                            <p className="text-[10px] text-destructive mt-0.5">Sweep failed</p>
                                         )}
                                     </div>
 
-                                    <span className="text-xs font-semibold tabular-nums shrink-0">{r.amount} SOL</span>
+                                    <span className="text-xs tabular-nums shrink-0 text-muted-foreground">
+                                        ~{s.estimatedSOL.toFixed(4)} SOL
+                                    </span>
                                 </div>
                             )
                         })}
                     </div>
 
                     {transfersDone && (() => {
-                        const total   = activeTransfer?.receivers.length ?? 0
-                        const success = Object.values(receiverStatuses).filter((s) => s === 'success').length
+                        const total   = activeTransfer?.senders.length ?? 0
+                        const success = Object.values(senderStatuses).filter(s => s === 'success').length
                         const failed  = total - success
                         return (
                             <>
@@ -660,11 +620,11 @@ export default function TransferForm() {
                                         : 'bg-destructive/10 text-destructive',
                                 ].join(' ')}>
                                     {failed === 0
-                                        ? `All ${success} transfer${success !== 1 ? 's' : ''} submitted successfully.`
-                                        : `${success} succeeded, ${failed} failed. Check wallet balances and retry.`}
+                                        ? `All ${success} wallet${success !== 1 ? 's' : ''} swept successfully.`
+                                        : `${success} succeeded, ${failed} failed. Check balances and retry.`}
                                 </div>
                                 <DialogFooter>
-                                    <Button variant="default" onClick={resetAfterTransfer}>Done</Button>
+                                    <Button onClick={resetAfterTransfer}>Done</Button>
                                 </DialogFooter>
                             </>
                         )

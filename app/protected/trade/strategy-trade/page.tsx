@@ -1,11 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import BundleTradesWizard   from '@/components/tokens/strategy-trade/wizards/bundle-trades-wizard'
-import StaggeredBuyWizard   from '@/components/tokens/strategy-trade/wizards/staggered-buy-wizard'
-import NaturalVolumeWizard  from '@/components/tokens/strategy-trade/wizards/natural-volume-wizard'
-import TrendingVolumeWizard from '@/components/tokens/strategy-trade/wizards/trending-volume-wizard'
-import HoldersMakerWizard   from '@/components/tokens/strategy-trade/wizards/holders-maker-wizard'
+import BundleTradesWizard   from '@/components/trade/strategy-trade/wizards/bundle-trades-wizard'
+import StaggeredBuyWizard   from '@/components/trade/strategy-trade/wizards/staggered-buy-wizard'
+import NaturalVolumeWizard  from '@/components/trade/strategy-trade/wizards/natural-volume-wizard'
+import TrendingVolumeWizard from '@/components/trade/strategy-trade/wizards/trending-volume-wizard'
+import HoldersMakerWizard   from '@/components/trade/strategy-trade/wizards/holders-maker-wizard'
 
 type StrategyKey = 'bundle' | 'staggered' | 'natural' | 'trending' | 'holders'
 
