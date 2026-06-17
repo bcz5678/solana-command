@@ -24,6 +24,8 @@ type Props = {
     tradeType?: 'buy' | 'sell'
     tokenMint?: string
     onBalancesLoaded?: (balances: Record<string, string>, decimals: number) => void
+    hideSupplyColumn?:      boolean
+    hideTradeAmountColumn?: boolean
 }
 
 function maskPubKey(key: string) {
@@ -53,6 +55,8 @@ export default function StrategyWalletSelector({
     tradeType = 'buy',
     tokenMint,
     onBalancesLoaded,
+    hideSupplyColumn      = false,
+    hideTradeAmountColumn = false,
 }: Props) {
     const [wallets, setWallets]               = useState<WalletRecord[]>([])
     const [walletTypes, setWalletTypes]       = useState<WalletTypeRow[]>([])
@@ -61,7 +65,11 @@ export default function StrategyWalletSelector({
     const [activeFilters, setActiveFilters]   = useState<string[]>([])
     const [localTradeAmounts, setLocalTradeAmounts] = useState<Record<string, string>>({})
     const tradeAmounts = controlledTradeAmounts ?? localTradeAmounts
-    const didInit                             = useRef(false)
+    const didInit      = useRef(false)
+
+    // Dynamic colSpan — adjusts when optional columns are hidden
+    const groupHeaderColSpan = 7 - (hideSupplyColumn ? 1 : 0) - (hideTradeAmountColumn ? 1 : 0)
+    const fullRowColSpan     = 8 - (hideSupplyColumn ? 1 : 0) - (hideTradeAmountColumn ? 1 : 0)
 
     const [tokenBalances, setTokenBalances]               = useState<Record<string, string>>({})
     const [tokenBalancesLoading, setTokenBalancesLoading] = useState(false)
@@ -227,7 +235,7 @@ export default function StrategyWalletSelector({
                 className="border-b bg-muted/50 cursor-pointer hover:bg-muted/70 transition-colors select-none"
                 onClick={() => toggleGroup(group.wallets)}
             >
-                <td colSpan={7} className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <td colSpan={groupHeaderColSpan} className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     <span className="flex items-center gap-2">
                         {group.color && (
                             <span
@@ -297,18 +305,20 @@ export default function StrategyWalletSelector({
                             })()
                         : '—'}
                 </td>
-                <td className="px-3 py-2.5 text-right text-muted-foreground text-xs">—</td>
-                <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                    <input
-                        type="number"
-                        min={0}
-                        step={0.000000001}
-                        placeholder="0.00"
-                        value={tradeAmounts[wallet.id] ?? ''}
-                        onChange={(e) => setTradeAmount(wallet.id, e.target.value)}
-                        className="w-24 rounded border border-input bg-transparent px-2 py-1 text-right text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    />
-                </td>
+                {!hideSupplyColumn && <td className="px-3 py-2.5 text-right text-muted-foreground text-xs">—</td>}
+                {!hideTradeAmountColumn && (
+                    <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
+                        <input
+                            type="number"
+                            min={0}
+                            step={0.000000001}
+                            placeholder="0.00"
+                            value={tradeAmounts[wallet.id] ?? ''}
+                            onChange={(e) => setTradeAmount(wallet.id, e.target.value)}
+                            className="w-24 rounded border border-input bg-transparent px-2 py-1 text-right text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        />
+                    </td>
+                )}
                 <td className="px-3 py-2.5 text-right">
                     <span
                         onClick={(e) => { e.stopPropagation(); toggleWallet(wallet.id) }}
@@ -385,18 +395,20 @@ export default function StrategyWalletSelector({
                             <th className="px-3 py-2.5 text-left">Label</th>
                             <th className="px-3 py-2.5 text-right">SOL Balance</th>
                             <th className="px-3 py-2.5 text-right">Token Amount</th>
-                            <th className="px-3 py-2.5 text-right">% Supply</th>
-                            <th className="px-3 py-2.5 text-right">
-                                <div className="flex items-center justify-end gap-2">
-                                    {tradeType === 'sell' ? 'Token to Trade' : 'SOL to Trade'}
-                                    <button
-                                        onClick={clearTradeAmounts}
-                                        className="normal-case tracking-normal font-normal text-[10px] border border-border rounded px-1.5 py-0.5 text-muted-foreground hover:text-destructive hover:border-destructive transition-colors"
-                                    >
-                                        Clear all
-                                    </button>
-                                </div>
-                            </th>
+                            {!hideSupplyColumn && <th className="px-3 py-2.5 text-right">% Supply</th>}
+                            {!hideTradeAmountColumn && (
+                                <th className="px-3 py-2.5 text-right">
+                                    <div className="flex items-center justify-end gap-2">
+                                        {tradeType === 'sell' ? 'Token to Trade' : 'SOL to Trade'}
+                                        <button
+                                            onClick={clearTradeAmounts}
+                                            className="normal-case tracking-normal font-normal text-[10px] border border-border rounded px-1.5 py-0.5 text-muted-foreground hover:text-destructive hover:border-destructive transition-colors"
+                                        >
+                                            Clear all
+                                        </button>
+                                    </div>
+                                </th>
+                            )}
                             <th className="px-3 py-2.5 text-right">
                                 <div className="flex items-center justify-end gap-2">
                                     Include
@@ -430,7 +442,7 @@ export default function StrategyWalletSelector({
                             <Fragment>
                                 {ungrouped.length > 0 && walletGroups.length > 0 && (
                                     <tr className="border-b bg-muted/30">
-                                        <td colSpan={8} className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">
+                                        <td colSpan={fullRowColSpan} className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">
                                             Ungrouped
                                         </td>
                                     </tr>
@@ -441,7 +453,7 @@ export default function StrategyWalletSelector({
 
                         {visibleWallets.length === 0 && (
                             <tr>
-                                <td colSpan={8} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                                <td colSpan={fullRowColSpan} className="px-3 py-6 text-center text-sm text-muted-foreground">
                                     No wallets found.
                                 </td>
                             </tr>

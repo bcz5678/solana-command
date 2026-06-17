@@ -6,6 +6,7 @@ type WalletState = 'IDLE' | 'BUYING' | 'HOLDING' | 'HOLDING_PORTION' | 'SELLING'
 
 export interface BotStatusResponse {
     running:      boolean
+    paused:       boolean
     shuttingDown: boolean
     cycleIndex:   number | null
     walletPool:   {
@@ -40,12 +41,14 @@ type Props = {
     isLoading:  boolean
     canStart:   boolean
     onStart:    () => void
+    onResume:   () => void
     onShutdown: () => void
     onStop:     () => void
 }
 
-export default function BotStatusPanel({ status, isLoading, canStart, onStart, onShutdown, onStop }: Props) {
+export default function BotStatusPanel({ status, isLoading, canStart, onStart, onResume, onShutdown, onStop }: Props) {
     const running      = status?.running      ?? false
+    const paused       = status?.paused       ?? false
     const shuttingDown = status?.shuttingDown ?? false
     const pool         = status?.walletPool   ?? []
 
@@ -62,7 +65,7 @@ export default function BotStatusPanel({ status, isLoading, canStart, onStart, o
                 <div className="flex items-center gap-2.5">
                     <span className={`inline-block size-2 rounded-full ${running ? 'bg-emerald-500 animate-pulse' : 'bg-muted-foreground/30'}`} />
                     <span className="text-sm font-medium">
-                        {shuttingDown ? 'Draining positions…' : running ? 'Running' : 'Stopped'}
+                        {shuttingDown ? 'Draining positions…' : running ? 'Running' : paused ? 'Paused' : 'Stopped'}
                     </span>
                     {status?.cycleIndex != null && (
                         <span className="text-xs text-muted-foreground">cycle {status.cycleIndex.toLocaleString()}</span>
@@ -70,18 +73,7 @@ export default function BotStatusPanel({ status, isLoading, canStart, onStart, o
                 </div>
 
                 <div className="flex items-center gap-2">
-                    {!running ? (
-                        <Button
-                            size="sm"
-                            onClick={onStart}
-                            disabled={!canStart || isLoading}
-                        >
-                            {isLoading && (
-                                <span className="mr-1.5 inline-block size-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                            )}
-                            Start Bot
-                        </Button>
-                    ) : (
+                    {running ? (
                         <>
                             <Button
                                 size="sm"
@@ -105,6 +97,43 @@ export default function BotStatusPanel({ status, isLoading, canStart, onStart, o
                                 ) : 'Shutdown'}
                             </Button>
                         </>
+                    ) : paused ? (
+                        <>
+                            <Button
+                                size="sm"
+                                onClick={onResume}
+                                disabled={isLoading}
+                            >
+                                {isLoading && (
+                                    <span className="mr-1.5 inline-block size-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                                )}
+                                Resume Bot
+                            </Button>
+                            <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={onShutdown}
+                                disabled={isLoading || shuttingDown}
+                            >
+                                {shuttingDown ? (
+                                    <>
+                                        <span className="mr-1.5 inline-block size-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                                        Draining…
+                                    </>
+                                ) : 'Shutdown'}
+                            </Button>
+                        </>
+                    ) : (
+                        <Button
+                            size="sm"
+                            onClick={onStart}
+                            disabled={!canStart || isLoading}
+                        >
+                            {isLoading && (
+                                <span className="mr-1.5 inline-block size-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                            )}
+                            Start Bot
+                        </Button>
                     )}
                 </div>
             </div>

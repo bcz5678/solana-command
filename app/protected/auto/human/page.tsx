@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { lamportsStringToBN } from '@/lib/lamports'
 import type { WalletRecord } from '@/lib/types/wallet'
 
-const POLL_INTERVAL_MS = 5_000
+const POLL_INTERVAL_MS = 2_000
 
 function solToLamports(sol: string): number {
     return Math.round(parseFloat(sol) * 1_000_000_000)
@@ -127,6 +127,8 @@ export default function HumanVolumeBotPage() {
                 minWalletLamports:   solToLamports(config.minWalletSol),
                 txFeeBufferLamports: solToLamports(config.txFeeBufferSol),
                 maxSellTranches:     parseInt(config.maxSellTranches),
+                buysPerCycleMin:     parseInt(config.buysPerCycleMin),
+                buysPerCycleMax:     parseInt(config.buysPerCycleMax),
             }
 
             const res  = await fetch('/api/auto/human', {
@@ -139,6 +141,21 @@ export default function HumanVolumeBotPage() {
             fetchStatus()
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Start failed')
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    async function handleResume() {
+        setError('')
+        setIsLoading(true)
+        try {
+            const res  = await fetch('/api/auto/human', { method: 'PATCH' })
+            const data = await res.json()
+            if (!res.ok) throw new Error(data.error ?? 'Resume failed')
+            fetchStatus()
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Resume failed')
         } finally {
             setIsLoading(false)
         }
@@ -200,18 +217,17 @@ export default function HumanVolumeBotPage() {
                     isLoading={isLoading}
                     canStart={canStart}
                     onStart={handleStart}
+                    onResume={handleResume}
                     onShutdown={handleShutdown}
                     onStop={handleStop}
                 />
             </div>
 
-            {/* Token + Funding Wallet  ·  Bot Config */}
-            <div className="flex flex-wrap items-start gap-6">
-
-                <div className="rounded-lg border border-border p-4 flex flex-col gap-4 min-w-65 flex-1">
-                    <p className="text-xs font-semibold">Target</p>
-
-                    <div className="flex flex-col gap-1.5">
+            {/* Row: Token + Funding Wallet */}
+            <div className="rounded-lg border border-border p-4">
+                <p className="text-xs font-semibold mb-4">Target</p>
+                <div className="flex flex-wrap gap-6">
+                    <div className="flex flex-col gap-1.5 flex-1 min-w-52">
                         <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                             Token
                         </label>
@@ -231,7 +247,7 @@ export default function HumanVolumeBotPage() {
                         )}
                     </div>
 
-                    <div className="flex flex-col gap-1.5">
+                    <div className="flex flex-col gap-1.5 flex-1 min-w-52">
                         <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                             Funding Wallet
                         </label>
@@ -265,15 +281,16 @@ export default function HumanVolumeBotPage() {
                         )}
                     </div>
                 </div>
+            </div>
 
-                <div className="rounded-lg border border-border p-4 min-w-65 flex-1">
-                    <p className="text-xs font-semibold mb-4">Bot Configuration</p>
-                    <BotConfigPanel
-                        config={config}
-                        onChange={handleConfigChange}
-                        disabled={isRunning}
-                    />
-                </div>
+            {/* Row: Bot Configuration (full width, 4 inputs per row) */}
+            <div className="rounded-lg border border-border p-4">
+                <p className="text-xs font-semibold mb-4">Bot Configuration</p>
+                <BotConfigPanel
+                    config={config}
+                    onChange={handleConfigChange}
+                    disabled={isRunning}
+                />
             </div>
 
             {/* Pool Wallet Selector */}
@@ -293,6 +310,8 @@ export default function HumanVolumeBotPage() {
                     onTradeAmountReset={() => {}}
                     defaultTypeName="Volume"
                     tradeType="buy"
+                    hideSupplyColumn={true}
+                    hideTradeAmountColumn={true}
                 />
             </div>
 

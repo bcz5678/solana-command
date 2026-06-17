@@ -16,6 +16,8 @@ export interface BotConfigState {
     minWalletSol:     string   // → minWalletLamports
     txFeeBufferSol:   string   // → txFeeBufferLamports
     maxSellTranches:  string
+    buysPerCycleMin:  string
+    buysPerCycleMax:  string
 }
 
 export const DEFAULT_BOT_CONFIG: BotConfigState = {
@@ -31,7 +33,9 @@ export const DEFAULT_BOT_CONFIG: BotConfigState = {
     cycleJitterMs:    '2000',
     minWalletSol:     '0.02',
     txFeeBufferSol:   '0.000005',
-    maxSellTranches:  '3',
+    maxSellTranches:  '2',
+    buysPerCycleMin:  '1',
+    buysPerCycleMax:  '3',
 }
 
 type Props = {
@@ -52,7 +56,7 @@ function Field({
 }) {
     return (
         <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider truncate">
                 {label}
             </label>
             <div className="relative flex items-center">
@@ -72,52 +76,41 @@ function Field({
     )
 }
 
-function GroupLabel({ children }: { children: React.ReactNode }) {
-    return (
-        <p className="text-xs font-semibold text-foreground pt-1">
-            {children}
-        </p>
-    )
-}
-
 export default function BotConfigPanel({ config, onChange, disabled }: Props) {
     return (
-        <div className="flex flex-col gap-5">
-            <GroupLabel>Buy Amount</GroupLabel>
-            <div className="grid grid-cols-2 gap-3">
-                <Field label="Min" suffix="SOL" id="buyAmountMinSol" value={config.buyAmountMinSol} onChange={onChange} disabled={disabled} />
-                <Field label="Max" suffix="SOL" id="buyAmountMaxSol" value={config.buyAmountMaxSol} onChange={onChange} disabled={disabled} />
+        <div className="flex flex-col gap-3">
+
+            {/* Row 1: Buy amounts + Sell percent */}
+            <div className="grid grid-cols-4 gap-3">
+                <Field label="Buy Min"  suffix="SOL" id="buyAmountMinSol" value={config.buyAmountMinSol} onChange={onChange} disabled={disabled} />
+                <Field label="Buy Max"  suffix="SOL" id="buyAmountMaxSol" value={config.buyAmountMaxSol} onChange={onChange} disabled={disabled} />
+                <Field label="Sell Min" suffix="%"   id="sellPercentMin"  value={config.sellPercentMin}  onChange={onChange} disabled={disabled} />
+                <Field label="Sell Max" suffix="%"   id="sellPercentMax"  value={config.sellPercentMax}  onChange={onChange} disabled={disabled} />
             </div>
 
-            <GroupLabel>Sell Percent</GroupLabel>
-            <div className="grid grid-cols-2 gap-3">
-                <Field label="Min" suffix="%" id="sellPercentMin" value={config.sellPercentMin} onChange={onChange} disabled={disabled} />
-                <Field label="Max" suffix="%" id="sellPercentMax" value={config.sellPercentMax} onChange={onChange} disabled={disabled} />
+            {/* Row 2: Hold cycles + Cycle timing */}
+            <div className="grid grid-cols-4 gap-3">
+                <Field label="Hold Min"  suffix="cyc" id="minHoldCycles"  value={config.minHoldCycles}  onChange={onChange} disabled={disabled} />
+                <Field label="Hold Max"  suffix="cyc" id="maxHoldCycles"  value={config.maxHoldCycles}  onChange={onChange} disabled={disabled} />
+                <Field label="Interval"  suffix="ms"  id="cycleIntervalMs" value={config.cycleIntervalMs} onChange={onChange} disabled={disabled} />
+                <Field label="Jitter ±"  suffix="ms"  id="cycleJitterMs"  value={config.cycleJitterMs}  onChange={onChange} disabled={disabled} />
             </div>
 
-            <GroupLabel>Hold Cycles</GroupLabel>
-            <div className="grid grid-cols-2 gap-3">
-                <Field label="Min" suffix="cyc" id="minHoldCycles" value={config.minHoldCycles} onChange={onChange} disabled={disabled} />
-                <Field label="Max" suffix="cyc" id="maxHoldCycles" value={config.maxHoldCycles} onChange={onChange} disabled={disabled} />
+            {/* Row 3: Tips + tranches + wallet minimums */}
+            <div className="grid grid-cols-4 gap-3">
+                <Field label="Jito Tip"    suffix="SOL" id="jitoTipSol"      value={config.jitoTipSol}      onChange={onChange} disabled={disabled} />
+                <Field label="Tranches"               id="maxSellTranches"  value={config.maxSellTranches} onChange={onChange} disabled={disabled} />
+                <Field label="Min Wallet"  suffix="SOL" id="minWalletSol"    value={config.minWalletSol}    onChange={onChange} disabled={disabled} />
+                <Field label="Fee Buffer"  suffix="SOL" id="txFeeBufferSol"  value={config.txFeeBufferSol}  onChange={onChange} disabled={disabled} />
             </div>
 
-            <GroupLabel>Cycle Timing</GroupLabel>
-            <div className="grid grid-cols-2 gap-3">
-                <Field label="Interval" suffix="ms" id="cycleIntervalMs" value={config.cycleIntervalMs} onChange={onChange} disabled={disabled} />
-                <Field label="Jitter ±"  suffix="ms" id="cycleJitterMs"   value={config.cycleJitterMs}   onChange={onChange} disabled={disabled} />
+            {/* Row 4: Buy ratio + Total cycles */}
+            <div className="grid grid-cols-4 gap-3">
+                <Field label="Buys Min"     suffix="×"   id="buysPerCycleMin" value={config.buysPerCycleMin} onChange={onChange} disabled={disabled} />
+                <Field label="Buys Max"     suffix="×"   id="buysPerCycleMax" value={config.buysPerCycleMax} onChange={onChange} disabled={disabled} />
+                <Field label="Total Cycles" suffix="cyc" id="totalCycles"     value={config.totalCycles}     onChange={onChange} disabled={disabled} />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-                <Field label="Jito Tip"     suffix="SOL" id="jitoTipSol"      value={config.jitoTipSol}      onChange={onChange} disabled={disabled} />
-                <Field label="Max Tranches"              id="maxSellTranches"  value={config.maxSellTranches} onChange={onChange} disabled={disabled} />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-                <Field label="Min Wallet"   suffix="SOL" id="minWalletSol"    value={config.minWalletSol}    onChange={onChange} disabled={disabled} />
-                <Field label="Fee Buffer"   suffix="SOL" id="txFeeBufferSol"  value={config.txFeeBufferSol}  onChange={onChange} disabled={disabled} />
-            </div>
-
-            <Field label="Total Cycles" suffix="cyc" id="totalCycles" value={config.totalCycles} onChange={onChange} disabled={disabled} />
         </div>
     )
 }

@@ -1,4 +1,5 @@
 import { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction, TransactionMessage, VersionedTransaction, sendAndConfirmTransaction } from "@solana/web3.js"
+import bs58 from 'bs58'
 import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token"
 import { PUMP_SDK, OnlinePumpSdk, getSellSolAmountFromTokenAmount, getBuyTokenAmountFromSolAmount } from "@nirholas/pump-sdk"
 import { getWalletKeypairById } from "@/lib/vault/get-wallet-by-id";
@@ -25,6 +26,8 @@ export interface HumanVolumeBotConfig {
     minWalletLamports?: BN                  // top-up threshold in lamports (default 20_000_000 = 0.02 SOL)
     txFeeBufferLamports?: BN               // Transfer fee in Lamports to use in SOL transfer
     maxSellTranches?: number               // max partial sells before forcing 100% exit (default 3)
+    buysPerCycleMin?: number               // minimum buys attempted per cycle (default 1)
+    buysPerCycleMax?: number               // maximum buys attempted per cycle (default 3)
 }
 
 export interface WalletRecord {
@@ -79,6 +82,8 @@ export class HumanVolumeBot<T = void> {
     private minWalletLamports: BN
     private txFeeBufferLamports: BN
     private maxSellTranches: number
+    private buysPerCycleMin: number
+    private buysPerCycleMax: number
 
     private walletPool: WalletRecord[]
 
@@ -107,6 +112,8 @@ export class HumanVolumeBot<T = void> {
             minWalletLamports,
             txFeeBufferLamports,
             maxSellTranches,
+            buysPerCycleMin,
+            buysPerCycleMax,
         } = config
 
         this.connection = connection;
@@ -122,7 +129,9 @@ export class HumanVolumeBot<T = void> {
         this.cycleJitterMs = cycleJitterMs ?? 2_000;
         this.minWalletLamports = minWalletLamports ?? new BN(20_000_000);
         this.txFeeBufferLamports = txFeeBufferLamports ?? new BN(5_000);
-        this.maxSellTranches = maxSellTranches ?? 3;
+        this.maxSellTranches   = maxSellTranches ?? 2;
+        this.buysPerCycleMin   = buysPerCycleMin ?? 1;
+        this.buysPerCycleMax   = buysPerCycleMax ?? 3;
 
         this.executor  = executor;
         this.onlineSdk = new OnlinePumpSdk(connection);
@@ -187,18 +196,24 @@ export class HumanVolumeBot<T = void> {
             await this.submitSellBundle(sellCandidate);
         }
 
-        // ── STEP 2: Select next IDLE wallet to buy ───────────────────────────
-        // Exclude the wallet that just sold — prevents same-cycle sell+rebuy
-        const justSoldId = sellCandidate?.id ?? null
-        let idleWallets: WalletRecord[] = this.walletPool.filter(w => w.state === 'IDLE' && w.id !== justSoldId);
-        let buyCandidate: WalletRecord | null = this.selectBuyCandidate(idleWallets);
+        // ── STEP 2: Buy for a randomized number of IDLE wallets ─────────────
+        // Randomized count (buysPerCycleMin–buysPerCycleMax) produces an organic
+        // buy/sell ratio instead of a fixed 1:1 pattern that flags as wash trading.
+        const justSoldId  = sellCandidate?.id ?? null
+        const buysThisCycle = this.randomPercentInRangeInclusive(this.buysPerCycleMin, this.buysPerCycleMax)
+        const usedIds = new Set<string>(justSoldId ? [justSoldId] : [])
 
-        if(buyCandidate != null) {
+        for (let b = 0; b < buysThisCycle; b++) {
+            const idleWallets = this.walletPool.filter(w => w.state === 'IDLE' && !usedIds.has(w.id))
+            const buyCandidate = this.selectBuyCandidate(idleWallets)
+            if (!buyCandidate) break  // pool exhausted
+            usedIds.add(buyCandidate.id)
+            // Small jitter between buys so they don't land in the same slot
+            if (b > 0) await new Promise(r => setTimeout(r, this.randomPercentInRangeInclusive(300, 800)))
             await this.checkAndTopUp(buyCandidate)
             await this.submitBuyBundle(buyCandidate)
-            // marks wallet state = HOLDING
         }
-            
+
         // ── STEP 3: Increment hold counters on all HOLDING / HOLDING_PORTION wallets
 
         this.walletPool
@@ -279,23 +294,19 @@ export class HumanVolumeBot<T = void> {
     }
 
     selectSellCandidate(holdingWallets: WalletRecord[]): WalletRecord | null {
-        // HOLDING_PORTION wallets are always highest priority — open remainder, must exit
-        const portionWallets = holdingWallets.filter(w => w.state === 'HOLDING_PORTION')
-        if (portionWallets.length > 0) {
-            return this.randomPick(portionWallets)
-        }
-
-        // Force-exit any HOLDING wallet that has held too long
+        // Force-exit any wallet (HOLDING or HOLDING_PORTION) that has held too long
         const overdue = holdingWallets
-            .filter(w => w.state === 'HOLDING' && (w.holdCycles ?? 0) >= this.maxHoldCycles)
+            .filter(w => (w.holdCycles ?? 0) >= this.maxHoldCycles)
             .sort((a, b) => (b.holdCycles ?? 0) - (a.holdCycles ?? 0))
 
         if (overdue.length > 0) {
             return overdue[0]
         }
 
-        // Otherwise only sell if at least minHoldCycles have passed
-        const eligible = holdingWallets.filter(w => w.state === 'HOLDING' && (w.holdCycles ?? 0) >= this.minHoldCycles)
+        // Only sell if minHoldCycles have passed — applies to HOLDING_PORTION too so
+        // partial-sell wallets wait the same cadence as fresh positions instead of
+        // dominating every cycle after their first tranche.
+        const eligible = holdingWallets.filter(w => (w.holdCycles ?? 0) >= this.minHoldCycles)
 
         if (eligible.length === 0) {
             return null
@@ -317,6 +328,7 @@ export class HumanVolumeBot<T = void> {
         const prevState = wallet.state
         wallet.state = 'SELLING'
         let walletKeypair: Keypair | null = null
+        let txSignature: string | null = null
 
         try {
             // ── Step 1: Read actual on-chain token balance ────────────────────
@@ -328,12 +340,16 @@ export class HumanVolumeBot<T = void> {
                 const resp = await this.connection.getTokenAccountBalance(ata, 'confirmed')
                 actualBalanceRaw = new BN(resp.value.amount)
             } catch {
-                actualBalanceRaw = new BN(0)
+                // RPC failure ≠ zero balance — use stored balance so a transient error
+                // doesn't silently idle a wallet that still holds tokens.
+                actualBalanceRaw = wallet.tokenBalanceRaw
             }
 
             if (actualBalanceRaw.isZero()) {
                 wallet.state           = 'IDLE'
                 wallet.tokenBalanceRaw = new BN(0)
+                wallet.holdCycles      = null
+                wallet.sellTranches    = 0
                 return true
             }
 
@@ -345,6 +361,18 @@ export class HumanVolumeBot<T = void> {
                 : this.randomPercentInRangeInclusive(this.sellPercent.min, this.sellPercent.max)
             const sellAmount  = actualBalanceRaw.muln(sellPercent).divn(100)
             const slippage    = this.randomPercentInRangeInclusive(5, 15)
+
+            // ── Step 2b: Ensure wallet has SOL to pay the sell Jito tip ─────────
+            // After a max-size buy the wallet may have only a few lamports left.
+            // A missing tip causes immediate TX rejection (no "Invalid" to recover from).
+            const sellSolBalance = await this.getSOLBalanceLamports(wallet)
+            const sellMinSOL     = this.jitoTipLamports.add(this.txFeeBufferLamports)
+            if (sellSolBalance.lt(sellMinSOL)) {
+                const topUp   = sellMinSOL.sub(sellSolBalance)
+                const funded  = await this.sendLamports(this.fundingWallet.id, wallet, topUp)
+                if (!funded) throw new Error(`sell top-up failed for wallet ${wallet.id}`)
+                console.log(`[submitSellBundle] topped up ${topUp} lamports for sell tip on wallet=${wallet.id}`)
+            }
 
             // ── Step 3: Fetch on-chain state and tip account in parallel ──────
             const [global, feeConfig, mintInfo, sellState, tipAccount, { blockhash }] = await Promise.all([
@@ -405,10 +433,11 @@ export class HumanVolumeBot<T = void> {
                 instructions:    [...tradeIxs, tipIx],
             }).compileToV0Message()
 
-            // ── Step 6: Fetch keypair and sign (secret key minimally exposed) ─
+            // ── Step 6: Fetch keypair, sign, capture signature ────────────────
             walletKeypair = await getWalletKeypairById(wallet.id)
             const tx = new VersionedTransaction(message)
             tx.sign([walletKeypair])
+            txSignature = bs58.encode(tx.signatures[0])
 
             const encoded = Buffer.from(tx.serialize()).toString('base64') as import('@solana/kit').Base64EncodedWireTransaction
 
@@ -433,6 +462,38 @@ export class HumanVolumeBot<T = void> {
             return true
 
         } catch (err) {
+            // Same single-tx timing issue as buys — verify via Solana signature status.
+            if (txSignature && err instanceof Error && err.message.includes('status: Invalid')) {
+                for (let attempt = 0; attempt < 6; attempt++) {
+                    await new Promise(r => setTimeout(r, 2_000))
+                    try {
+                        const { value: statuses } = await this.connection.getSignatureStatuses([txSignature])
+                        const s = statuses[0]
+                        if (s && !s.err && (s.confirmationStatus === 'confirmed' || s.confirmationStatus === 'finalized')) {
+                            // Sell confirmed — read ATA to determine remaining balance
+                            const mint = this.tokenMint
+                            const ata  = getAssociatedTokenAddressSync(mint, wallet.publicKey)
+                            let remaining = new BN(0)
+                            try {
+                                const resp = await this.connection.getTokenAccountBalance(ata, 'confirmed')
+                                remaining = new BN(resp.value.amount)
+                            } catch { /* ATA gone = full sell */ }
+                            wallet.tokenBalanceRaw = remaining
+                            if (remaining.isZero()) {
+                                wallet.state        = 'IDLE'
+                                wallet.holdCycles   = null
+                                wallet.sellTranches = 0
+                            } else {
+                                wallet.state        = 'HOLDING_PORTION'
+                                wallet.holdCycles   = 0
+                                wallet.sellTranches = wallet.sellTranches + 1
+                            }
+                            console.log(`[submitSellBundle] RECOVERED: wallet=${wallet.id} sig=${txSignature} state=${wallet.state} remaining=${remaining}`)
+                            return true
+                        }
+                    } catch { /* RPC hiccup — try again */ }
+                }
+            }
             wallet.state = prevState
             console.error(`[submitSellBundle] FAILED: wallet=${wallet.id}`, err)
             return false
@@ -445,12 +506,18 @@ export class HumanVolumeBot<T = void> {
         wallet.state = 'BUYING'
         let walletKeypair: Keypair | null = null
 
+        const mint      = this.tokenMint
+        const solAmount = new BN(
+            Math.floor(Math.random() * (this.buyAmountLamports.max.toNumber() - this.buyAmountLamports.min.toNumber() + 1))
+            + this.buyAmountLamports.min.toNumber()
+        )
+
+        // Extracted before the try so the catch can verify on-chain
+        let txSignature: string | null = null
+        let tokenAmount = new BN(0)
+        let isBondingCurve = true
+
         try {
-            const mint      = this.tokenMint
-            const solAmount = new BN(
-                Math.floor(Math.random() * (this.buyAmountLamports.max.toNumber() - this.buyAmountLamports.min.toNumber() + 1))
-                + this.buyAmountLamports.min.toNumber()
-            )
             const slippage = this.randomPercentInRangeInclusive(5, 15)
 
             // ── Step 1: Fetch on-chain state and tip account in parallel ──────
@@ -463,8 +530,9 @@ export class HumanVolumeBot<T = void> {
                 this.connection.getLatestBlockhash('confirmed'),
             ])
 
+            isBondingCurve = !buyState.bondingCurve.complete
+
             // ── Step 2: Build trade instructions (bonding curve or AMM) ──────
-            let tokenAmount = new BN(0)
             let tradeIxs: TransactionInstruction[]
 
             if (buyState.bondingCurve.complete) {
@@ -518,10 +586,11 @@ export class HumanVolumeBot<T = void> {
                 instructions:    [...tradeIxs, tipIx],
             }).compileToV0Message()
 
-            // ── Step 4: Fetch keypair and sign (secret key minimally exposed) ─
+            // ── Step 4: Fetch keypair, sign, capture signature ────────────────
             walletKeypair = await getWalletKeypairById(wallet.id)
             const tx = new VersionedTransaction(message)
             tx.sign([walletKeypair])
+            txSignature = bs58.encode(tx.signatures[0])
 
             const encoded = Buffer.from(tx.serialize()).toString('base64') as import('@solana/kit').Base64EncodedWireTransaction
 
@@ -529,8 +598,8 @@ export class HumanVolumeBot<T = void> {
             const { bundleId } = await this.executor.sendPrebuiltBundle([encoded], [wallet.publicKey.toBase58()])
 
             // ── Step 6: Update wallet state ───────────────────────────────────
-            if (buyState.bondingCurve.complete) {
-                // AMM path: tokenAmount was not calculated — read actual on-chain balance
+            if (!isBondingCurve) {
+                // AMM path: read actual on-chain balance
                 try {
                     const ata  = getAssociatedTokenAddressSync(mint, wallet.publicKey)
                     const resp = await this.connection.getTokenAccountBalance(ata, 'confirmed')
@@ -550,6 +619,35 @@ export class HumanVolumeBot<T = void> {
             return true
 
         } catch (err) {
+            // Single-tx bundles land so fast (~400ms) that the Jito inflight status
+            // returns "Invalid" before our first poll at 1.5s — the bundle is already
+            // out of the queue. Verify directly via Solana RPC signature status,
+            // which works at "confirmed" commitment (~2-3s) independently of Jito APIs.
+            if (txSignature && err instanceof Error && err.message.includes('status: Invalid')) {
+                for (let attempt = 0; attempt < 6; attempt++) {
+                    await new Promise(r => setTimeout(r, 2_000))
+                    try {
+                        const { value: statuses } = await this.connection.getSignatureStatuses([txSignature])
+                        const s = statuses[0]
+                        if (s && !s.err && (s.confirmationStatus === 'confirmed' || s.confirmationStatus === 'finalized')) {
+                            // Transaction confirmed — recover into HOLDING
+                            const ata = getAssociatedTokenAddressSync(mint, wallet.publicKey)
+                            let balance = tokenAmount
+                            try {
+                                const resp = await this.connection.getTokenAccountBalance(ata, 'confirmed')
+                                balance = new BN(resp.value.amount)
+                            } catch { /* use calculated tokenAmount */ }
+                            wallet.tokenBalanceRaw = balance
+                            wallet.state           = 'HOLDING'
+                            wallet.lamportsSpent   = solAmount
+                            wallet.boughtAtCycle   = this.cycleIndex
+                            wallet.holdCycles      = 0
+                            console.log(`[submitBuyBundle] RECOVERED: wallet=${wallet.id} sig=${txSignature} tokens=${balance}`)
+                            return true
+                        }
+                    } catch { /* RPC hiccup — try again */ }
+                }
+            }
             wallet.state = 'IDLE'
             console.error(`[submitBuyBundle] FAILED: wallet=${wallet.id}`, err)
             return false
@@ -566,7 +664,13 @@ export class HumanVolumeBot<T = void> {
     async checkAndTopUp(wallet: WalletRecord): Promise<boolean> {
         const balance = await this.getSOLBalanceLamports(wallet)
         if (balance.lt(this.minWalletLamports)) {
-            const lamportsNeeded = this.buyAmountLamports.max.add(this.jitoTipLamports).add(this.txFeeBufferLamports).sub(balance)
+            // Fund enough for: buy amount + buy Jito tip + sell Jito tip + fee buffer.
+            // Without the second tip the wallet has 0 SOL after buying and the sell TX
+            // fails before submission, which is why sells were never visible in the UI.
+            const lamportsNeeded = this.buyAmountLamports.max
+                .add(this.jitoTipLamports.muln(2))
+                .add(this.txFeeBufferLamports)
+                .sub(balance)
             return this.sendLamports(this.fundingWallet.id, wallet, lamportsNeeded)
         }
         return true

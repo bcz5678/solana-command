@@ -107,6 +107,13 @@ export interface QuicknodeJitoExecutorConfig {
     pollIntervalMs?: number;
     /** Initial delay before the first poll in ms. @default 1_500 */
     waitBeforePollMs?: number;
+    /**
+     * When true, treats a Jito "Invalid" bundle status as likely-landed and returns
+     * normally instead of throwing. Use only with endpoints that do not support
+     * getBundleStatuses (e.g. QuickNode Lil Jito). Callers must verify via on-chain
+     * state (e.g. ATA balance check). @default false
+     */
+    optimisticOnInvalid?: boolean;
 }
 
 /** One wallet's contribution to a multi-wallet bundle. */
@@ -145,6 +152,7 @@ export class QuicknodeJitoExecutor {
     private readonly pollTimeoutMs: number;
     private readonly pollIntervalMs: number;
     private readonly waitBeforePollMs: number;
+    private readonly optimisticOnInvalid: boolean;
 
     private constructor(
         solanaRpc: ReturnType<typeof createSolanaRpc>,
@@ -155,6 +163,7 @@ export class QuicknodeJitoExecutor {
         pollTimeoutMs: number,
         pollIntervalMs: number,
         waitBeforePollMs: number,
+        optimisticOnInvalid: boolean,
     ) {
         this.solanaRpc = solanaRpc;
         this.lilJitRpc = lilJitRpc;
@@ -164,6 +173,7 @@ export class QuicknodeJitoExecutor {
         this.pollTimeoutMs = pollTimeoutMs;
         this.pollIntervalMs = pollIntervalMs;
         this.waitBeforePollMs = waitBeforePollMs;
+        this.optimisticOnInvalid = optimisticOnInvalid;
     }
 
     /**
@@ -189,6 +199,7 @@ export class QuicknodeJitoExecutor {
             config.pollTimeoutMs ?? 30_000,
             config.pollIntervalMs ?? 1_000,
             config.waitBeforePollMs ?? 1_500,
+            config.optimisticOnInvalid ?? false,
         );
     }
 
@@ -401,19 +412,32 @@ export class QuicknodeJitoExecutor {
                 }
 
                 if (status === 'Invalid') {
-                    // "Invalid" from getInflightBundleStatuses is ambiguous: it means
-                    // the bundle is not currently in-flight, which is true for both
-                    // bundles that were rejected AND bundles that already landed and
-                    // exited the inflight window. Check the finalized ledger first.
-                    try {
-                        const finalRes = await this.lilJitRpc.getBundleStatuses([bundleId]).send();
-                        const entry = finalRes.value[0];
-                        if (entry && (entry.confirmationStatus === 'confirmed' || entry.confirmationStatus === 'finalized' || entry.confirmationStatus === 'processed')) {
-                            console.log(`[QuicknodeJitoExecutor] bundle ${bundleId} already landed (${entry.confirmationStatus})`);
-                            return;
+                    // "Invalid" = bundle left the inflight queue (landed or dropped).
+                    // Poll getBundleStatuses: a landed bundle appears in the results;
+                    // a dropped bundle never does. Poll up to 5× at 2s gaps (10s window)
+                    // to cover both "confirmed" (~2-3s) and "finalized" (~13s) timing.
+                    let landed = false;
+                    for (let attempt = 0; attempt < 5 && !landed; attempt++) {
+                        await new Promise(r => setTimeout(r, 2_000));
+                        try {
+                            const finalRes = await this.lilJitRpc.getBundleStatuses([bundleId]).send();
+                            // Any entry in the response means the bundle was included in a block.
+                            // Dropped bundles are simply absent from the results.
+                            if (finalRes.value[0]) {
+                                const cs = finalRes.value[0].confirmationStatus;
+                                console.log(`[QuicknodeJitoExecutor] bundle ${bundleId} in ledger (attempt ${attempt + 1}): ${cs ?? 'unknown'}`);
+                                landed = true;
+                            }
+                        } catch (e) {
+                            console.warn(`[QuicknodeJitoExecutor] getBundleStatuses error (attempt ${attempt + 1}):`, e);
                         }
-                    } catch {
-                        // getBundleStatuses failed — fall through to throw
+                    }
+                    if (landed) return;
+                    if (this.optimisticOnInvalid) {
+                        // getBundleStatuses found nothing — could be a very late confirmation
+                        // or a genuine drop. Return so the caller can verify via on-chain state.
+                        console.warn(`[QuicknodeJitoExecutor] bundle ${bundleId}: not found in ledger after retries — returning optimistically`);
+                        return;
                     }
                     throw new Error(`Bundle ${bundleId} status: Invalid`);
                 }

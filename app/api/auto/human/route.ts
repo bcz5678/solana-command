@@ -28,6 +28,8 @@ interface StartBotBody {
     minWalletLamports?:     number
     txFeeBufferLamports?:   number
     maxSellTranches?:       number
+    buysPerCycleMin?:       number
+    buysPerCycleMax?:       number
 }
 
 // ── GET: status ───────────────────────────────────────────────────────────────
@@ -35,11 +37,12 @@ export async function GET() {
     try { await requireSuperAdmin() } catch (res) { return res as Response }
 
     if (!bot) {
-        return NextResponse.json({ running: false, cycleIndex: null, walletPool: null })
+        return NextResponse.json({ running: false, paused: false, cycleIndex: null, walletPool: null })
     }
 
     return NextResponse.json({
         running:       bot.volumeLoopRunning,
+        paused:        !bot.volumeLoopRunning && !isShuttingDown,
         shuttingDown:  isShuttingDown,
         ...bot.getStatus(),
     })
@@ -51,6 +54,9 @@ export async function POST(req: NextRequest) {
 
     if (bot?.volumeLoopRunning) {
         return NextResponse.json({ error: 'Bot is already running' }, { status: 409 })
+    }
+    if (bot && !bot.volumeLoopRunning) {
+        return NextResponse.json({ error: 'Bot is paused — resume or shutdown before starting fresh' }, { status: 409 })
     }
 
     let body: StartBotBody
@@ -75,6 +81,8 @@ export async function POST(req: NextRequest) {
         minWalletLamports,
         txFeeBufferLamports,
         maxSellTranches,
+        buysPerCycleMin,
+        buysPerCycleMax,
     } = body
 
     if (!tokenMint || !fundingWallet?.id || !fundingWallet?.publicKey || !walletsList?.length) {
@@ -119,6 +127,8 @@ export async function POST(req: NextRequest) {
             minWalletLamports:   minWalletLamports   != null ? new BN(minWalletLamports)   : undefined,
             txFeeBufferLamports: txFeeBufferLamports  != null ? new BN(txFeeBufferLamports)  : undefined,
             maxSellTranches,
+            buysPerCycleMin,
+            buysPerCycleMax,
         })
 
         bot.initializeWalletPool(walletsList)
@@ -133,6 +143,22 @@ export async function POST(req: NextRequest) {
         const message = err instanceof Error ? err.message : 'Failed to start bot'
         return NextResponse.json({ error: message }, { status: 500 })
     }
+}
+
+// ── PATCH: resume a paused bot ────────────────────────────────────────────────
+export async function PATCH() {
+    try { await requireSuperAdmin() } catch (res) { return res as Response }
+
+    if (!bot) {
+        return NextResponse.json({ error: 'No paused bot to resume' }, { status: 404 })
+    }
+
+    if (bot.volumeLoopRunning) {
+        return NextResponse.json({ error: 'Bot is already running' }, { status: 409 })
+    }
+
+    void bot.startVolumeLoop()
+    return NextResponse.json({ resumed: true })
 }
 
 // ── DELETE: stop or full shutdown ─────────────────────────────────────────────
