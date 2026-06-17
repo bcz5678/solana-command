@@ -1,11 +1,13 @@
-import { Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
-import { handleError, initializeQuickNodeSolana, parseAndValidateAddress } from '@/app/api/utils/helpers'
+import { Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } from '@solana/web3.js'
+import { initializeQuickNodeSolana, parseAndValidateAddress } from '@/app/api/utils/helpers'
 import { getWalletKeypairById } from '@/lib/vault/get-wallet-by-id'
 
 export const dynamic = 'force-dynamic'
 
-// Mirrors consolidateSOL's txFeeBufferLamports — enough for base fee + recommended priority fee
-const FEE_BUFFER_LAMPORTS = 10_000
+// Solana accounts must end at either >= rent-exempt minimum (~890 880 lamports)
+// OR exactly 0 (account closes). 5 000 = the exact base fee for 1 signature, so
+// sendAmount = balance - 5 000 drains the sender to exactly 0 — no rent violation.
+const FEE_BUFFER_LAMPORTS = 5_000
 
 type SenderInput  = { walletId: string }
 type SenderResult = { walletId: string; success: boolean; swept?: number; signature?: string; error?: string }
@@ -35,11 +37,12 @@ export async function POST(request: Request) {
     try {
         receiverPubkey = await parseAndValidateAddress(receiverPublicKey)
     } catch (err) {
-        return handleError(err)
+        return new Response(JSON.stringify({ error: err instanceof Error ? err.message : 'Invalid receiver address.' }), {
+            status: 400, headers: { 'Content-Type': 'application/json' },
+        })
     }
 
-    const solana     = initializeQuickNodeSolana()
-    const connection = solana.connection
+    const { connection } = initializeQuickNodeSolana()
     const results: SenderResult[] = []
 
     for (let i = 0; i < senders.length; i++) {
@@ -59,7 +62,10 @@ export async function POST(request: Request) {
                 continue
             }
 
-            const transaction = new Transaction()
+            const { blockhash } = await connection.getLatestBlockhash('confirmed')
+            const transaction   = new Transaction()
+            transaction.recentBlockhash = blockhash
+            transaction.feePayer        = senderKeypair.publicKey
             transaction.add(
                 SystemProgram.transfer({
                     fromPubkey: senderKeypair.publicKey,
@@ -68,11 +74,12 @@ export async function POST(request: Request) {
                 })
             )
 
-            const signature = await solana.sendSmartTransaction({
+            const signature = await sendAndConfirmTransaction(
+                connection,
                 transaction,
-                keyPair:  senderKeypair,
-                feeLevel: 'recommended',
-            })
+                [senderKeypair],
+                { commitment: 'confirmed' },
+            )
 
             results.push({ walletId, success: true, swept: sendAmount, signature })
         } catch (err) {

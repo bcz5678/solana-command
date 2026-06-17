@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import type { WalletRecord } from '@/lib/types/wallet'
 import { lamportsStringToBN, lamportsBNToSolDisplay } from '@/lib/lamports'
 
-// Base fee (5 000) + priority fee headroom — mirrors consolidateSOL's txFeeBufferLamports
+// Base fee (~5 000) + priority fee headroom for sendSmartTransaction
 const FEE_BUFFER_LAMPORTS = 10_000
 import { Button } from '@/components/ui/button'
 import { FieldLabel } from '@/components/ui/field'

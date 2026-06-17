@@ -32,8 +32,8 @@ import {
 } from '@/components/ui/tooltip'
 import { Copy, ExternalLink } from 'lucide-react'
 
-// Mirrors consolidateSOL's txFeeBufferLamports
-const FEE_BUFFER_LAMPORTS = 10_000
+// Must match the API route — base fee for 1 signature, drains sender to exactly 0
+const FEE_BUFFER_LAMPORTS = 5_000
 
 type WalletTypeRow = { id: string; name: string }
 
