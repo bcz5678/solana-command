@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { S3Client, PutObjectCommand, S3ServiceException } from '@aws-sdk/client-s3'
 import { createClient } from '@/lib/supabase/server'
 import { requireSuperAdmin } from '@/lib/auth/require-super-admin'
-import { TokenMint } from '@/lib/types/token-mint'
+import { TokenMint, TokenMetaDTO } from '@/lib/types/token-mint'
 
 export const dynamic = 'force-dynamic'
 
@@ -64,19 +64,20 @@ export async function POST(req: NextRequest) {
   const s3Key = token.metadata_uri.slice(bucketBase.length)
 
   // ── 5. Build meta payload matching the original structure ──
-  const meta = {
+  const meta: TokenMetaDTO = {
     name:            token.token_name,
     symbol:          token.token_symbol,
+    showName:        true,
     description:     token.description,
     image:           token.logo_url,
     banner:          token.banner_url,
-    websiteUrl:      token.website_url,
-    twitterUrl:      token.twitter_url,
-    telegramHandle:  token.telegram_handle,
-    tiktokUrl:       token.tiktok_url,
-    instagramUrl:    token.instagram_url,
-    discordUrl:      token.discord_url,
-    communitiesUrl:  token.communities_url,
+    website:         token.website_url,
+    twitter:         token.twitter_url,
+    telegram:        token.telegram_handle,
+    tiktok:          token.tiktok_url,
+    instagram:       token.instagram_url,
+    discord:         token.discord_url,
+    coin_community:  token.communities_url,
   }
 
   // ── 6. Overwrite S3 object (PutObject replaces existing) ───

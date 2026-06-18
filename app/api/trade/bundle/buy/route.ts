@@ -42,11 +42,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { feePayerWalletId, jitoTipInLamports, tradesList, useJito = true, useQuicknodeJito = true } = body
+  const { jitoTipInLamports, tradesList, useJito = true, useQuicknodeJito = true } = body
 
-  if (!feePayerWalletId || !jitoTipInLamports || !tradesList?.length) {
+  if (!jitoTipInLamports || !tradesList?.length) {
     return NextResponse.json(
-      { error: 'feePayerWalletId, jitoTipInLamports, and tradesList are required' },
+      { error: 'jitoTipInLamports and tradesList are required' },
       { status: 400 },
     )
   }
@@ -58,19 +58,16 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  let feePayerKeypair: Keypair | null = null
   const tradeKeypairs: Keypair[] = []
 
   try {
     const connection = initializeQuickNodeSolana().connection
     const onlineSdk  = new OnlinePumpSdk(connection)
 
-    // Fetch all keypairs in parallel (shared by all paths)
-    const [feePayer, ...walletKps] = await Promise.all([
-      getWalletKeypairById(feePayerWalletId),
-      ...tradesList.map((t) => getWalletKeypairById(t.walletId)),
-    ])
-    feePayerKeypair = feePayer
+    // Fetch all trade keypairs in parallel
+    const walletKps = await Promise.all(
+      tradesList.map((t) => getWalletKeypairById(t.walletId)),
+    )
     tradeKeypairs.push(...walletKps)
 
     // ── QuickNode Lil Jito path (1–20 wallet bundle, packed via ALTs) ──────────
@@ -170,7 +167,7 @@ export async function POST(req: NextRequest) {
             const altResolver = new JitoExecutor({
               blockEngineUrl: BLOCK_ENGINE_URL,
               connection,
-              payer:          feePayerKeypair!,
+              payer:          tradeKeypairs[0],
               tipLamports:    Number(jitoTipInLamports),
             })
             const allIxs = walletIxSets.flatMap(w => w.ixs)
@@ -193,7 +190,7 @@ export async function POST(req: NextRequest) {
 
       const tipPublicKey = new PublicKey(tipAccount as string)
 
-      // Pack wallets into batches — fee payer signs each tx, trade wallets co-sign
+      // Pack wallets into batches — each batch's first wallet pays tx fee; last wallet overall pays tip inline
       const batches: WalletIxSet[][] = []
       for (let i = 0; i < walletIxSets.length; i += WALLETS_PER_BATCH) {
         batches.push(walletIxSets.slice(i, i + WALLETS_PER_BATCH))
@@ -203,26 +200,28 @@ export async function POST(req: NextRequest) {
       const encodedTxs: string[] = []
 
       for (let b = 0; b < batches.length; b++) {
-        const batch      = batches[b]
+        const batch       = batches[b]
         const isLastBatch = b === batches.length - 1
-        const batchIxs   = batch.flatMap(({ ixs }) => ixs)
+        const batchIxs    = batch.flatMap(({ ixs }) => ixs)
+        const batchPayer  = batch[0].wallet
+        const lastWallet  = batch[batch.length - 1].wallet
 
         const txIxs = isLastBatch
           ? [...batchIxs, SystemProgram.transfer({
-              fromPubkey: feePayerKeypair!.publicKey,
+              fromPubkey: lastWallet.publicKey,
               toPubkey:   tipPublicKey,
               lamports:   Number(jitoTipInLamports),
             })]
           : batchIxs
 
         const message = new TransactionMessage({
-          payerKey:        feePayerKeypair!.publicKey,
+          payerKey:        batchPayer.publicKey,
           recentBlockhash: blockhash,
           instructions:    txIxs,
         }).compileToV0Message(idealALTs)
 
         const tx      = new VersionedTransaction(message)
-        const signers = [feePayerKeypair!, ...batch.map(({ wallet }) => wallet)]
+        const signers = batch.map(({ wallet }) => wallet)
         tx.sign(signers)
 
         for (const { wallet } of batch) signerAddresses.push(wallet.publicKey.toBase58())
@@ -303,7 +302,7 @@ export async function POST(req: NextRequest) {
       const executor = new JitoExecutor({
         blockEngineUrl: BLOCK_ENGINE_URL,
         connection:     connection,
-        payer:          feePayerKeypair,
+        payer:          tradeKeypairs[0],
         tipLamports:    Number(jitoTipInLamports),
       })
 
@@ -404,7 +403,6 @@ export async function POST(req: NextRequest) {
     const message = err instanceof Error ? err.message : 'Bundle buy failed'
     return NextResponse.json({ error: message }, { status: 500 })
   } finally {
-    feePayerKeypair?.secretKey.fill(0)
     for (const kp of tradeKeypairs) kp.secretKey.fill(0)
   }
 }

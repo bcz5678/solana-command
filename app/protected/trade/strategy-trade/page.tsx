@@ -3,16 +3,16 @@
 import { useState } from 'react'
 import BundleTradesWizard   from '@/components/trade/strategy-trade/wizards/bundle-trades-wizard'
 import StaggeredBuyWizard   from '@/components/trade/strategy-trade/wizards/staggered-buy-wizard'
-import NaturalVolumeWizard  from '@/components/trade/strategy-trade/wizards/natural-volume-wizard'
+import HumanVolumeWizard  from '@/components/trade/strategy-trade/wizards/human-volume-wizard'
 import TrendingVolumeWizard from '@/components/trade/strategy-trade/wizards/trending-volume-wizard'
 import HoldersMakerWizard   from '@/components/trade/strategy-trade/wizards/holders-maker-wizard'
 
-type StrategyKey = 'bundle' | 'staggered' | 'natural' | 'trending' | 'holders'
+type StrategyKey = 'bundle' | 'staggered' | 'human' | 'trending' | 'holders'
 
 const strategies: { key: StrategyKey; label: string; description: string }[] = [
     { key: 'bundle',    label: 'Bundle Trades',   description: 'Execute coordinated multi-wallet buys in a single bundle' },
     { key: 'staggered', label: 'Staggered Buy',   description: 'Spread purchases across time to reduce price impact' },
-    { key: 'natural',   label: 'Natural Volume',  description: 'Generate organic-looking trading volume patterns' },
+    { key: 'human',   label: 'Human Volume',  description: 'Generate human-looking trading volume patterns' },
     { key: 'trending',  label: 'Trending Volume', description: 'Boost volume to push a token into trending lists' },
     { key: 'holders',   label: 'Holders Maker',   description: 'Distribute tokens to grow the unique holder count' },
 ]
@@ -20,7 +20,7 @@ const strategies: { key: StrategyKey; label: string; description: string }[] = [
 const wizards: Record<StrategyKey, React.ComponentType> = {
     bundle:    BundleTradesWizard,
     staggered: StaggeredBuyWizard,
-    natural:   NaturalVolumeWizard,
+    human:   HumanVolumeWizard,
     trending:  TrendingVolumeWizard,
     holders:   HoldersMakerWizard,
 }

@@ -1,13 +1,16 @@
 import { S3Client, PutObjectCommand, S3ServiceException } from '@aws-sdk/client-s3'
+import { TokenMetaDTO } from '@/lib/types/token-mint'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request): Promise<Response> {
-    const body = await request.json()
+    const body: { filename?: string; meta?: TokenMetaDTO } = await request.json()
 
     if (!body || !body.filename || !body.meta) {
         return Response.json({ error: 'filename and meta are required' }, { status: 400 })
     }
+
+    console.log(`body.meta: ${JSON.stringify(body.meta)}`);
 
     const s3Client = new S3Client({
         region: process.env.AWS_S3_REGION,

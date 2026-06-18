@@ -60,7 +60,6 @@ export default function BotStatusPanel({ status, isLoading, canStart, onStart, o
     return (
         <div className="flex flex-col gap-4">
 
-            {/* Top bar: status indicator + action buttons */}
             <div className="flex items-center justify-between gap-4 flex-wrap">
                 <div className="flex items-center gap-2.5">
                     <span className={`inline-block size-2 rounded-full ${running ? 'bg-emerald-500 animate-pulse' : 'bg-muted-foreground/30'}`} />
@@ -138,7 +137,6 @@ export default function BotStatusPanel({ status, isLoading, canStart, onStart, o
                 </div>
             </div>
 
-            {/* State tally */}
             {pool.length > 0 && (
                 <div className="flex items-center gap-4 flex-wrap">
                     {(Object.entries(counts) as [WalletState, number][]).map(([state, n]) => (
@@ -150,7 +148,6 @@ export default function BotStatusPanel({ status, isLoading, canStart, onStart, o
                 </div>
             )}
 
-            {/* Wallet pool table */}
             {pool.length > 0 && (
                 <div className="rounded-lg border border-border overflow-hidden text-xs">
                     <table className="w-full">

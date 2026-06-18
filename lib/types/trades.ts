@@ -13,7 +13,6 @@ export interface SellTokenBody {
 }
 
 export interface BundleBuyBody {
-  feePayerWalletId:  string
   jitoTipInLamports: string   // lamports as decimal string — BN can't cross JSON
   tradesList:        BuyTokenBody[]
   /** Set false to bypass Jito entirely and submit via sendRawTransaction (diagnostic mode) */
@@ -23,7 +22,6 @@ export interface BundleBuyBody {
 }
 
 export interface BundleSellBody {
-  feePayerWalletId:  string
   jitoTipInLamports: string   // lamports as decimal string — BN can't cross JSON
   tradesList:        SellTokenBody[]
   /** Set false to bypass Jito entirely and submit via sendRawTransaction (diagnostic mode) */

@@ -6,16 +6,6 @@ import WizardShell, { WizardStep } from './wizard-shell'
 import StrategyWalletSelector from '@/components/trade/strategy-trade/strategy-wallet-selector'
 import { solStringToLamports, lamportsBNToSolDisplay, lamportsStringToBN } from '@/lib/lamports'
 import { WalletRecord } from '@/lib/types/wallet'
-import {
-    Select,
-    SelectContent,
-    SelectGroup,
-    SelectItem,
-    SelectLabel,
-    SelectSeparator,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select'
 import { SlippageControl } from '@/components/trade/trade/SlippageControl'
 import { TokenMintInput } from '@/components/trade/strategy-trade/TokenMintInput'
 
@@ -95,9 +85,8 @@ export default function BundleTradesWizard() {
     const [rangeMax, setRangeMax]               = useState('')
     const [maxSolEnabled, setMaxSolEnabled]     = useState(false)
     const [maxSolTotal, setMaxSolTotal]         = useState('')
-    const [wallets, setWallets]                 = useState<WalletRecord[]>([])
-    const [tipPayerWalletId, setTipPayerWalletId] = useState('')
-    const [slippage, setSlippage]                 = useState(0.01)
+    const [wallets, setWallets]   = useState<WalletRecord[]>([])
+    const [slippage, setSlippage] = useState(0.01)
     const [sellPct, setSellPct]                   = useState('')
     const [tokenMint, setTokenMint]               = useState('')
     const [tokenResolved, setTokenResolved]       = useState(false)
@@ -126,18 +115,6 @@ export default function BundleTradesWizard() {
             .catch(() => {})
     }, [])
 
-    const tipPayerGroups = useMemo<[string, WalletRecord[]][]>(() => {
-        const withSol = wallets.filter(
-            (w) => w.solana_balance_in_lamports != null && w.solana_balance_in_lamports.gtn(0),
-        )
-        const map: Record<string, WalletRecord[]> = {}
-        for (const w of withSol) {
-            const key = w.wallet_type ?? 'Other'
-            ;(map[key] ??= []).push(w)
-        }
-        return Object.entries(map)
-    }, [wallets])
-
     const jitoTipLamports = useMemo((): BN | null => {
         if (tipMode === 'fixed') {
             const v = jitoTipSol.trim()
@@ -156,7 +133,6 @@ export default function BundleTradesWizard() {
             ? jitoTipLamports !== null && jitoTipLamports.gtn(0)
             : tipFloorData !== null
         if (!tipOk) return false
-        if (!tipPayerWalletId) return false
         if (selectedWallets.size === 0) return false
         if (tradeType === 'buy') {
             if (randomRange) {
@@ -169,7 +145,7 @@ export default function BundleTradesWizard() {
             }
         }
         return true
-    }, [step, tradeType, tokenResolved, randomRange, rangeMin, rangeMax, maxSolEnabled, maxSolTotal, slippage, tipMode, jitoTipLamports, tipFloorData, tipPayerWalletId, selectedWallets])
+    }, [step, tradeType, tokenResolved, randomRange, rangeMin, rangeMax, maxSolEnabled, maxSolTotal, slippage, tipMode, jitoTipLamports, tipFloorData, selectedWallets])
 
     async function fetchTipFloor() {
         setTipFloorLoading(true)
@@ -391,7 +367,6 @@ export default function BundleTradesWizard() {
                 method:  'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body:    JSON.stringify({
-                    feePayerWalletId:  tipPayerWalletId,
                     jitoTipInLamports: jitoTipLamports.toString(),
                     tradesList: tradesList,
                 }),
@@ -594,7 +569,7 @@ export default function BundleTradesWizard() {
 
                         </div>
 
-                        {/* Row 3: Jito Tip + Tip Payer */}
+                        {/* Row 3: Jito Tip */}
                         <div className="flex flex-wrap items-start gap-8">
 
                             {/* Jito Tip */}
@@ -669,36 +644,6 @@ export default function BundleTradesWizard() {
                                 )}
                             </div>
 
-                            {/* Tip Payer */}
-                            <div className="flex flex-col gap-1.5">
-                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Tip Payer</span>
-                                <Select value={tipPayerWalletId} onValueChange={setTipPayerWalletId}>
-                                    <SelectTrigger className="h-9 text-xs w-52">
-                                        <SelectValue placeholder="Select wallet" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {tipPayerGroups.map(([typeName, group], i) => (
-                                            <SelectGroup key={typeName}>
-                                                {i > 0 && <SelectSeparator />}
-                                                <SelectLabel>{typeName}</SelectLabel>
-                                                {group.map((w) => (
-                                                    <SelectItem key={w.id} value={w.id}>
-                                                        {w.label ? `${w.label} · ` : ''}
-                                                        {maskPubKey(w.public_key)}
-                                                        {' · '}
-                                                        {lamportsBNToSolDisplay(w.solana_balance_in_lamports!)} SOL
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectGroup>
-                                        ))}
-                                        {tipPayerGroups.length === 0 && (
-                                            <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-                                                No wallets with SOL found
-                                            </div>
-                                        )}
-                                    </SelectContent>
-                                </Select>
-                            </div>
 
                         </div>
 
@@ -742,7 +687,6 @@ export default function BundleTradesWizard() {
                     </div>
                 )}
                 {step === 1 && (() => {
-                    const tipPayerWallet = wallets.find((w) => w.id === tipPayerWalletId)
                     const selectedArr = [...selectedWallets]
                     const totalBuySol = selectedArr.reduce((s, id) => s + (parseFloat(tradeAmounts[id] ?? '0') || 0), 0)
                     const floorLabel = FLOOR_OPTIONS.find((f) => f.key === floorPercentile)?.label
@@ -807,19 +751,6 @@ export default function BundleTradesWizard() {
                                         )}
                                     </span>
                                 </div>
-                                {tipPayerWallet && (
-                                    <div className="flex items-center gap-3 px-4 py-2.5">
-                                        <span className="w-28 shrink-0 font-medium text-muted-foreground">Tip Payer</span>
-                                        <span className="font-mono text-foreground text-[11px]">
-                                            {tipPayerWallet.label && (
-                                                <span className="font-sans text-xs">{tipPayerWallet.label} · </span>
-                                            )}
-                                            {maskPubKey(tipPayerWallet.public_key)}
-                                            {' · '}
-                                            <span className="tabular-nums">{lamportsBNToSolDisplay(tipPayerWallet.solana_balance_in_lamports!)} SOL</span>
-                                        </span>
-                                    </div>
-                                )}
                             </div>
 
                             {/* Wallet table */}

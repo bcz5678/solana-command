@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from "react";
 import type { WalletRecord } from "@/lib/types/wallet";
 import { useForm, Controller, SubmitHandler } from "react-hook-form";
 import { Button } from "@/components/ui/button";
@@ -42,11 +42,17 @@ interface CreateTokenFormProps {
     isSubmitting?: boolean;
 }
 
+export interface CreateTokenFormHandle {
+    setField:     (field: keyof CreateTokenFormInput, value: string) => void;
+    setLogoFile:  (file: File) => void;
+    setBannerFile: (file: File) => void;
+}
+
 function truncate(key: string) {
     return `${key.slice(0, 8)}...${key.slice(-8)}`;
 }
 
-export default function CreateTokenForm({ onSubmit, isSubmitting = false }: CreateTokenFormProps) {
+const CreateTokenForm = forwardRef<CreateTokenFormHandle, CreateTokenFormProps>(function CreateTokenForm({ onSubmit, isSubmitting = false }, ref) {
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
     const [isDragging, setIsDragging] = useState(false);
@@ -70,7 +76,7 @@ export default function CreateTokenForm({ onSubmit, isSubmitting = false }: Crea
         }, {})
     );
 
-    const { register, handleSubmit, control, formState: { errors } } = useForm<CreateTokenFormInput>();
+    const { register, handleSubmit, control, setValue, formState: { errors } } = useForm<CreateTokenFormInput>();
 
     useEffect(() => {
         fetch('/api/wallets/explorer')
@@ -123,6 +129,12 @@ export default function CreateTokenForm({ onSubmit, isSubmitting = false }: Crea
         }
     };
 
+    useImperativeHandle(ref, () => ({
+        setField: (field, value) => setValue(field, value, { shouldDirty: true }),
+        setLogoFile: handleFileSelect,
+        setBannerFile: handleBannerFileSelect,
+    }), [setValue]);
+
     const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault();
         setIsDragging(false);
@@ -136,7 +148,7 @@ export default function CreateTokenForm({ onSubmit, isSubmitting = false }: Crea
     };
 
     return (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="w-full">
             <form onSubmit={handleSubmit(handleFormSubmit)}>
 
                 <p className="mt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -449,4 +461,6 @@ export default function CreateTokenForm({ onSubmit, isSubmitting = false }: Crea
             </form>
         </div>
     );
-}
+});
+
+export default CreateTokenForm;

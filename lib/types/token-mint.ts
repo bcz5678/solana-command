@@ -41,22 +41,24 @@ export interface TokenMint {
 
 
 export interface TokenMetaDTO {
-    name: string
-    symbol: string
-    description:      string | null
-    logo_url:          string | null
-    banner_url:        string | null
+    name:               string
+    symbol:             string
+    showName:           boolean
+    description:        string | null
+    image:              string | null
+    banner:             string | null
+  
 
     // Primary links
-    website_url:       string | null   // ← now wired
-    twitter_url:       string | null   // ← now wired
-    telegram_handle:   string | null   // ← now wired
+    website:            string | null
+    twitter:            string | null
+    telegram:           string | null
 
     // Social links
-    tiktok_url:        string | null
-    instagram_url:     string | null
-    discord_url:       string | null
-    communities_url:   string | null
+    tiktok:             string | null
+    instagram:          string | null
+    discord:            string | null
+    coin_community:     string | null
 }
 
 
@@ -67,4 +69,5 @@ export interface BaseTokenDTO {
     symbol: string;
     contract_address: string | null;
 }
+
 

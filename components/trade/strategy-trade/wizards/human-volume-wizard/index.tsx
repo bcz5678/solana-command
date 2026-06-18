@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { TokenMintInput } from '@/components/trade/strategy-trade/TokenMintInput'
 import StrategyWalletSelector from '@/components/trade/strategy-trade/strategy-wallet-selector'
-import BotConfigPanel, { BotConfigState, DEFAULT_BOT_CONFIG } from '@/components/auto/human/bot-config-panel'
-import BotStatusPanel, { BotStatusResponse } from '@/components/auto/human/bot-status-panel'
+import BotConfigPanel, { BotConfigState, DEFAULT_BOT_CONFIG } from './bot-config-panel'
+import BotStatusPanel, { BotStatusResponse } from './bot-status-panel'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { lamportsStringToBN } from '@/lib/lamports'
 import type { WalletRecord } from '@/lib/types/wallet'
@@ -15,27 +15,23 @@ function solToLamports(sol: string): number {
     return Math.round(parseFloat(sol) * 1_000_000_000)
 }
 
-export default function HumanVolumeBotPage() {
-    // ── Token ──────────────────────────────────────────────────────────────────
+export default function HumanVolumeWizard() {
     const [tokenMint,     setTokenMint]     = useState('')
     const [tokenResolved, setTokenResolved] = useState(false)
     const [tokenName,     setTokenName]     = useState('')
     const [tokenSymbol,   setTokenSymbol]   = useState('')
 
-    // ── Config ─────────────────────────────────────────────────────────────────
     const [config, setConfig] = useState<BotConfigState>(DEFAULT_BOT_CONFIG)
 
     const handleConfigChange = useCallback((key: keyof BotConfigState, value: string) => {
         setConfig(prev => ({ ...prev, [key]: value }))
     }, [])
 
-    // ── Wallets ────────────────────────────────────────────────────────────────
     const [wallets,         setWallets]         = useState<WalletRecord[]>([])
     const [walletsLoading,  setWalletsLoading]  = useState(false)
     const [fundingWalletId, setFundingWalletId] = useState('')
     const [poolWalletIds,   setPoolWalletIds]   = useState<Set<string>>(new Set())
 
-    // Fetch wallet list for funding wallet dropdown + public key lookup on submit
     useEffect(() => {
         setWalletsLoading(true)
         fetch('/api/wallets/explorer')
@@ -53,7 +49,6 @@ export default function HumanVolumeBotPage() {
             .finally(() => setWalletsLoading(false))
     }, [])
 
-    // Drop funding wallet from pool selection if user accidentally picks the same one
     useEffect(() => {
         if (fundingWalletId && poolWalletIds.has(fundingWalletId)) {
             setPoolWalletIds(prev => {
@@ -64,7 +59,6 @@ export default function HumanVolumeBotPage() {
         }
     }, [fundingWalletId, poolWalletIds])
 
-    // ── Bot status + polling ───────────────────────────────────────────────────
     const [botStatus, setBotStatus] = useState<BotStatusResponse | null>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [error,     setError]     = useState('')
@@ -88,13 +82,10 @@ export default function HumanVolumeBotPage() {
         return () => { if (pollRef.current) clearInterval(pollRef.current) }
     }, [botStatus?.running, fetchStatus])
 
-    // ── Derived ────────────────────────────────────────────────────────────────
     const isRunning     = botStatus?.running ?? false
     const fundingWallet = wallets.find(w => w.id === fundingWalletId)
+    const canStart      = tokenResolved && !!fundingWalletId && poolWalletIds.size >= 2 && !isRunning
 
-    const canStart = tokenResolved && !!fundingWalletId && poolWalletIds.size >= 2 && !isRunning
-
-    // ── Handlers ───────────────────────────────────────────────────────────────
     async function handleStart() {
         if (!canStart || !fundingWallet) return
         setError('')
@@ -191,26 +182,15 @@ export default function HumanVolumeBotPage() {
         }
     }
 
-    // ── Render ─────────────────────────────────────────────────────────────────
     return (
-        <div className="flex flex-col gap-6 p-6 w-full min-h-0">
+        <div className="flex flex-col gap-6 w-full min-h-0">
 
-            {/* Header */}
-            <div>
-                <h1 className="text-lg font-semibold">Human Volume Bot</h1>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                    Rolling buy/sell cycles on pump.fun bonding curve via Jito bundles
-                </p>
-            </div>
-
-            {/* Error banner */}
             {error && (
                 <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                     {error}
                 </div>
             )}
 
-            {/* Status + Controls */}
             <div className="rounded-lg border border-border p-4">
                 <BotStatusPanel
                     status={botStatus}
@@ -223,7 +203,6 @@ export default function HumanVolumeBotPage() {
                 />
             </div>
 
-            {/* Row: Token + Funding Wallet */}
             <div className="rounded-lg border border-border p-4">
                 <p className="text-xs font-semibold mb-4">Target</p>
                 <div className="flex flex-wrap gap-6">
@@ -283,7 +262,6 @@ export default function HumanVolumeBotPage() {
                 </div>
             </div>
 
-            {/* Row: Bot Configuration (full width, 4 inputs per row) */}
             <div className="rounded-lg border border-border p-4">
                 <p className="text-xs font-semibold mb-4">Bot Configuration</p>
                 <BotConfigPanel
@@ -293,7 +271,6 @@ export default function HumanVolumeBotPage() {
                 />
             </div>
 
-            {/* Pool Wallet Selector */}
             <div className="flex flex-col gap-2">
                 <div className="flex items-center justify-between">
                     <p className="text-xs font-semibold">Pool Wallets</p>
