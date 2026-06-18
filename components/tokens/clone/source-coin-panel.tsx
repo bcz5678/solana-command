@@ -71,10 +71,6 @@ export function clonableCoinFromOnChainAsset(
 type Props = {
     coin:    ClonableCoin
     formRef: RefObject<CreateTokenFormHandle | null>
-    // 'proxy' fetches through our server (only safe for our own S3 bucket).
-    // 'direct' fetches from the browser — required for arbitrary on-chain
-    // asset URLs, since proxying attacker-influenced URLs server-side is an SSRF risk.
-    assetFetchMode?: 'proxy' | 'direct'
 }
 
 type TextRow = {
@@ -97,12 +93,13 @@ type ImageRow = {
 
 type Row = TextRow | ImageRow
 
-async function fetchAsFile(url: string, fallbackName: string, mode: 'proxy' | 'direct'): Promise<File> {
-    const fetchUrl = mode === 'proxy'
-        ? `/api/token-mint/fetch-asset?url=${encodeURIComponent(url)}`
-        : url
-    const res = await fetch(fetchUrl)
-    if (!res.ok) throw new Error(`Failed to fetch asset (${res.status})`)
+async function fetchAsFile(url: string, fallbackName: string): Promise<File> {
+    const proxied = `/api/token-mint/fetch-asset?url=${encodeURIComponent(url)}`
+    const res = await fetch(proxied)
+    if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        throw new Error(body?.error ?? `Failed to fetch asset (${res.status})`)
+    }
     const blob = await res.blob()
     const name = decodeURIComponent(url.split('/').pop() ?? fallbackName)
     return new File([blob], name, { type: blob.type })
@@ -149,7 +146,7 @@ function DownloadButton({ disabled, onClick }: { disabled?: boolean; onClick: ()
     )
 }
 
-export default function SourceCoinPanel({ coin, formRef, assetFetchMode = 'proxy' }: Props) {
+export default function SourceCoinPanel({ coin, formRef }: Props) {
     const [imageBusy, setImageBusy]     = useState(false)
     const [bannerBusy, setBannerBusy]   = useState(false)
     const [imageError, setImageError]   = useState<string | null>(null)
@@ -160,7 +157,7 @@ export default function SourceCoinPanel({ coin, formRef, assetFetchMode = 'proxy
         setImageBusy(true)
         setImageError(null)
         try {
-            const file = await fetchAsFile(coin.logoUrl, `${coin.symbol ?? 'token'}_logo.png`, assetFetchMode)
+            const file = await fetchAsFile(coin.logoUrl, `${coin.symbol ?? 'token'}_logo.png`)
             formRef.current?.setLogoFile(file)
         } catch (err) {
             setImageError(err instanceof Error ? err.message : 'Failed to copy image')
@@ -174,7 +171,7 @@ export default function SourceCoinPanel({ coin, formRef, assetFetchMode = 'proxy
         setImageBusy(true)
         setImageError(null)
         try {
-            const file = await fetchAsFile(coin.logoUrl, `${coin.symbol ?? 'token'}_logo.png`, assetFetchMode)
+            const file = await fetchAsFile(coin.logoUrl, `${coin.symbol ?? 'token'}_logo.png`)
             triggerDownload(file)
         } catch (err) {
             setImageError(err instanceof Error ? err.message : 'Failed to download image')
@@ -188,7 +185,7 @@ export default function SourceCoinPanel({ coin, formRef, assetFetchMode = 'proxy
         setBannerBusy(true)
         setBannerError(null)
         try {
-            const file = await fetchAsFile(coin.bannerUrl, `${coin.symbol ?? 'token'}_banner.png`, assetFetchMode)
+            const file = await fetchAsFile(coin.bannerUrl, `${coin.symbol ?? 'token'}_banner.png`)
             formRef.current?.setBannerFile(file)
         } catch (err) {
             setBannerError(err instanceof Error ? err.message : 'Failed to copy banner')
@@ -202,7 +199,7 @@ export default function SourceCoinPanel({ coin, formRef, assetFetchMode = 'proxy
         setBannerBusy(true)
         setBannerError(null)
         try {
-            const file = await fetchAsFile(coin.bannerUrl, `${coin.symbol ?? 'token'}_banner.png`, assetFetchMode)
+            const file = await fetchAsFile(coin.bannerUrl, `${coin.symbol ?? 'token'}_banner.png`)
             triggerDownload(file)
         } catch (err) {
             setBannerError(err instanceof Error ? err.message : 'Failed to download banner')

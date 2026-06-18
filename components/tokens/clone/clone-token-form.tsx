@@ -168,7 +168,7 @@ export default function CloneTokenForm({ onSubmit, isSubmitting = false }: Props
             {/* Mint address looked up — on-chain metadata, duplicate workflow */}
             {!selectedToken && onChainCoin && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <SourceCoinPanel coin={onChainCoin} formRef={formRef} assetFetchMode="direct" />
+                    <SourceCoinPanel coin={onChainCoin} formRef={formRef} />
                     <CreateTokenForm ref={formRef} onSubmit={onSubmit} isSubmitting={isSubmitting} />
                 </div>
             )}
