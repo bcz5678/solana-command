@@ -1,0 +1,56 @@
+import BN from 'bn.js'
+
+// Free tier by default — set JUPITER_API_URL=https://api.jup.ag and JUPITER_API_KEY
+// to switch to the paid tier (higher rate limits, priority routing).
+const JUPITER_API_URL = process.env.JUPITER_API_URL ?? 'https://lite-api.jup.ag'
+
+export const WRAPPED_SOL_MINT = 'So11111111111111111111111111111111111111112'
+
+export interface JupiterQuote {
+  inputMint: string
+  outputMint: string
+  inAmount: string
+  outAmount: string
+  [key: string]: unknown
+}
+
+interface JupiterSwapResponse {
+  swapTransaction: string
+  lastValidBlockHeight: number
+}
+
+async function jupiterFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) }
+  if (process.env.JUPITER_API_KEY) headers['x-api-key'] = process.env.JUPITER_API_KEY
+
+  const res = await fetch(`${JUPITER_API_URL}${path}`, { ...init, headers })
+  if (!res.ok) {
+    throw new Error(`Jupiter ${path} failed: HTTP ${res.status} ${await res.text().catch(() => '')}`)
+  }
+  return res.json()
+}
+
+/** amount is in the input mint's raw units (lamports for SOL). */
+export function getJupiterQuote(
+  inputMint: string,
+  outputMint: string,
+  amount: BN,
+  slippageBps: number,
+): Promise<JupiterQuote> {
+  const params = new URLSearchParams({
+    inputMint,
+    outputMint,
+    amount: amount.toString(),
+    slippageBps: String(slippageBps),
+  })
+  return jupiterFetch<JupiterQuote>(`/swap/v1/quote?${params}`)
+}
+
+/** Returns a fully-built, base64-encoded VersionedTransaction — sign and send it as-is. */
+export function getJupiterSwapTransaction(quote: JupiterQuote, userPublicKey: string): Promise<JupiterSwapResponse> {
+  return jupiterFetch<JupiterSwapResponse>('/swap/v1/swap', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ quoteResponse: quote, userPublicKey, wrapAndUnwrapSol: true }),
+  })
+}

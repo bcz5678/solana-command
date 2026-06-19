@@ -20,7 +20,7 @@ const ws = new WebSocket('ws://localhost:3099/ws');
 On connect, before anything live, the server sends (in order):
 1. One `status` message — current snapshot.
 2. Up to the last 50 `token-launch` events.
-3. Up to the last 50 `coin-transaction` events (from currently/previously watched mints).
+3. Up to the last 50 `token-transaction` events (from currently/previously watched mints).
 4. Up to the last 50 `wallet-transaction` events (from currently/previously watched wallets).
 
 After that backfill, you receive events live as they happen, plus a periodic `status` every 10s and a `heartbeat` every 15s (heartbeats exist purely to keep the socket alive through proxies — no payload to act on).
@@ -81,13 +81,13 @@ Emitted when PumpFun's API surfaces a new token (polled every 5s upstream). This
 | `githubUrls` | `string[]` | Extracted via regex from description/website/twitter/telegram/metadata |
 | `marketCapSol` | `number \| null` | One-time snapshot at detection time, **not live** |
 
-### `coin-transaction`
+### `token-transaction`
 
 Emitted for a transaction touching a mint you're watching (see [§3 Watching Mints](#watching-mints)). Requires the mint to be confirmed-subscribed first — see that section for the timing guarantee.
 
 ```json
 {
-  "type": "coin-transaction",
+  "type": "token-transaction",
   "signature": "4usy38y3...",
   "slot": 427374187,
   "timestamp": 1781819910,
@@ -123,7 +123,7 @@ Treat `priceSol: null` as "unknown," never as zero. Validated empirically: for a
 
 ### `wallet-transaction`
 
-Emitted for any transaction that changes the SOL or token balance of a wallet you're watching (see [§4 Watching Wallets](#watching-wallets)). Unlike `coin-transaction`, there's no buy/sell classification — a wallet isn't tied to one asset.
+Emitted for any transaction that changes the SOL or token balance of a wallet you're watching (see [§4 Watching Wallets](#watching-wallets)). Unlike `token-transaction`, there's no buy/sell classification — a wallet isn't tied to one asset.
 
 ```json
 {
@@ -181,30 +181,30 @@ No action needed beyond noting the connection is alive.
 
 ## 3. Watching Mints
 
-Watching a mint subscribes to its on-chain activity live — no historical backfill. If you know a mint address before its creation transaction lands (e.g. a pre-generated vanity address), watch it first and the creation tx itself will be caught as the first `coin-transaction` event.
+Watching a mint subscribes to its on-chain activity live — no historical backfill. If you know a mint address before its creation transaction lands (e.g. a pre-generated vanity address), watch it first and the creation tx itself will be caught as the first `token-transaction` event.
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| `GET` | `/watched` | — | `{ "mints": string[] }` |
-| `POST` | `/watch` | `{ "mint": "<base58 address>" }` | `{ "mints": string[] }` |
-| `POST` | `/unwatch` | `{ "mint": "<base58 address>" }` | `{ "mints": string[] }` |
+| `GET` | `/tokens/watched` | — | `{ "mints": string[] }` |
+| `POST` | `/tokens/watch` | `{ "mint": "<base58 address>" }` | `{ "mints": string[] }` |
+| `POST` | `/tokens/unwatch` | `{ "mint": "<base58 address>" }` | `{ "mints": string[] }` |
 
-**`POST /watch` blocks until the RPC node confirms the subscription is live.** A `200` response is a real guarantee — if your flow needs to broadcast an on-chain transaction immediately after subscribing (e.g. launching the token), it's safe to do so only after this call resolves, not before.
+**`POST /tokens/watch` blocks until the RPC node confirms the subscription is live.** A `200` response is a real guarantee — if your flow needs to broadcast an on-chain transaction immediately after subscribing (e.g. launching the token), it's safe to do so only after this call resolves, not before.
 
 Error responses:
 - `400 { "error": "mint must be a valid base58 Solana address" }` — bad input.
 - `504 { "error": "..." }` — the upstream Solana WebSocket isn't connected, or the RPC node didn't confirm in time (5s default). Retry, or check `/health`'s `solana` field first.
 
 ```bash
-curl -X POST http://localhost:3099/watch \
+curl -X POST http://localhost:3099/tokens/watch \
   -H "Content-Type: application/json" \
   -d '{"mint":"61V8vBaqAGMpgDQi4JcAwo1dmBGHsyhzodcPqnEVpump"}'
 # => {"mints":["61V8vBaqAGMpgDQi4JcAwo1dmBGHsyhzodcPqnEVpump"]}
 
-curl http://localhost:3099/watched
+curl http://localhost:3099/tokens/watched
 # => {"mints":["61V8vBaqAGMpgDQi4JcAwo1dmBGHsyhzodcPqnEVpump"]}
 
-curl -X POST http://localhost:3099/unwatch \
+curl -X POST http://localhost:3099/tokens/unwatch \
   -H "Content-Type: application/json" \
   -d '{"mint":"61V8vBaqAGMpgDQi4JcAwo1dmBGHsyhzodcPqnEVpump"}'
 # => {"mints":[]}
@@ -257,7 +257,7 @@ curl http://localhost:3099/health
 | `totalWalletTxs` | Cumulative watched-wallet transactions processed |
 | `uptime` | Seconds |
 
-Poll this before calling `/watch` if you need to confirm the upstream connection is up first (a `504` from `/watch` usually means `solana: false` here).
+Poll this before calling `/tokens/watch` if you need to confirm the upstream connection is up first (a `504` from `/tokens/watch` usually means `solana: false` here).
 
 ## 6. Reference Client (Node.js)
 
@@ -301,8 +301,8 @@ class RelayClient {
   }
 
   // Resolves once the subscription is confirmed live — safe to act on afterward.
-  watchMint(mint) { return this._post('/watch', { mint }); }
-  unwatchMint(mint) { return this._post('/unwatch', { mint }); }
+  watchMint(mint) { return this._post('/tokens/watch', { mint }); }
+  unwatchMint(mint) { return this._post('/tokens/unwatch', { mint }); }
   watchWallet(wallet) { return this._post('/wallets/watch', { wallet }); }
   unwatchWallet(wallet) { return this._post('/wallets/unwatch', { wallet }); }
 }
@@ -310,7 +310,7 @@ class RelayClient {
 // Usage:
 const relay = new RelayClient('http://localhost:3099');
 
-relay.on('coin-transaction', (e) => {
+relay.on('token-transaction', (e) => {
   if (e.priceSol === null) return; // unknown price — see §2 caveats
   console.log(`${e.txType} ${Math.abs(e.tokenAmount)} of ${e.mint} @ ${e.priceSol} SOL (mcap ${e.marketCapSol})`);
 });

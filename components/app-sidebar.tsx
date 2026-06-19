@@ -21,12 +21,16 @@ import {
 } from '@/components/ui/dropdown-menu'
 
 import { ChevronDown, Computer, Rocket, User2, Table} from "lucide-react"
+import { RelayStatusIndicator } from "@/components/wss/relay-status-indicator"
 
 
 export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader>
+        <div className="flex items-center justify-between px-2 py-1.5">
+          <RelayStatusIndicator />
+        </div>
         <SidebarMenu>
             <SidebarMenuItem className="flex items-center gap-2">
                 <DropdownMenu>

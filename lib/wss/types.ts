@@ -20,16 +20,16 @@ export interface TokenLaunchEvent {
   telegram: string | null
 }
 
-export type CoinTxType = 'buy' | 'sell' | 'transfer' | 'unknown'
+export type TokenTxType = 'buy' | 'sell' | 'transfer' | 'unknown'
 
-export interface CoinTransactionEvent {
-  type: 'coin-transaction'
+export interface TokenTransactionEvent {
+  type: 'token-transaction'
   signature: string
   slot: number
   timestamp: number
   mint: string
   wallet: string
-  txType: CoinTxType
+  txType: TokenTxType
   tokenAmount: number
   solAmount: number
   priceSol: number | null
@@ -68,7 +68,7 @@ export interface HeartbeatEvent {
 
 export type RelayMessage =
   | TokenLaunchEvent
-  | CoinTransactionEvent
+  | TokenTransactionEvent
   | WalletTransactionEvent
   | StatusEvent
   | HeartbeatEvent

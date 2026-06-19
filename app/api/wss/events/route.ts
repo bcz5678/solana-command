@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 
 const MESSAGE_TYPES: RelayMessage['type'][] = [
     'token-launch',
-    'coin-transaction',
+    'token-transaction',
     'wallet-transaction',
     'status',
     'heartbeat',

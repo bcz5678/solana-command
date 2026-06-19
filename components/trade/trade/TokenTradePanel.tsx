@@ -121,15 +121,16 @@ export function TokenTradePanel() {
     if (!mintAddress) return
 
     const mint = mintAddress
-    fetch('/api/wss/watch', {
+    fetch('/api/wss/tokens/watch', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ mint }),
     }).catch(() => {})
 
+
     return () => {
       if (liveRefetchDebounceRef.current) clearTimeout(liveRefetchDebounceRef.current)
-      fetch('/api/wss/unwatch', {
+      fetch('/api/wss/tokens/unwatch', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ mint }),
@@ -139,8 +140,12 @@ export function TokenTradePanel() {
 
   // Coalesce bursts of fills into one re-fetch — we only need the latest
   // bonding-curve state, not a patch per trade.
-  useRelayEvent('coin-transaction', (e) => {
+  useRelayEvent('token-transaction', (e) => {
     if (e.mint !== mintAddress) return
+
+       console.log(`TokenTradePanel -> liveRefetchDebounceRef.current : ${liveRefetchDebounceRef.current}`);
+
+       
     if (liveRefetchDebounceRef.current) clearTimeout(liveRefetchDebounceRef.current)
     liveRefetchDebounceRef.current = setTimeout(() => fetchToken(mintAddress), 600)
   })
@@ -414,7 +419,7 @@ export function TokenTradePanel() {
               Token Graduated
             </strong>
             <p className="m-0 text-xs text-amber-700 leading-relaxed">
-              This token has moved to Raydium AMM. Trades will be routed via the AMM automatically.
+              This token has graduated off the bonding curve. Trades will be routed automatically via Jupiter.
             </p>
           </div>
         </div>

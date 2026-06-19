@@ -102,19 +102,19 @@ export class RelayClient {
     return json as T
   }
 
-  // ─── Mints (§3) ───────────────────────────────────────────────
+  // ─── Tokens (§3) ──────────────────────────────────────────────
 
   getWatchedMints(): Promise<WatchedMintsResponse> {
-    return this.get('/watched')
+    return this.get('/tokens/watched')
   }
 
   /** Resolves once the RPC node confirms the subscription is live. */
   watchMint(mint: string): Promise<WatchedMintsResponse> {
-    return this.post('/watch', { mint })
+    return this.post('/tokens/watch', { mint })
   }
 
   unwatchMint(mint: string): Promise<WatchedMintsResponse> {
-    return this.post('/unwatch', { mint })
+    return this.post('/tokens/unwatch', { mint })
   }
 
   // ─── Wallets (§4) ─────────────────────────────────────────────

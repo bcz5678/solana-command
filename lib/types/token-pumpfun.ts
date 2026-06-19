@@ -1,6 +1,11 @@
 import { PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
 
+function solToLamportsBN(sol: number): BN {
+  const lamports = Math.round(sol * 1e9);
+  return Number.isSafeInteger(lamports) ? new BN(lamports) : new BN(0);
+}
+
 // Raw shape returned by the pump.fun REST API
 export interface TokenApiSnapshot {
   mint:                       string;
@@ -124,12 +129,13 @@ export class TokenSnapshot {
     this.realSolReserves        = new BN(api.real_sol_reserves);
     this.realTokenReserves      = new BN(api.real_token_reserves);
 
-    // API returns market_cap in SOL — convert to lamports
-    const mcLamports            = new BN(Math.round(api.market_cap * 1e9));
-    this.initialMarketCap       = mcLamports;
-    this.marketCap              = mcLamports;
+    // API returns market_cap in SOL — convert to lamports. pump.fun has been observed to
+    // return corrupted ath_market_cap values (e.g. ~1e23) for some older coins, which
+    // overflows BN's number constructor — clamp to 0 rather than fail the whole snapshot.
+    this.initialMarketCap       = solToLamportsBN(api.market_cap);
+    this.marketCap              = this.initialMarketCap;
     this.usdMarketCap           = api.usd_market_cap;
-    this.athMarketCap           = new BN(Math.round(api.ath_market_cap * 1e9));
+    this.athMarketCap           = solToLamportsBN(api.ath_market_cap);
 
     this.pricePerToken          = api.virtual_sol_reserves / api.virtual_token_reserves;
 
