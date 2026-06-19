@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import BN from 'bn.js'
 import { cn }                           from '@/lib/utils'
 import { Label }                        from '@/components/ui/label'
@@ -9,6 +9,7 @@ import { TokenMintInput }               from '@/components/trade/strategy-trade/
 import { PublicKey } from '@solana/web3.js'
 import { solStringToLamports, lamportsBNToSolDisplay, lamportsStringToBN } from '@/lib/lamports'
 import { TradeType }                    from './hooks/useTrade'
+import { useRelayEvent }                from '@/hooks/use-relay-event'
 import { TokenCard }                    from './TokenCard'
 import { WalletSelector }               from './WalletSelector'
 import { AmountInput }                  from './AmountInput'
@@ -47,46 +48,10 @@ export function TokenTradePanel() {
       .finally(() => setWalletsLoading(false))
   }, [])
 
-    // Debounce mint address input — fetch token after 1000ms pause
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-
-    if (mintAddress.length >= 32) {
-      debounceRef.current = setTimeout(() => {
-        fetchToken(mintAddress)
-        if (tradeType === 'sell' && selectedWallet && mintAddress !== lastHoldingMintRef.current) {
-          lastHoldingMintRef.current = mintAddress
-          fetchHolding(selectedWallet.public_key, mintAddress)
-        }
-      }, 1000)
-    } else {
-      clearToken()
-    }
-
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current)
-    }
-  }, [mintAddress, fetchToken, clearToken])
-
-
-
-  async function getWalletsList(): Promise<WalletRecord[] | null> {
-    try {
-      const res = await fetch('/api/wallets/explorer')
-      if (!res.ok) return null
-      const { wallets } = await res.json()
-      return (wallets ?? []).map((w: any) => ({
-        ...w,
-        solana_balance_in_lamports: w.solana_balance_in_lamports != null
-          ? lamportsStringToBN(String(w.solana_balance_in_lamports))
-          : null,
-      })) as WalletRecord[]
-    } catch {
-      return null
-    }
-  }
-
-  async function fetchToken(mint: string): Promise<void> {
+  // Stable identities — otherwise the debounce effect below (which lists
+  // these as deps) re-fires its 1000ms timer on every render, turning a
+  // one-shot fetch into a perpetual RPC poll.
+  const fetchToken = useCallback(async (mint: string): Promise<void> => {
     setTokenLoading(true)
     try {
       const res = await fetch(`/api/pumpfun/token-info?mintAddress=${encodeURIComponent(mint)}`)
@@ -117,6 +82,85 @@ export function TokenTradePanel() {
     } finally {
       setTokenLoading(false)
     }
+  }, [])
+
+  const clearToken = useCallback(() => {
+    setTokenInfo(null)
+    setTokenError('')
+    setTokenHolding(null)
+    setHoldingError('')
+    lastHoldingMintRef.current = ''
+  }, [])
+
+    // Debounce mint address input — fetch token after 1000ms pause
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+
+    if (mintAddress.length >= 32) {
+      debounceRef.current = setTimeout(() => {
+        fetchToken(mintAddress)
+        if (tradeType === 'sell' && selectedWallet && mintAddress !== lastHoldingMintRef.current) {
+          lastHoldingMintRef.current = mintAddress
+          fetchHolding(selectedWallet.public_key, mintAddress)
+        }
+      }, 1000)
+    } else {
+      clearToken()
+    }
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [mintAddress, fetchToken, clearToken])
+
+  // Live updates: watch the resolved mint on the relay (lib/wss) instead of
+  // polling RPC on a timer. Re-watches on mint change; unwatches on change/unmount.
+  const liveRefetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (!mintAddress) return
+
+    const mint = mintAddress
+    fetch('/api/wss/watch', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ mint }),
+    }).catch(() => {})
+
+    return () => {
+      if (liveRefetchDebounceRef.current) clearTimeout(liveRefetchDebounceRef.current)
+      fetch('/api/wss/unwatch', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ mint }),
+      }).catch(() => {})
+    }
+  }, [mintAddress])
+
+  // Coalesce bursts of fills into one re-fetch — we only need the latest
+  // bonding-curve state, not a patch per trade.
+  useRelayEvent('coin-transaction', (e) => {
+    if (e.mint !== mintAddress) return
+    if (liveRefetchDebounceRef.current) clearTimeout(liveRefetchDebounceRef.current)
+    liveRefetchDebounceRef.current = setTimeout(() => fetchToken(mintAddress), 600)
+  })
+
+
+
+  async function getWalletsList(): Promise<WalletRecord[] | null> {
+    try {
+      const res = await fetch('/api/wallets/explorer')
+      if (!res.ok) return null
+      const { wallets } = await res.json()
+      return (wallets ?? []).map((w: any) => ({
+        ...w,
+        solana_balance_in_lamports: w.solana_balance_in_lamports != null
+          ? lamportsStringToBN(String(w.solana_balance_in_lamports))
+          : null,
+      })) as WalletRecord[]
+    } catch {
+      return null
+    }
   }
 
   useEffect(() => {
@@ -130,14 +174,6 @@ export function TokenTradePanel() {
 
   function reset () {
     setTradeError('');
-  }
-
-  function clearToken() {
-    setTokenInfo(null)
-    setTokenError('')
-    setTokenHolding(null)
-    setHoldingError('')
-    lastHoldingMintRef.current = ''
   }
 
   async function fetchHolding(walletPublicKey: string, mint: string) {
