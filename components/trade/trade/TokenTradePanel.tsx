@@ -4,17 +4,33 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import BN from 'bn.js'
 import { cn }                           from '@/lib/utils'
 import { Label }                        from '@/components/ui/label'
-import { TokenSnapshot } from '@/lib/types/token-pumpfun'
+import { TokenPreview } from '@/lib/types/token-pumpfun'
 import { TokenMintInput }               from '@/components/trade/strategy-trade/TokenMintInput'
 import { PublicKey } from '@solana/web3.js'
 import { solStringToLamports, lamportsBNToSolDisplay, lamportsStringToBN } from '@/lib/lamports'
 import { TradeType }                    from './hooks/useTrade'
 import { useRelayEvent }                from '@/hooks/use-relay-event'
 import { TokenCard }                    from './TokenCard'
+import { GenericTokenCard }             from './GenericTokenCard'
 import { WalletSelector }               from './WalletSelector'
 import { AmountInput }                  from './AmountInput'
 import { SlippageControl }              from './SlippageControl'
 import { WalletRecord }                 from '@/lib/types/wallet'
+
+// Human-typed token amount (e.g. "1.5") → raw on-chain units for an arbitrary decimals count.
+function tokenAmountToRawBN(amount: string, decimals: number): BN {
+  const [whole = '0', frac = ''] = amount.split('.')
+  const fracPadded = frac.padEnd(decimals, '0').slice(0, decimals)
+  return new BN(whole).mul(new BN(10).pow(new BN(decimals))).add(new BN(fracPadded || '0'))
+}
+
+// Raw on-chain units → human display string (2 fractional digits), for an arbitrary decimals count.
+function rawUnitsToDisplay(raw: BN, decimals: number): string {
+  const unit = new BN(10).pow(new BN(decimals))
+  const whole = raw.div(unit).toString()
+  const frac  = raw.mod(unit).toString().padStart(decimals, '0').slice(0, 2)
+  return `${whole}.${frac}`
+}
 
 export function TokenTradePanel() {
   const [tradeType,      setTradeType]      = useState<TradeType>('buy')
@@ -26,7 +42,7 @@ export function TokenTradePanel() {
 
   const [tokenLoading, setTokenLoading]  = useState(false);
   const [tokenError, setTokenError] = useState('');
-  const [tokenInfo, setTokenInfo] = useState<TokenSnapshot | null>(null);
+  const [tokenInfo, setTokenInfo] = useState<TokenPreview | null>(null);
   
   const [wallets, setWallets] = useState<WalletRecord[]>([]);
   const [walletsLoading, setWalletsLoading ] = useState<boolean>(false);
@@ -56,27 +72,27 @@ export function TokenTradePanel() {
     try {
       const res = await fetch(`/api/pumpfun/token-info?mintAddress=${encodeURIComponent(mint)}`)
       if (!res.ok) throw new Error('Token not found')
-      const { body: { snapshot: raw } } = await res.json()
+      const { body: { preview: raw } } = await res.json()
 
       // BN fields arrive as hex strings (BN.toJSON → hex).
       // PublicKey fields arrive as base58 strings (PublicKey.toJSON → toBase58).
-      const snapshot = {
+      // `curve` is only present for an active (non-graduated) pump.fun bonding curve.
+      const preview: TokenPreview = {
         ...raw,
-        virtualSolReserves:     new BN(raw.virtualSolReserves,   16),
-        virtualTokenReserves:   new BN(raw.virtualTokenReserves, 16),
-        totalSupply:            new BN(raw.totalSupply,           16),
-        realSolReserves:        new BN(raw.realSolReserves,       16),
-        realTokenReserves:      new BN(raw.realTokenReserves,     16),
-        initialMarketCap:       new BN(raw.initialMarketCap,      16),
-        marketCap:              new BN(raw.marketCap,             16),
-        athMarketCap:           new BN(raw.athMarketCap,          16),
-        mint:                   new PublicKey(raw.mint),
-        bondingCurve:           new PublicKey(raw.bondingCurve),
-        associatedBondingCurve: new PublicKey(raw.associatedBondingCurve),
-        creator:                new PublicKey(raw.creator),
-      } as unknown as TokenSnapshot
+        mint:         new PublicKey(raw.mint),
+        marketCapSol: raw.marketCapSol != null ? new BN(raw.marketCapSol, 16) : null,
+        curve: raw.curve ? {
+          bondingCurve:           new PublicKey(raw.curve.bondingCurve),
+          associatedBondingCurve: new PublicKey(raw.curve.associatedBondingCurve),
+          virtualSolReserves:     new BN(raw.curve.virtualSolReserves,   16),
+          virtualTokenReserves:   new BN(raw.curve.virtualTokenReserves, 16),
+          realSolReserves:        new BN(raw.curve.realSolReserves,      16),
+          realTokenReserves:      new BN(raw.curve.realTokenReserves,    16),
+          totalSupply:            new BN(raw.curve.totalSupply,          16),
+        } : null,
+      }
 
-      setTokenInfo(snapshot)
+      setTokenInfo(preview)
     } catch (error) {
       setTokenError(error instanceof Error ? error.message : 'Failed to load token')
     } finally {
@@ -150,7 +166,45 @@ export function TokenTradePanel() {
     liveRefetchDebounceRef.current = setTimeout(() => fetchToken(mintAddress), 600)
   })
 
+  // Bonding-curve estimates are pure client-side math against cached reserves —
+  // no network call needed per keystroke. Generic (Jupiter-routed) tokens have no
+  // such cache, so price/output has to be re-quoted per amount change instead.
+  const [genericQuote, setGenericQuote] = useState<{ outAmount: string; priceImpactPct: number | null } | null>(null)
+  const quoteDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  useEffect(() => {
+    if (quoteDebounceRef.current) clearTimeout(quoteDebounceRef.current)
+
+    if (!tokenInfo || tokenInfo.curve) {
+      setGenericQuote(null)
+      return
+    }
+
+    const amountStr = tradeType === 'buy' ? amountInSol : tokenAmount
+    if (!amountStr) {
+      setGenericQuote(null)
+      return
+    }
+
+    quoteDebounceRef.current = setTimeout(async () => {
+      try {
+        const amountBN = tradeType === 'buy'
+          ? solStringToLamports(amountStr)
+          : tokenAmountToRawBN(amountStr, tokenInfo.decimals)
+        if (amountBN.isZero()) { setGenericQuote(null); return }
+
+        const res = await fetch(
+          `/api/pumpfun/quote?mintAddress=${encodeURIComponent(mintAddress)}&side=${tradeType}&amount=${amountBN.toString()}`
+        )
+        if (!res.ok) { setGenericQuote(null); return }
+        setGenericQuote(await res.json())
+      } catch {
+        setGenericQuote(null)
+      }
+    }, 400)
+
+    return () => { if (quoteDebounceRef.current) clearTimeout(quoteDebounceRef.current) }
+  }, [tokenInfo, tradeType, amountInSol, tokenAmount, mintAddress])
 
   async function getWalletsList(): Promise<WalletRecord[] | null> {
     try {
@@ -249,12 +303,9 @@ export function TokenTradePanel() {
         // trade succeeded
       } else {
 
-        // tokenAmount is human-readable (e.g. "1500000" = 1.5M tokens).
-        // Convert to raw units (* 10^6 for pump.fun 6-decimal tokens).
-        const [whole = '0', frac = ''] = tokenAmount.split('.')
-        const fracPadded = frac.padEnd(6, '0').slice(0, 6)
+        // tokenAmount is human-readable (e.g. "1500000" = 1.5M tokens) — convert to raw units.
         let tokens: BN
-        try { tokens = new BN(whole).mul(new BN(1_000_000)).add(new BN(fracPadded)) } catch { return }
+        try { tokens = tokenAmountToRawBN(tokenAmount, tokenInfo.decimals) } catch { return }
         if (tokens.isZero()) return
 
           setExecutingTrade(true)
@@ -307,40 +358,55 @@ export function TokenTradePanel() {
 
 
 
+  // Bonding-curve case: pure client-side constant-product math against cached reserves.
+  // Generic case: read the debounced Jupiter quote fetched above.
   const estimatedOutput = (() => {
     if (!tokenInfo || !amountInSol) return null
-    let lamports: BN
-    try { lamports = solStringToLamports(amountInSol) } catch { return null }
-    if (lamports.isZero()) return null
-    const TOKEN_UNIT = new BN(1_000_000)
-    const out = tokenInfo.virtualTokenReserves
-      .mul(lamports)
-      .div(tokenInfo.virtualSolReserves.add(lamports))
-    const whole = out.div(TOKEN_UNIT).toString()
-    const frac  = out.mod(TOKEN_UNIT).toString().padStart(6, '0').slice(0, 2)
-    return `${whole}.${frac}`
+
+    if (tokenInfo.curve) {
+      let lamports: BN
+      try { lamports = solStringToLamports(amountInSol) } catch { return null }
+      if (lamports.isZero()) return null
+      const out = tokenInfo.curve.virtualTokenReserves
+        .mul(lamports)
+        .div(tokenInfo.curve.virtualSolReserves.add(lamports))
+      return rawUnitsToDisplay(out, tokenInfo.decimals)
+    }
+
+    if (!genericQuote) return null
+    return rawUnitsToDisplay(new BN(genericQuote.outAmount), tokenInfo.decimals)
   })()
 
   const estimatedSol = (() => {
     if (!tokenInfo || !tokenAmount) return null
-    const [whole = '0', frac = ''] = tokenAmount.split('.')
-    const fracPadded = frac.padEnd(6, '0').slice(0, 6)
-    let tokenRaw: BN
-    try { tokenRaw = new BN(whole).mul(new BN(1_000_000)).add(new BN(fracPadded)) } catch { return null }
-    if (tokenRaw.isZero() || tokenRaw.gte(tokenInfo.virtualTokenReserves)) return null
-    const sol = tokenInfo.virtualSolReserves
-      .mul(tokenRaw)
-      .div(tokenInfo.virtualTokenReserves.sub(tokenRaw))
-    return lamportsBNToSolDisplay(sol)
+
+    if (tokenInfo.curve) {
+      let tokenRaw: BN
+      try { tokenRaw = tokenAmountToRawBN(tokenAmount, tokenInfo.decimals) } catch { return null }
+      if (tokenRaw.isZero() || tokenRaw.gte(tokenInfo.curve.virtualTokenReserves)) return null
+      const sol = tokenInfo.curve.virtualSolReserves
+        .mul(tokenRaw)
+        .div(tokenInfo.curve.virtualTokenReserves.sub(tokenRaw))
+      return lamportsBNToSolDisplay(sol)
+    }
+
+    if (!genericQuote) return null
+    return lamportsBNToSolDisplay(new BN(genericQuote.outAmount))
   })()
 
   const priceImpact = (() => {
-    if (!tokenInfo || !amountInSol) return 0
-    let lamports: BN
-    try { lamports = solStringToLamports(amountInSol) } catch { return 0 }
-    if (lamports.isZero()) return 0
-    const basisPoints = lamports.mul(new BN(10_000)).div(tokenInfo.virtualSolReserves)
-    return basisPoints.toNumber() / 100
+    if (!tokenInfo) return 0
+
+    if (tokenInfo.curve) {
+      if (!amountInSol) return 0
+      let lamports: BN
+      try { lamports = solStringToLamports(amountInSol) } catch { return 0 }
+      if (lamports.isZero()) return 0
+      const basisPoints = lamports.mul(new BN(10_000)).div(tokenInfo.curve.virtualSolReserves)
+      return basisPoints.toNumber() / 100
+    }
+
+    return genericQuote?.priceImpactPct ?? tokenInfo.priceImpactPct ?? 0
   })()
 
   
@@ -408,7 +474,10 @@ export function TokenTradePanel() {
           Loading token…
         </div>
       )}
-      {tokenInfo && <TokenCard tokenInfo={tokenInfo} priceImpact={priceImpact} />}
+      {tokenInfo && (tokenInfo.curve
+        ? <TokenCard tokenInfo={{ ...tokenInfo, curve: tokenInfo.curve }} priceImpact={priceImpact} />
+        : <GenericTokenCard tokenInfo={tokenInfo} priceImpact={priceImpact} />
+      )}
 
       {/* ── Graduated Warning ──────────────────────────────── */}
       {tokenInfo?.complete && (

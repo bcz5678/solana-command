@@ -37,6 +37,21 @@ export function solStringToLamports(sol: string): BN {
     return new BN(whole).mul(LAMPORTS_PER_SOL).add(new BN(fracPadded));
 }
 
+/**
+ * Float SOL amount (e.g. from an external API) → lamports BN. Clamps to 0 instead
+ * of throwing when the input is non-finite, negative, or absurdly large — upstream
+ * APIs have been observed to return corrupted values (e.g. ~1e23 SOL, when total
+ * SOL supply is ~588M). Legitimately large-but-real values (hundreds of millions
+ * of SOL, e.g. a stablecoin's market cap) still convert correctly — the lamports
+ * BN is built from a digit string, not a JS number, so it never hits BN's
+ * safe-integer assertion the way `new BN(hugeNumber)` would.
+ */
+export function solNumberToLamportsBN(sol: number): BN {
+    if (!Number.isFinite(sol) || sol < 0 || sol > 1e9) return new BN(0);
+    const lamports = Math.round(sol * 1e9);
+    return new BN(lamports.toString());
+}
+
 // ─── Conversions FROM BN ─────────────────────────────────────────────────────
 
 /** Write back to Supabase int8 column. */

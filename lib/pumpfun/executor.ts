@@ -4,7 +4,10 @@ import BN from 'bn.js';
 import { PumpfunExecutor } from './pumpfun-executor';
 import { GenericSwapExecutor } from '@/lib/trade/generic-swap-executor';
 import { getSolBalance, getTokenBalance } from '@/lib/trade/wallet-balance';
+import { resolveTradeableMint } from '@/lib/trade/resolve-mint';
 import { ExecuteResult } from '@/lib/trade/types';
+
+const ZERO = new BN(0);
 
 export type { ExecuteResult };
 
@@ -40,25 +43,53 @@ export class Executor {
     return this.wallet.publicKey;
   }
 
-  /** Buy `mint` — bonding curve if active, otherwise a generic (Jupiter) swap. */
+  /**
+   * Buy `mint` — bonding curve if active, otherwise a generic (Jupiter) swap.
+   * `mint` is resolved first in case it's actually a PumpSwap pool address
+   * (trading partners sometimes hand those out instead of the real mint).
+   */
   async buy(mint: PublicKey, solAmount: BN, slippage?: number): Promise<ExecuteResult> {
-    return (await this.pumpfun.isBondingCurveActive(mint))
-      ? this.pumpfun.buy(mint, solAmount, slippage)
-      : this.genericSwap.buy(mint, solAmount, slippage);
+    let resolved: PublicKey;
+    try {
+      resolved = await resolveTradeableMint(this.connection, mint);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      return { success: false, error, solAmount, tokenAmount: ZERO, tokensRemaining: ZERO, price: 0 };
+    }
+
+    return (await this.pumpfun.isBondingCurveActive(resolved))
+      ? this.pumpfun.buy(resolved, solAmount, slippage)
+      : this.genericSwap.buy(resolved, solAmount, slippage);
   }
 
   /** Sell `mint` — bonding curve if active, otherwise a generic (Jupiter) swap. */
   async sell(mint: PublicKey, tokenAmount?: BN, slippage?: number): Promise<ExecuteResult> {
-    return (await this.pumpfun.isBondingCurveActive(mint))
-      ? this.pumpfun.sell(mint, tokenAmount, slippage)
-      : this.genericSwap.sell(mint, tokenAmount, slippage);
+    let resolved: PublicKey;
+    try {
+      resolved = await resolveTradeableMint(this.connection, mint);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      return { success: false, error, solAmount: ZERO, tokenAmount: ZERO, tokensRemaining: tokenAmount ?? ZERO, price: 0 };
+    }
+
+    return (await this.pumpfun.isBondingCurveActive(resolved))
+      ? this.pumpfun.sell(resolved, tokenAmount, slippage)
+      : this.genericSwap.sell(resolved, tokenAmount, slippage);
   }
 
   /** Sell the wallet's entire balance of `mint`. */
   async sellAll(mint: PublicKey, slippage?: number): Promise<ExecuteResult> {
-    return (await this.pumpfun.isBondingCurveActive(mint))
-      ? this.pumpfun.sellAll(mint, slippage)
-      : this.genericSwap.sellAll(mint, slippage);
+    let resolved: PublicKey;
+    try {
+      resolved = await resolveTradeableMint(this.connection, mint);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      return { success: false, error, solAmount: ZERO, tokenAmount: ZERO, tokensRemaining: ZERO, price: 0 };
+    }
+
+    return (await this.pumpfun.isBondingCurveActive(resolved))
+      ? this.pumpfun.sellAll(resolved, slippage)
+      : this.genericSwap.sellAll(resolved, slippage);
   }
 
   /** Get SOL balance of the wallet */

@@ -19,6 +19,16 @@ interface JupiterSwapResponse {
   lastValidBlockHeight: number
 }
 
+export interface JupiterTokenInfo {
+  id: string
+  name: string
+  symbol: string
+  icon: string | null
+  decimals: number
+  totalSupply: number | null   // UI units, not raw
+  [key: string]: unknown
+}
+
 async function jupiterFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) }
   if (process.env.JUPITER_API_KEY) headers['x-api-key'] = process.env.JUPITER_API_KEY
@@ -53,4 +63,14 @@ export function getJupiterSwapTransaction(quote: JupiterQuote, userPublicKey: st
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ quoteResponse: quote, userPublicKey, wrapAndUnwrapSol: true }),
   })
+}
+
+/** Metadata fallback for mints pump.fun doesn't know about — name/symbol/icon/decimals. */
+export async function searchJupiterToken(mint: string): Promise<JupiterTokenInfo | null> {
+  try {
+    const results = await jupiterFetch<JupiterTokenInfo[]>(`/tokens/v2/search?query=${encodeURIComponent(mint)}`)
+    return results.find((r) => r.id === mint) ?? null
+  } catch {
+    return null
+  }
 }

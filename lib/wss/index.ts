@@ -9,6 +9,8 @@ export type {
   HeartbeatEvent,
   TokenBalanceChange,
   TokenTxType,
+  TokenStateEvent,
+  TokenStateSource,
   WatchedMintsResponse,
   WatchedWalletsResponse,
   HealthResponse,

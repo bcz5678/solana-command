@@ -9,6 +9,7 @@ import {
 
 import { sendWithRetry, signInstructions } from '@/lib/trade/send-transaction';
 import { resolveTokenProgram, getTokenBalance, getSolBalance } from '@/lib/trade/wallet-balance';
+import { isBondingCurveActive } from '@/lib/trade/bonding-curve';
 import { ExecuteResult } from '@/lib/trade/types';
 
 const ZERO = new BN(0);
@@ -215,11 +216,6 @@ export class PumpfunExecutor {
 
   /** True if `mint` has a live (non-graduated) pump.fun bonding curve. */
   async isBondingCurveActive(mint: PublicKey): Promise<boolean> {
-    try {
-      const bc = await this.onlineSdk.fetchBondingCurve(mint);
-      return !bc.complete && !bc.virtualTokenReserves.isZero();
-    } catch {
-      return false; // no bonding curve account at all — not a pump.fun mint
-    }
+    return isBondingCurveActive(this.connection, mint);
   }
 }

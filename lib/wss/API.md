@@ -22,8 +22,9 @@ On connect, before anything live, the server sends (in order):
 2. Up to the last 50 `token-launch` events.
 3. Up to the last 50 `token-transaction` events (from currently/previously watched mints).
 4. Up to the last 50 `wallet-transaction` events (from currently/previously watched wallets).
+5. One `token-state` message per currently-watched mint — its latest known price/marketcap snapshot.
 
-After that backfill, you receive events live as they happen, plus a periodic `status` every 10s and a `heartbeat` every 15s (heartbeats exist purely to keep the socket alive through proxies — no payload to act on).
+After that backfill, you receive events live as they happen, plus a periodic `status` every 10s and a `heartbeat` every 15s (heartbeats exist purely to keep the socket alive through proxies — no payload to act on). `token-state` also arrives live, roughly every 4s per watched mint.
 
 There's no message replay beyond that 50-deep buffer. If your client disconnects for longer than it takes for >50 events of a given type to occur, you will miss some — reconnect promptly and don't rely on this feed as a durable log.
 
@@ -150,6 +151,37 @@ Emitted for any transaction that changes the SOL or token balance of a wallet yo
 
 Events where nothing actually changed for the wallet (`solAmount === 0` and `tokenChanges` empty) are suppressed — you will never see a no-op event.
 
+### `token-state`
+
+A current price/marketcap *snapshot* for a watched mint — "what's true right now", polled roughly every 4s, as opposed to `token-transaction`'s per-fill log. Source is picked automatically: mints ending in `pump` are resolved via PumpFun's API (covers both pre- and post-migration state in one response); everything else via Jupiter's price API plus on-chain supply.
+
+```json
+{
+  "type": "token-state",
+  "mint": "61V8vBaq...pump",
+  "source": "pump",
+  "complete": true,
+  "poolAddress": "3avACZvP3aAmdqZGC1eSA6HFivg8nvtkamwnyiLoLrKf",
+  "priceSol": 2.08e-8,
+  "marketCapSol": 20.8,
+  "priceUsd": 0.0000015,
+  "marketCapUsd": 1511.6,
+  "updatedAt": 1782146376
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `mint` | `string` | The watched mint |
+| `source` | `'pump' \| 'jupiter'` | Which upstream resolved this snapshot |
+| `complete` | `boolean \| null` | Graduated/migrated to an AMM — only meaningful for `source: 'pump'`, otherwise `null` |
+| `poolAddress` | `string \| null` | Bonding-curve (pre-migration) or AMM pool (post-migration) address — only for `source: 'pump'` |
+| `priceSol`, `marketCapSol` | `number \| null` | SOL-denominated |
+| `priceUsd`, `marketCapUsd` | `number \| null` | USD-denominated |
+| `updatedAt` | `number` | Unix seconds, when this snapshot was resolved |
+
+See [§3a One-off State Lookups](#one-off-state-lookups) for fetching this without watching the mint.
+
 ### `status`
 
 ```json
@@ -211,6 +243,26 @@ curl -X POST http://localhost:3099/tokens/unwatch \
 ```
 
 An initial watch list can also be set at server startup via the `WATCH_MINTS` env var (comma-separated addresses) — useful for mints you always want watched regardless of which client connects.
+
+### 3a. One-off State Lookups
+
+Don't need an ongoing feed — just the current price/marketcap for a mint, once? `GET /tokens/state` resolves it on demand, no watch/unwatch required.
+
+| Method | Path | Response |
+|---|---|---|
+| `GET` | `/tokens/state?mint=<base58 address>` | A `token-state` event (see [§2](#token-state)) |
+
+If the mint is already watched, this returns the live, always-fresh snapshot from the watch loop. Otherwise it's resolved fresh and cached server-side for ~8s, so repeated lookups of the same unwatched mint within that window don't re-hit PumpFun/Jupiter.
+
+Error responses:
+- `400 { "error": "mint must be a valid base58 Solana address" }` — bad or missing `mint`.
+- `404 { "error": "No price/state data found for this mint" }` — neither source recognizes it.
+- `502 { "error": "..." }` — both upstream lookups failed (network/timeout).
+
+```bash
+curl "http://localhost:3099/tokens/state?mint=61V8vBaqAGMpgDQi4JcAwo1dmBGHsyhzodcPqnEVpump"
+# => {"type":"token-state","mint":"61V8vBaq...pump","source":"pump","complete":false,...}
+```
 
 ## 4. Watching Wallets
 

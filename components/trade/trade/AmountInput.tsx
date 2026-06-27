@@ -4,11 +4,11 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { TradeType } from './hooks/useTrade'
-import { TokenSnapshot } from '@/lib/types/token-pumpfun'
+import { TokenPreview } from '@/lib/types/token-pumpfun'
 
 interface AmountInputProps {
   tradeType:       TradeType
-  tokenInfo:       TokenSnapshot | null
+  tokenInfo:       TokenPreview | null
   amountInSol:     string
   tokenAmount:     string
   estimatedOutput: string | null

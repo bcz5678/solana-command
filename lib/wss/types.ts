@@ -66,12 +66,32 @@ export interface HeartbeatEvent {
   ts: number
 }
 
+export type TokenStateSource = 'pump' | 'jupiter'
+
+/**
+ * Current price/marketcap snapshot for a watched mint, polled periodically —
+ * "what's true right now", as opposed to TokenTransactionEvent's per-fill log.
+ */
+export interface TokenStateEvent {
+  type: 'token-state'
+  mint: string
+  source: TokenStateSource
+  complete: boolean | null
+  poolAddress: string | null
+  priceSol: number | null
+  marketCapSol: number | null
+  priceUsd: number | null
+  marketCapUsd: number | null
+  updatedAt: number
+}
+
 export type RelayMessage =
   | TokenLaunchEvent
   | TokenTransactionEvent
   | WalletTransactionEvent
   | StatusEvent
   | HeartbeatEvent
+  | TokenStateEvent
 
 export interface WatchedMintsResponse {
   mints: string[]

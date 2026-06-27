@@ -1,52 +1,27 @@
-import { PublicKey } from "@solana/web3.js";
-import { OnlinePumpSdk, bondingCurveMarketCap } from "@nirholas/pump-sdk";
-import BN from "bn.js";
+import { PublicKey, Connection } from "@solana/web3.js";
 
 import { initializeQuickNodeSolana } from "@/app/api/utils/helpers";
-import { TokenApiSnapshot, TokenSnapshot } from "@/lib/types/token-pumpfun";
+import { isBondingCurveActive } from "@/lib/trade/bonding-curve";
+import { buildGenericTokenPreview } from "@/lib/trade/token-preview";
+import { resolveTradeableMint } from "@/lib/trade/resolve-mint";
+import { tokenPreviewFromPumpApi, TokenPreview } from "@/lib/types/token-pumpfun";
+import { fetchPumpCoinApi } from "./pump-api";
 
 const quicknodeSolana = initializeQuickNodeSolana();
-const onlineSdk = new OnlinePumpSdk(quicknodeSolana.connection);
 
-export async function getTokenSnapshot(mint: PublicKey): Promise<TokenSnapshot | null> {
-  try {
-    const res = await fetch(`https://frontend-api-v3.pump.fun/coins/${mint.toBase58()}`);
-    if (!res.ok) return null;
-    const api = await res.json() as TokenApiSnapshot;
-    return new TokenSnapshot(api);
-  } catch {
-    return null;
-  }
-}
+/**
+ * Token preview lookup — routes to the pump.fun bonding-curve path while the mint
+ * has a live curve, otherwise falls back to a generic (Jupiter-priced) preview.
+ * Mirrors the Executor split in lib/pumpfun/executor.ts.
+ */
+export async function getTokenPreview(mint: PublicKey, connection: Connection = quicknodeSolana.connection): Promise<TokenPreview | null> {
+  const resolvedMint = await resolveTradeableMint(connection, mint);
 
-// Fetches latest bonding-curve state and mutates the snapshot in place.
-export async function updateTokenSnapshot(snapshot: TokenSnapshot): Promise<void> {
-  const bc = await onlineSdk.fetchBondingCurve(snapshot.mint);
-
-  if (bc.complete || bc.virtualTokenReserves.isZero()) {
-    snapshot.applyUpdate({
-      mint:             snapshot.mint,
-      marketCapLamports: new BN(0),
-      pricePerToken:    0,
-      realSolReserves:  bc.realSolReserves,
-      realTokenReserves: bc.realTokenReserves,
-      complete:         true,
-    });
-    return;
+  if (await isBondingCurveActive(connection, resolvedMint)) {
+    const api = await fetchPumpCoinApi(resolvedMint);
+    if (!api) return null; // curve is live but pump.fun's API hiccuped — let the caller retry
+    return tokenPreviewFromPumpApi(api);
   }
 
-  const marketCapLamports = bondingCurveMarketCap({
-    mintSupply:           bc.tokenTotalSupply,
-    virtualSolReserves:   bc.virtualSolReserves,
-    virtualTokenReserves: bc.virtualTokenReserves,
-  });
-
-  snapshot.applyUpdate({
-    mint:             snapshot.mint,
-    marketCapLamports,
-    pricePerToken:    bc.virtualSolReserves.toNumber() / bc.virtualTokenReserves.toNumber(),
-    realSolReserves:  bc.realSolReserves,
-    realTokenReserves: bc.realTokenReserves,
-    complete:         false,
-  });
+  return buildGenericTokenPreview(resolvedMint, connection);
 }

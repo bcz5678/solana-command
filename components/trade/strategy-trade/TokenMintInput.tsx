@@ -53,10 +53,10 @@ export function TokenMintInput({ onTokenChange }: Props) {
             try {
                 const res = await fetch(`/api/pumpfun/token-info?mintAddress=${encodeURIComponent(query)}`)
                 if (!res.ok) throw new Error()
-                const { body: { snapshot } } = await res.json()
-                const r: ResolvedToken = { name: snapshot.name, symbol: snapshot.symbol, mintAddress: query }
+                const { body: { preview } } = await res.json()
+                const r: ResolvedToken = { name: preview.name, symbol: preview.symbol, mintAddress: query }
                 setResolved(r)
-                callbackRef.current(query, true, snapshot.name, snapshot.symbol)
+                callbackRef.current(query, true, preview.name, preview.symbol)
             } catch {
                 setError('Token not found')
                 callbackRef.current('', false)

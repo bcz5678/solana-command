@@ -1,44 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
-import BN from 'bn.js';
 import { PublicKey } from "@solana/web3.js";
 
-import { getTokenSnapshot } from '@/lib/pumpfun/token-snapshot';
-import { TokenSnapshot } from '@/lib/types/token-pumpfun';
+import { getTokenPreview } from '@/lib/pumpfun/token-snapshot';
+import { TokenPreview } from '@/lib/types/token-pumpfun';
 
 
-export async function GET(request: NextRequest) {       
+export async function GET(request: NextRequest) {
     const url = new URL(request.url);
     const mintAddress = url.searchParams.get('mintAddress');
-   
+
     try{
-        
+
         if(mintAddress != null){
-            const tokenSnapshotResponse: TokenSnapshot | null = await getTokenSnapshot(new PublicKey(mintAddress)); 
-            if (tokenSnapshotResponse != null) {
+            const preview: TokenPreview | null = await getTokenPreview(new PublicKey(mintAddress));
+            if (preview != null) {
                 return NextResponse.json({
-                    message: "Token Snapshot",
+                    message: "Token Preview",
                     body: {
-                        snapshot: tokenSnapshotResponse,
+                        preview,
                     }
                 },{
-                    status: 200    
+                    status: 200
                 });
             } else {
-                return NextResponse.json({ error: 'Unable to return snapshot' }, { status: 400 })
+                return NextResponse.json({ error: 'Unable to return token preview' }, { status: 400 })
             }
         } else {
            return NextResponse.json({ error: 'Invalid Request' }, { status: 400 })
         }
-       
 
-    } catch {
-        return NextResponse.json({ error: 'Invalid Request' }, { status: 400 })
+
+    } catch (err) {
+        return NextResponse.json(
+            { error: err instanceof Error ? err.message : 'Invalid Request' },
+            { status: 400 },
+        )
     }
 }
-
-
-
-
-
-
-

@@ -4,6 +4,7 @@ import type {
   WatchedMintsResponse,
   WatchedWalletsResponse,
   HealthResponse,
+  TokenStateEvent,
 } from './types'
 
 type HandlerMap = { [K in RelayMessage['type']]?: Array<(msg: Extract<RelayMessage, { type: K }>) => void> }
@@ -115,6 +116,15 @@ export class RelayClient {
 
   unwatchMint(mint: string): Promise<WatchedMintsResponse> {
     return this.post('/tokens/unwatch', { mint })
+  }
+
+  /**
+   * Current price/marketcap snapshot for a mint — no watch/unwatch needed. If the mint
+   * is already watched this is always fresh; otherwise it's resolved on demand and
+   * short-cached server-side (~8s).
+   */
+  getTokenState(mint: string): Promise<TokenStateEvent> {
+    return this.get(`/tokens/state?mint=${encodeURIComponent(mint)}`)
   }
 
   // ─── Wallets (§4) ─────────────────────────────────────────────
