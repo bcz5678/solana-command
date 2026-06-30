@@ -11,6 +11,7 @@ import {
     SidebarMenuButton,
     SidebarGroupLabel,
     SidebarGroupContent,
+    SidebarSeparator,
 } from "@/components/ui/sidebar"
  
 import {
@@ -20,19 +21,35 @@ import {
     DropdownMenuContent,
 } from '@/components/ui/dropdown-menu'
 
-import { ChevronDown, Computer, Rocket, User2, Table} from "lucide-react"
+import {
+    ChevronDown,
+    Rocket,
+    User2,
+    Table,
+    Workflow,
+    List,
+    Plus,
+    Import,
+    RotateCcw,
+    Search,
+    ArrowLeftRight,
+    Copy,
+    KeyRound,
+    Repeat,
+    GitBranch,
+} from "lucide-react"
 import { RelayStatusIndicator } from "@/components/wss/relay-status-indicator"
 
 
 export function AppSidebar() {
   return (
-    <Sidebar>
+    <Sidebar collapsible="icon">
       <SidebarHeader>
         <div className="flex items-center justify-between px-2 py-1.5">
           <RelayStatusIndicator />
         </div>
         <SidebarMenu>
-            <SidebarMenuItem className="flex items-center gap-2">
+            <SidebarMenuItem className="flex items-center gap-2 group-data-[collapsible=icon]:hidden">
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <SidebarMenuButton>
@@ -60,7 +77,7 @@ export function AppSidebar() {
                   asChild
                 >
                   <a href="/protected/wallet/explorer">
-                    <Computer />
+                    <List />
                     <span>Explorer</span>
                   </a>
                 </SidebarMenuButton>
@@ -72,7 +89,7 @@ export function AppSidebar() {
                   asChild
                 >
                   <a href="/protected/wallet/create">
-                    <Computer />
+                    <Plus />
                     <span>Create</span>
                   </a>
                 </SidebarMenuButton>
@@ -83,7 +100,7 @@ export function AppSidebar() {
                   asChild
                 >
                   <a href="/protected/wallet/add-existing">
-                    <Computer />
+                    <Import />
                     <span>Add existing</span>
                   </a>
                 </SidebarMenuButton>
@@ -94,7 +111,7 @@ export function AppSidebar() {
                   asChild
                 >
                   <a href="/protected/wallet/recover">
-                    <Computer />
+                    <RotateCcw />
                     <span>Recover</span>
                   </a>
                 </SidebarMenuButton>
@@ -105,7 +122,7 @@ export function AppSidebar() {
                   asChild
                 >
                   <a href="/protected/wallet/find">
-                    <Computer />
+                    <Search />
                     <span>Find</span>
                   </a>
                 </SidebarMenuButton>
@@ -116,7 +133,7 @@ export function AppSidebar() {
                   asChild
                 >
                   <a href="/protected/wallet/transfer">
-                    <Computer />
+                    <ArrowLeftRight />
                     <span>Transfer SOL</span>
                   </a>
                 </SidebarMenuButton>
@@ -124,6 +141,8 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        <SidebarSeparator />
 
         <SidebarGroup>
           <SidebarGroupLabel>Tokens</SidebarGroupLabel>
@@ -135,7 +154,7 @@ export function AppSidebar() {
                   asChild
                 >
                   <a href="/protected/tokens/explorer">
-                    <Computer />
+                    <List />
                     <span>Explorer</span>
                   </a>
                 </SidebarMenuButton>
@@ -146,7 +165,7 @@ export function AppSidebar() {
                   asChild
                 >
                   <a href="/protected/tokens/create">
-                    <Computer />
+                    <Plus />
                     <span>Create</span>
                   </a>
                 </SidebarMenuButton>
@@ -162,13 +181,24 @@ export function AppSidebar() {
                   </a>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
+                  asChild
+                >
+                  <a href="/protected/tokens/launch-builder">
+                    <Workflow />
+                    <span>Launch Builder</span>
+                  </a>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
                <SidebarMenuItem>
                 <SidebarMenuButton
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
                 >
                   <a href="/protected/tokens/clone">
-                    <Rocket />
+                    <Copy />
                     <span>Clone</span>
                   </a>
                 </SidebarMenuButton>
@@ -191,7 +221,7 @@ export function AppSidebar() {
                   asChild
                 >
                   <a href="/protected/tokens/vanity-address-import">
-                    <Computer />
+                    <KeyRound />
                     <span>Vanity Address Import</span>
                   </a>
                 </SidebarMenuButton>
@@ -199,6 +229,9 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        <SidebarSeparator />
+
         <SidebarGroup>
           <SidebarGroupLabel>Trade</SidebarGroupLabel>
           <SidebarGroupContent>
@@ -209,7 +242,7 @@ export function AppSidebar() {
                   asChild
                 >
                   <a href="/protected/trade/trade">
-                    <Computer />
+                    <Repeat />
                     <span>Single Trade</span>
                   </a>
                 </SidebarMenuButton>
@@ -222,7 +255,7 @@ export function AppSidebar() {
                   asChild
                 >
                   <a href="/protected/trade/strategy-trade">
-                    <Computer />
+                    <GitBranch />
                     <span>Strategy Trade</span>
                   </a>
                 </SidebarMenuButton>

@@ -214,11 +214,18 @@ export default function TokenTable({ tokens, walletMap }: Props) {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return tokens
-    return tokens.filter(
-      t =>
-        t.token_name.toLowerCase().includes(q) ||
-        t.token_symbol.toLowerCase().includes(q),
+    const visible = tokens.filter(
+      t => t.launch_status === 'draft' || t.launch_status === 'launched',
+    )
+    const matched = q
+      ? visible.filter(
+          t =>
+            t.token_name.toLowerCase().includes(q) ||
+            t.token_symbol.toLowerCase().includes(q),
+        )
+      : visible
+    return [...matched].sort((a, b) =>
+      a.launch_status === b.launch_status ? 0 : a.launch_status === 'draft' ? -1 : 1,
     )
   }, [tokens, search])
 

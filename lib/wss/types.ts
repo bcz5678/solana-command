@@ -36,7 +36,7 @@ export interface TokenTransactionEvent {
   marketCapSol: number | null
 }
 
-export interface TokenBalanceChange {
+export interface WalletTokenChange {
   mint: string
   amount: number
 }
@@ -49,10 +49,10 @@ export interface WalletTransactionEvent {
   wallet: string
   isFeePayer: boolean
   solAmount: number
-  tokenChanges: TokenBalanceChange[]
+  tokenChanges: WalletTokenChange[]
 }
 
-export interface StatusEvent {
+export interface ServerStatus {
   type: 'status'
   connected: boolean
   uptime: number
@@ -61,7 +61,7 @@ export interface StatusEvent {
   clients: number
 }
 
-export interface HeartbeatEvent {
+export interface Heartbeat {
   type: 'heartbeat'
   ts: number
 }
@@ -89,8 +89,8 @@ export type RelayMessage =
   | TokenLaunchEvent
   | TokenTransactionEvent
   | WalletTransactionEvent
-  | StatusEvent
-  | HeartbeatEvent
+  | ServerStatus
+  | Heartbeat
   | TokenStateEvent
 
 export interface WatchedMintsResponse {

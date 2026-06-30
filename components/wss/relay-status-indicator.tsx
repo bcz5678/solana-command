@@ -1,6 +1,7 @@
 'use client'
 
 import { useRelayStatus, type RelayConnectionStatus } from '@/hooks/use-relay-event'
+import { useSidebar } from '@/components/ui/sidebar'
 
 const STATUS_DOT: Record<RelayConnectionStatus, string> = {
     connecting: 'bg-amber-500 animate-pulse',
@@ -16,11 +17,14 @@ const STATUS_LABEL: Record<RelayConnectionStatus, string> = {
 
 export function RelayStatusIndicator() {
     const status = useRelayStatus()
+    const { state } = useSidebar()
 
     return (
         <div className="flex items-center gap-2">
             <span className={`inline-block size-2 rounded-full ${STATUS_DOT[status]}`} />
-            <span className="text-sm font-medium">{STATUS_LABEL[status]}</span>
+            {state !== 'collapsed' && (
+                <span className="text-sm font-medium">{STATUS_LABEL[status]}</span>
+            )}
         </div>
     )
 }

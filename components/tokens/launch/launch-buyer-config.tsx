@@ -13,13 +13,15 @@ type Props = {
     launchConfig: LaunchConfig
     onBuyInputChange: (walletId: string, newAmount: string) => void
     onBuyInputReset: () => void
+    /** Restrict the table to the dev wallet only — hides type filters and all other wallet rows. */
+    devOnly?: boolean
 }
 
 function maskPubKey(key: string) {
     return `${key.slice(0, 7)}....${key.slice(-7)}`
 }
 
-export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBuyInputReset }: Props) {
+export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBuyInputReset, devOnly = false }: Props) {
     const [wallets, setWallets]         = useState<WalletRecord[]>([])
     const [walletTypes, setWalletTypes] = useState<WalletTypeRow[]>([])
     const [loading, setLoading]         = useState(true)
@@ -104,33 +106,35 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
     return (
         <div className="flex flex-col gap-4">
             {/* Type filter chips */}
-            <div className="flex flex-wrap gap-2">
-                <button
-                    onClick={() => setActiveFilters([])}
-                    className={[
-                        'px-3 py-1 rounded-full text-xs font-medium border transition-colors',
-                        activeFilters.length === 0
-                            ? 'bg-blue-500 border-blue-500 text-white'
-                            : 'border-border text-muted-foreground hover:border-blue-400 hover:text-foreground',
-                    ].join(' ')}
-                >
-                    All
-                </button>
-                {walletTypes.map((type) => (
+            {!devOnly && (
+                <div className="flex flex-wrap gap-2">
                     <button
-                        key={type.id}
-                        onClick={() => toggleFilter(type.id)}
+                        onClick={() => setActiveFilters([])}
                         className={[
                             'px-3 py-1 rounded-full text-xs font-medium border transition-colors',
-                            activeFilters.includes(type.id)
+                            activeFilters.length === 0
                                 ? 'bg-blue-500 border-blue-500 text-white'
                                 : 'border-border text-muted-foreground hover:border-blue-400 hover:text-foreground',
                         ].join(' ')}
                     >
-                        {type.name}
+                        All
                     </button>
-                ))}
-            </div>
+                    {walletTypes.map((type) => (
+                        <button
+                            key={type.id}
+                            onClick={() => toggleFilter(type.id)}
+                            className={[
+                                'px-3 py-1 rounded-full text-xs font-medium border transition-colors',
+                                activeFilters.includes(type.id)
+                                    ? 'bg-blue-500 border-blue-500 text-white'
+                                    : 'border-border text-muted-foreground hover:border-blue-400 hover:text-foreground',
+                            ].join(' ')}
+                        >
+                            {type.name}
+                        </button>
+                    ))}
+                </div>
+            )}
 
             {/* Table */}
             <div className="w-full overflow-x-auto overflow-y-auto max-h-[600px] rounded-md border">
@@ -189,7 +193,7 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
                         )}
 
                         {/* Grouped wallet rows */}
-                        {groups.map(({ type, wallets: groupWallets }) => (
+                        {!devOnly && groups.map(({ type, wallets: groupWallets }) => (
                             <Fragment key={type.id}>
                                 <tr className="border-b bg-muted/50">
                                     <td
@@ -237,10 +241,10 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
                             </Fragment>
                         ))}
 
-                        {groups.length === 0 && !devWallet && (
+                        {!devWallet && (devOnly || groups.length === 0) && (
                             <tr>
                                 <td colSpan={6} className="px-3 py-6 text-center text-sm text-muted-foreground">
-                                    No wallets found.
+                                    {devOnly ? 'No dev wallet found for the selected token.' : 'No wallets found.'}
                                 </td>
                             </tr>
                         )}
