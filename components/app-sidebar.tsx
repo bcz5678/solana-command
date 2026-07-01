@@ -1,5 +1,6 @@
 'use client'
 
+import Link from "next/link"
 import {
     Sidebar,
     SidebarContent,
@@ -76,10 +77,10 @@ export function AppSidebar() {
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
                 >
-                  <a href="/protected/wallet/explorer">
+                  <Link href="/protected/wallet/explorer">
                     <List />
                     <span>Explorer</span>
-                  </a>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem></SidebarMenuItem>
@@ -88,10 +89,10 @@ export function AppSidebar() {
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
                 >
-                  <a href="/protected/wallet/create">
+                  <Link href="/protected/wallet/create">
                     <Plus />
                     <span>Create</span>
-                  </a>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
@@ -99,10 +100,10 @@ export function AppSidebar() {
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
                 >
-                  <a href="/protected/wallet/add-existing">
+                  <Link href="/protected/wallet/add-existing">
                     <Import />
                     <span>Add existing</span>
-                  </a>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
                <SidebarMenuItem>
@@ -110,10 +111,10 @@ export function AppSidebar() {
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
                 >
-                  <a href="/protected/wallet/recover">
+                  <Link href="/protected/wallet/recover">
                     <RotateCcw />
                     <span>Recover</span>
-                  </a>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
@@ -121,10 +122,10 @@ export function AppSidebar() {
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
                 >
-                  <a href="/protected/wallet/find">
+                  <Link href="/protected/wallet/find">
                     <Search />
                     <span>Find</span>
-                  </a>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
@@ -132,10 +133,10 @@ export function AppSidebar() {
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
                 >
-                  <a href="/protected/wallet/transfer">
+                  <Link href="/protected/wallet/transfer">
                     <ArrowLeftRight />
                     <span>Transfer SOL</span>
-                  </a>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -153,10 +154,10 @@ export function AppSidebar() {
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
                 >
-                  <a href="/protected/tokens/explorer">
+                  <Link href="/protected/tokens/explorer">
                     <List />
                     <span>Explorer</span>
-                  </a>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
                <SidebarMenuItem>
@@ -164,10 +165,10 @@ export function AppSidebar() {
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
                 >
-                  <a href="/protected/tokens/create">
+                  <Link href="/protected/tokens/create">
                     <Plus />
                     <span>Create</span>
-                  </a>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
@@ -175,10 +176,10 @@ export function AppSidebar() {
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
                 >
-                  <a href="/protected/tokens/launch">
+                  <Link href="/protected/tokens/launch">
                     <Rocket />
                     <span>Launch</span>
-                  </a>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
@@ -186,10 +187,10 @@ export function AppSidebar() {
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
                 >
-                  <a href="/protected/tokens/launch-builder">
+                  <Link href="/protected/tokens/launch-builder">
                     <Workflow />
                     <span>Launch Builder</span>
-                  </a>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
                <SidebarMenuItem>
@@ -197,10 +198,10 @@ export function AppSidebar() {
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
                 >
-                  <a href="/protected/tokens/clone">
+                  <Link href="/protected/tokens/clone">
                     <Copy />
                     <span>Clone</span>
-                  </a>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               
@@ -209,10 +210,10 @@ export function AppSidebar() {
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
                 >
-                  <a href="/protected/tokens/lookup-table">
+                  <Link href="/protected/tokens/lookup-table">
                     <Table />
                     <span>Lookup Tables</span>
-                  </a>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
@@ -220,10 +221,10 @@ export function AppSidebar() {
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
                 >
-                  <a href="/protected/tokens/vanity-address-import">
+                  <Link href="/protected/tokens/vanity-address-import">
                     <KeyRound />
                     <span>Vanity Address Import</span>
-                  </a>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -241,10 +242,10 @@ export function AppSidebar() {
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
                 >
-                  <a href="/protected/trade/trade">
+                  <Link href="/protected/trade/trade">
                     <Repeat />
                     <span>Single Trade</span>
-                  </a>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -254,10 +255,10 @@ export function AppSidebar() {
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
                 >
-                  <a href="/protected/trade/strategy-trade">
+                  <Link href="/protected/trade/strategy-trade">
                     <GitBranch />
                     <span>Strategy Trade</span>
-                  </a>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
              
