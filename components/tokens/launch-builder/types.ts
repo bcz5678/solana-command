@@ -17,6 +17,16 @@ export type ConditionalSubtype = 'loop' | 'ifThen' | 'switch'
 
 export type BuilderSubtype = TokenSubtype | LaunchTypeSubtype | TradeSubtype | TriggerSubtype | ConditionalSubtype
 
+/**
+ * The data type carried by a handle wire.
+ *
+ *   token  → raw token identity (mint, name, dev wallet)
+ *   config → full execution context flowing through trade nodes
+ *   signal → control-flow gate from a trigger
+ *   branch → one output arm from a conditional node
+ */
+export type HandleDataType = 'token' | 'config' | 'signal' | 'branch'
+
 export type PaletteNodeDef = {
     category: BuilderNodeCategory
     nodeType: BuilderNodeType
@@ -25,8 +35,11 @@ export type PaletteNodeDef = {
     description: string
     icon: LucideIcon
     inputs: 0 | 1
-    /** number of output handles, or 'dynamic' for nodes whose output count is set via config (e.g. Switch) */
+    /** number of output handles, or 'dynamic' for Switch whose count comes from config */
     outputs: number | 'dynamic'
+    inputTypes: HandleDataType[]
+    /** For Switch use ['branch'] — actual count is derived at runtime from config.branchCount */
+    outputTypes: HandleDataType[]
     defaultData?: Record<string, unknown>
 }
 
@@ -36,6 +49,9 @@ export type BuilderNodeData = {
     label: string
     /** node-specific config populated via the configure modal */
     config: Record<string, unknown>
+    /** typed I/O declarations — set on drop, restored on load */
+    inputTypes?: HandleDataType[]
+    outputTypes?: HandleDataType[]
     onConfigure?: () => void
     onDelete?: () => void
 }

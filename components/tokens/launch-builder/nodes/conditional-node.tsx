@@ -5,6 +5,7 @@ import { useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
 import BaseNodeShell from './base-node-shell'
 import { BuilderNodeData } from '../types'
 import { PALETTE_ITEMS } from '../node-palette-config'
+import { getNodeOutputTypes } from '../handle-types'
 
 function outputLabelsFor(data: BuilderNodeData): string[] {
     switch (data.subtype) {
@@ -46,6 +47,8 @@ export default function ConditionalNode({ id, data, selected }: NodeProps) {
             inputs={1}
             outputCount={outputCount}
             outputLabels={outputLabelsFor(d)}
+            inputTypes={d.inputTypes}
+            outputTypes={getNodeOutputTypes(d)}
             selected={selected}
             onConfigure={d.onConfigure}
             onDelete={d.onDelete}

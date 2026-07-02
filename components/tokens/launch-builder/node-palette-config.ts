@@ -40,7 +40,7 @@ export const CATEGORY_ACCENT: Record<BuilderNodeCategory, { border: string; bg: 
 }
 
 export const PALETTE_ITEMS: PaletteNodeDef[] = [
-    // Token
+    // ── Token ──────────────────────────────────────────────────────────────
     {
         category: 'token',
         nodeType: 'tokenNode',
@@ -50,9 +50,11 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         icon: Coins,
         inputs: 0,
         outputs: 1,
+        inputTypes: [],
+        outputTypes: ['token'],
     },
 
-    // Launch Type
+    // ── Launch Type ────────────────────────────────────────────────────────
     {
         category: 'launchType',
         nodeType: 'launchTypeNode',
@@ -62,6 +64,8 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         icon: User,
         inputs: 1,
         outputs: 1,
+        inputTypes: ['token'],
+        outputTypes: ['config'],
     },
     {
         category: 'launchType',
@@ -72,6 +76,8 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         icon: Rocket,
         inputs: 1,
         outputs: 1,
+        inputTypes: ['token'],
+        outputTypes: ['config'],
     },
     {
         category: 'launchType',
@@ -82,6 +88,8 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         icon: Package,
         inputs: 1,
         outputs: 1,
+        inputTypes: ['token'],
+        outputTypes: ['config'],
     },
     {
         category: 'launchType',
@@ -92,9 +100,13 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         icon: Network,
         inputs: 1,
         outputs: 1,
+        inputTypes: ['token'],
+        outputTypes: ['config'],
     },
 
-    // Trades
+    // ── Trades ──────────────────────────────────────────────────────────��──
+    // Trade nodes pass config through — they consume and re-emit the execution
+    // context so trades can be chained: LaunchType → Trade → Trade → …
     {
         category: 'trade',
         nodeType: 'tradeNode',
@@ -104,6 +116,8 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         icon: Layers,
         inputs: 1,
         outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['config'],
     },
     {
         category: 'trade',
@@ -114,6 +128,8 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         icon: Shuffle,
         inputs: 1,
         outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['config'],
     },
     {
         category: 'trade',
@@ -124,6 +140,8 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         icon: Users,
         inputs: 1,
         outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['config'],
     },
     {
         category: 'trade',
@@ -134,6 +152,8 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         icon: TrendingUp,
         inputs: 1,
         outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['config'],
     },
     {
         category: 'trade',
@@ -144,9 +164,11 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         icon: UserPlus,
         inputs: 1,
         outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['config'],
     },
 
-    // Trigger
+    // ── Triggers ───────────────────────────────────────────────────────────
     {
         category: 'trigger',
         nodeType: 'triggerNode',
@@ -156,6 +178,8 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         icon: CheckCircle2,
         inputs: 1,
         outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['signal'],
     },
     {
         category: 'trigger',
@@ -166,6 +190,8 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         icon: Receipt,
         inputs: 1,
         outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['signal'],
     },
     {
         category: 'trigger',
@@ -176,6 +202,8 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         icon: Timer,
         inputs: 1,
         outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['signal'],
         defaultData: { seconds: 5 },
     },
     {
@@ -187,6 +215,8 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         icon: Dices,
         inputs: 1,
         outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['signal'],
         defaultData: { minSeconds: 5, maxSeconds: 30 },
     },
     {
@@ -198,9 +228,11 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         icon: UserCheck,
         inputs: 1,
         outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['signal'],
     },
 
-    // Conditionals
+    // ── Conditionals ───────────────────────────────────────────────────────
     {
         category: 'conditional',
         nodeType: 'conditionalNode',
@@ -210,6 +242,8 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         icon: RotateCw,
         inputs: 1,
         outputs: 2,
+        inputTypes: ['signal'],
+        outputTypes: ['signal', 'signal'],
         defaultData: { maxIterations: 3 },
     },
     {
@@ -221,6 +255,8 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         icon: GitBranch,
         inputs: 1,
         outputs: 2,
+        inputTypes: ['signal'],
+        outputTypes: ['signal', 'signal'],
         defaultData: { condition: '' },
     },
     {
@@ -232,6 +268,8 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         icon: SplitSquareHorizontal,
         inputs: 1,
         outputs: 'dynamic',
+        inputTypes: ['signal'],
+        outputTypes: ['branch'],
         defaultData: { branchCount: 2, branchLabels: ['Case 1', 'Case 2'] },
     },
 ]

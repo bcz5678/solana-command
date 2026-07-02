@@ -17,6 +17,8 @@ export default function TokenNode({ data, selected }: NodeProps) {
             subLabel={symbol ? `${symbol}` : 'No token selected'}
             inputs={0}
             outputCount={1}
+            inputTypes={d.inputTypes}
+            outputTypes={d.outputTypes}
             selected={selected}
             onConfigure={d.onConfigure}
             onDelete={d.onDelete}

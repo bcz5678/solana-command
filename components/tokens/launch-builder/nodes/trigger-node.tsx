@@ -30,6 +30,8 @@ export default function TriggerNode({ data, selected }: NodeProps) {
             subLabel={subLabelFor(d)}
             inputs={1}
             outputCount={1}
+            inputTypes={d.inputTypes}
+            outputTypes={d.outputTypes}
             selected={selected}
             onConfigure={d.onConfigure}
             onDelete={d.onDelete}

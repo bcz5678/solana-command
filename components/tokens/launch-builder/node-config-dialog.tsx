@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import type { Node } from '@xyflow/react'
+import type { Node, Edge } from '@xyflow/react'
 import BN from 'bn.js'
 import {
     Dialog,
@@ -22,20 +22,21 @@ import { LaunchType } from '@/components/tokens/launch/types'
 import { TokenMint } from '@/lib/types/token-mint'
 import { WalletTradeDTO } from '@/lib/types/wallet'
 import { solStringToLamports } from '@/lib/lamports'
-import { TokenMintInput } from '@/components/trade/strategy-trade/TokenMintInput'
 import StrategyWalletSelector from '@/components/trade/strategy-trade/strategy-wallet-selector'
 import { SlippageControl } from '@/components/trade/trade/SlippageControl'
 import { BuilderNodeData, LaunchTypeSubtype, TradeSubtype, TriggerSubtype, ConditionalSubtype } from './types'
 import { PALETTE_ITEMS } from './node-palette-config'
+import { findTokenNodeData } from './handle-types'
 
 type Props = {
     node: Node | null
     nodes: Node[]
+    edges: Edge[]
     onOpenChange: (open: boolean) => void
     onSave: (nodeId: string, config: Record<string, unknown>) => void
 }
 
-export default function NodeConfigDialog({ node, nodes, onOpenChange, onSave }: Props) {
+export default function NodeConfigDialog({ node, nodes, edges, onOpenChange, onSave }: Props) {
     const data = node?.data as unknown as BuilderNodeData | undefined
 
     return (
@@ -47,6 +48,7 @@ export default function NodeConfigDialog({ node, nodes, onOpenChange, onSave }: 
                         nodeId={node.id}
                         data={data}
                         nodes={nodes}
+                        edges={edges}
                         onSave={onSave}
                         onClose={() => onOpenChange(false)}
                     />
@@ -60,12 +62,14 @@ function ConfigBody({
     nodeId,
     data,
     nodes,
+    edges,
     onSave,
     onClose,
 }: {
     nodeId: string
     data: BuilderNodeData
     nodes: Node[]
+    edges: Edge[]
     onSave: Props['onSave']
     onClose: () => void
 }) {
@@ -109,12 +113,21 @@ function ConfigBody({
                         subtype={data.subtype as LaunchTypeSubtype}
                         config={config}
                         patch={patch}
+                        nodeId={nodeId}
                         nodes={nodes}
+                        edges={edges}
                     />
                 )}
 
                 {data.category === 'trade' && (
-                    <TradeFields subtype={data.subtype as TradeSubtype} config={config} patch={patch} />
+                    <TradeFields
+                        subtype={data.subtype as TradeSubtype}
+                        config={config}
+                        patch={patch}
+                        nodeId={nodeId}
+                        nodes={nodes}
+                        edges={edges}
+                    />
                 )}
 
                 {data.category === 'trigger' && (
@@ -154,21 +167,21 @@ function LaunchTypeFields({
     subtype,
     config,
     patch,
+    nodeId,
     nodes,
+    edges,
 }: {
     subtype: LaunchTypeSubtype
     config: Record<string, unknown>
     patch: (p: Record<string, unknown>) => void
+    nodeId: string
     nodes: Node[]
+    edges: Edge[]
 }) {
     const devOnly = subtype === 'dev0DevOnly'
 
-    // The dev wallet to highlight comes from whatever Token node is on the
-    // canvas — there's no graph data-flow evaluation yet, so we just look it up directly.
-    const tokenNode = nodes
-        .map((n) => n.data as unknown as BuilderNodeData)
-        .find((d) => d.category === 'token')
-    const devWalletId = (tokenNode?.config.devWalletId as string | null | undefined) ?? null
+    const tokenNodeData = findTokenNodeData(nodeId, nodes, edges)
+    const devWalletId = (tokenNodeData?.config.devWalletId as string | null | undefined) ?? null
 
     const [launchConfig, setLaunchConfig] = useState<LaunchConfig>(
         () =>
@@ -231,10 +244,16 @@ function TradeFields({
     subtype,
     config,
     patch,
+    nodeId,
+    nodes,
+    edges,
 }: {
     subtype: TradeSubtype
     config: Record<string, unknown>
     patch: (p: Record<string, unknown>) => void
+    nodeId: string
+    nodes: Node[]
+    edges: Edge[]
 }) {
     const [selectedWalletIds, setSelectedWalletIds] = useState<Set<string>>(
         new Set((config.selectedWalletIds as string[]) ?? []),
@@ -243,6 +262,11 @@ function TradeFields({
         (config.tradeAmounts as Record<string, string>) ?? {},
     )
     const [slippage, setSlippage] = useState<number>((config.slippage as number) ?? 0.05)
+
+    const tokenNodeData = findTokenNodeData(nodeId, nodes, edges)
+    const tokenName   = (tokenNodeData?.config.tokenName   as string | undefined) ?? null
+    const tokenSymbol = (tokenNodeData?.config.tokenSymbol as string | undefined) ?? null
+    const tokenMint   = (tokenNodeData?.config.tokenMint   as string | undefined) ?? null
 
     function updateWallets(ids: Set<string>) {
         setSelectedWalletIds(ids)
@@ -269,13 +293,24 @@ function TradeFields({
 
     return (
         <div className="flex flex-col gap-6">
+            {/* Token — read-only, sourced from the Token node */}
             <div className="flex flex-col gap-1.5">
                 <Label className="text-xs">Token</Label>
-                <TokenMintInput
-                    onTokenChange={(mint, resolved, name, symbol) =>
-                        patch({ tokenMint: mint, tokenResolved: resolved, tokenName: name, tokenSymbol: symbol })
-                    }
-                />
+                {tokenMint ? (
+                    <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2">
+                        <span className="text-sm font-medium">{tokenName ?? tokenMint}</span>
+                        {tokenSymbol && (
+                            <span className="text-xs text-muted-foreground">{tokenSymbol}</span>
+                        )}
+                        <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+                            {tokenMint.slice(0, 6)}…{tokenMint.slice(-4)}
+                        </span>
+                    </div>
+                ) : (
+                    <p className="text-xs text-muted-foreground">
+                        Add a Token node and select a token — it will appear here automatically.
+                    </p>
+                )}
             </div>
 
             {subtype === 'staggeredBuy' && (

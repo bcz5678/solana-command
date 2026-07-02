@@ -23,6 +23,8 @@ export default function TradeNode({ data, selected }: NodeProps) {
             subLabel={subLabelParts.length ? subLabelParts.join(' · ') : 'Not configured'}
             inputs={1}
             outputCount={1}
+            inputTypes={d.inputTypes}
+            outputTypes={d.outputTypes}
             selected={selected}
             onConfigure={d.onConfigure}
             onDelete={d.onDelete}

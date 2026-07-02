@@ -28,6 +28,8 @@ export default function LaunchTypeNode({ data, selected }: NodeProps) {
             subLabel={subLabel}
             inputs={1}
             outputCount={1}
+            inputTypes={d.inputTypes}
+            outputTypes={d.outputTypes}
             selected={selected}
             onConfigure={d.onConfigure}
             onDelete={d.onDelete}

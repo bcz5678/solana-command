@@ -1,5 +1,6 @@
 import type { Node, Edge } from '@xyflow/react'
 import { BuilderNodeCategory, BuilderNodeData, BuilderNodeType, BuilderSubtype } from './types'
+import { PALETTE_ITEMS } from './node-palette-config'
 
 type Callbacks = Pick<BuilderNodeData, 'onConfigure' | 'onDelete'>
 
@@ -51,18 +52,23 @@ export function applyLaunchProfile(
     profile: LaunchProfile,
     makeCallbacks: (id: string) => Callbacks,
 ): { nodes: Node[]; edges: Edge[] } {
-    const nodes: Node[] = profile.nodes.map((pn) => ({
-        id: pn.id,
-        type: pn.type,
-        position: pn.position,
-        data: {
-            category: pn.category,
-            subtype: pn.subtype,
-            label: pn.label,
-            config: pn.config,
-            ...makeCallbacks(pn.id),
-        } as unknown as Record<string, unknown>,
-    }))
+    const nodes: Node[] = profile.nodes.map((pn) => {
+        const paletteDef = PALETTE_ITEMS.find((i) => i.subtype === pn.subtype)
+        return {
+            id: pn.id,
+            type: pn.type,
+            position: pn.position,
+            data: {
+                category: pn.category,
+                subtype: pn.subtype,
+                label: pn.label,
+                config: pn.config,
+                inputTypes:  paletteDef?.inputTypes  ?? [],
+                outputTypes: paletteDef?.outputTypes ?? [],
+                ...makeCallbacks(pn.id),
+            } as unknown as Record<string, unknown>,
+        }
+    })
 
     const edges: Edge[] = profile.edges.map((pe) => ({
         id: pe.id,

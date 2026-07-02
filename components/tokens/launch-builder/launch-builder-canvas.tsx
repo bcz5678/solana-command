@@ -31,6 +31,7 @@ import ConditionalNode from './nodes/conditional-node'
 import DeletableEdge from './edges/deletable-edge'
 import { CATEGORY_LABELS, SINGLE_INSTANCE_CATEGORIES } from './node-palette-config'
 import { PaletteNodeDef, BuilderNodeData } from './types'
+import { isCompatibleConnection, getNodeOutputTypes } from './handle-types'
 
 const nodeTypes = {
     tokenNode: TokenNode,
@@ -70,6 +71,27 @@ export default function LaunchBuilderCanvas({
     const { screenToFlowPosition } = useReactFlow()
     const [duplicateCategory, setDuplicateCategory] = useState<PaletteNodeDef['category'] | null>(null)
 
+    const isValidConnection = useCallback(
+        (connection: Edge | { source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }) => {
+            const sourceNode = nodes.find((n) => n.id === connection.source)
+            const targetNode = nodes.find((n) => n.id === connection.target)
+            if (!sourceNode || !targetNode) return false
+            const srcData = sourceNode.data as unknown as BuilderNodeData
+            const tgtData = targetNode.data as unknown as BuilderNodeData
+            const outTypes = getNodeOutputTypes(srcData)
+            const inTypes  = tgtData.inputTypes ?? []
+            let outputIdx = 0
+            if (connection.sourceHandle?.startsWith('output-')) {
+                outputIdx = parseInt(connection.sourceHandle.replace('output-', ''), 10)
+            }
+            const srcType = outTypes[outputIdx]
+            const tgtType = inTypes[0]
+            if (!srcType || !tgtType) return false
+            return isCompatibleConnection(srcType, tgtType)
+        },
+        [nodes],
+    )
+
     const onDragOver = useCallback((event: React.DragEvent) => {
         event.preventDefault()
         event.dataTransfer.dropEffect = 'move'
@@ -99,6 +121,8 @@ export default function LaunchBuilderCanvas({
                 subtype: item.subtype,
                 label: item.label,
                 config: { ...(item.defaultData ?? {}) },
+                inputTypes: item.inputTypes,
+                outputTypes: item.outputTypes,
                 onConfigure: () => onConfigureNode(id),
                 onDelete: () => onDeleteNode(id),
             }
@@ -119,6 +143,7 @@ export default function LaunchBuilderCanvas({
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
+                isValidConnection={isValidConnection}
                 onDrop={onDrop}
                 onDragOver={onDragOver}
                 defaultViewport={{ x: 0, y: 0, zoom: 1.0 }}

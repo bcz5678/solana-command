@@ -181,6 +181,7 @@ function LaunchBuilderInner() {
                 <NodeConfigDialog
                     node={configNode}
                     nodes={nodes}
+                    edges={edges}
                     onOpenChange={(open) => { if (!open) setConfigNodeId(null) }}
                     onSave={onSaveConfig}
                 />

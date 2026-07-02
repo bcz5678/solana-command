@@ -3,8 +3,9 @@
 import { Handle, Position } from '@xyflow/react'
 import { Settings2, Trash2, LucideIcon } from 'lucide-react'
 import { Card } from '@/components/ui/card'
-import { BuilderNodeCategory } from '../types'
+import { BuilderNodeCategory, HandleDataType } from '../types'
 import { CATEGORY_ACCENT } from '../node-palette-config'
+import { HANDLE_TYPE_META } from '../handle-types'
 
 type Props = {
     icon: LucideIcon
@@ -14,6 +15,8 @@ type Props = {
     inputs: 0 | 1
     outputCount: number
     outputLabels?: string[]
+    inputTypes?: HandleDataType[]
+    outputTypes?: HandleDataType[]
     selected?: boolean
     onConfigure?: () => void
     onDelete?: () => void
@@ -27,11 +30,15 @@ export default function BaseNodeShell({
     inputs,
     outputCount,
     outputLabels,
+    inputTypes,
+    outputTypes,
     selected,
     onConfigure,
     onDelete,
 }: Props) {
     const accent = CATEGORY_ACCENT[category]
+    const inputHandleMeta  = HANDLE_TYPE_META[inputTypes?.[0]  ?? 'config']
+    const outputHandleMeta = (i: number) => HANDLE_TYPE_META[outputTypes?.[i] ?? outputTypes?.[0] ?? 'config']
 
     return (
         <div className="relative">
@@ -80,7 +87,7 @@ export default function BaseNodeShell({
                     <Handle
                         type="target"
                         position={Position.Top}
-                        className={['size-2.5! border-2! bg-background! outline-2! outline-offset-1! outline-border', accent.border].join(' ')}
+                        className={['size-2.5! border-2! bg-background! outline-2! outline-offset-1! outline-border', inputHandleMeta.border].join(' ')}
                     />
                 )}
 
@@ -88,12 +95,13 @@ export default function BaseNodeShell({
                     <Handle
                         type="source"
                         position={Position.Bottom}
-                        className={['size-2.5! border-2! bg-background! outline-2! outline-offset-1! outline-border', accent.border].join(' ')}
+                        className={['size-2.5! border-2! bg-background! outline-2! outline-offset-1! outline-border', outputHandleMeta(0).border].join(' ')}
                     />
                 )}
 
                 {outputCount > 1 && Array.from({ length: outputCount }).map((_, i) => {
                     const leftPct = ((i + 1) / (outputCount + 1)) * 100
+                    const meta = outputHandleMeta(i)
                     return (
                         <Handle
                             key={i}
@@ -101,7 +109,7 @@ export default function BaseNodeShell({
                             type="source"
                             position={Position.Bottom}
                             style={{ left: `${leftPct}%` }}
-                            className={['size-2.5! border-2! bg-background! outline-2! outline-offset-1! outline-border', accent.border].join(' ')}
+                            className={['size-2.5! border-2! bg-background! outline-2! outline-offset-1! outline-border', meta.border].join(' ')}
                         >
                             {outputLabels?.[i] && (
                                 <span className="pointer-events-none absolute top-3.5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[9px] text-muted-foreground">
