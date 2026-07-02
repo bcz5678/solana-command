@@ -9,13 +9,12 @@ export async function GET(_req: NextRequest) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser()
   if (authErr || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { data, error } = await supabase
-    .from('launch_configs')
-    .select('id, name, description, launch_type, status, updated_at')
-    .eq('user_id', user.id)
-    .order('updated_at', { ascending: false })
+  const { data, error } = await supabase.rpc('get_launch_configs')
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) {
+    console.error('[launch-builder/config/list]', error)
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
 
   return NextResponse.json(data ?? [])
 }

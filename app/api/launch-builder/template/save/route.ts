@@ -9,22 +9,23 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json()
 
-  const { data, error } = await supabase
-    .from('launch_templates')
-    .upsert({
-      ...(body.id ? { id: body.id } : {}),
-      user_id:     user.id,
-      name:        body.name        ?? 'Untitled Template',
-      description: body.description ?? null,
-      launch_type: body.launchType  ?? null,
-      graph:       body.graph       ?? {},
-      settings:    body.settings    ?? {},
-      is_shared:   body.isShared    ?? false,
-    })
-    .select()
-    .single()
+  const { data, error } = await supabase.rpc('save_launch_template', {
+    p_id:          body.id          ?? null,
+    p_name:        body.name        ?? 'Untitled Template',
+    p_description: body.description ?? null,
+    p_launch_type: body.launchType  ?? null,
+    p_graph:       body.graph       ?? {},
+    p_settings:    body.settings    ?? {},
+    p_is_shared:   body.isShared    ?? false,
+  })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) {
+    console.error('[launch-builder/template/save]', error)
+    return NextResponse.json(
+      { error: error.message, code: error.code, hint: error.hint, details: error.details },
+      { status: 500 },
+    )
+  }
 
   return NextResponse.json(data, { status: 200 })
 }

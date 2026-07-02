@@ -115,6 +115,7 @@ function LaunchBuilderInner() {
     }, [nodes, profile, configId])
 
     const onSaveAsTemplate = useCallback(async (): Promise<boolean> => {
+        const launchType = profile.nodes.find((n) => n.category === 'launchType')?.subtype ?? 'dev0DevOnly'
         try {
             const res = await fetch('/api/launch-builder/template/save', {
                 method:  'POST',
@@ -122,6 +123,7 @@ function LaunchBuilderInner() {
                 body: JSON.stringify({
                     name:        profile.name,
                     description: profile.description,
+                    launchType,
                     graph:       profile,
                     settings:    {},
                 }),

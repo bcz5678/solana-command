@@ -9,13 +9,12 @@ export async function GET(_req: NextRequest) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser()
   if (authErr || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { data, error } = await supabase
-    .from('launch_templates')
-    .select('id, name, description, launch_type, use_count, is_shared, updated_at')
-    .or(`user_id.eq.${user.id},is_shared.eq.true`)
-    .order('use_count', { ascending: false })
+  const { data, error } = await supabase.rpc('get_launch_templates')
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) {
+    console.error('[launch-builder/template/list]', error)
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
 
   return NextResponse.json(data ?? [])
 }

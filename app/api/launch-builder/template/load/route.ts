@@ -12,17 +12,16 @@ export async function GET(req: NextRequest) {
   const id = new URL(req.url).searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
-  const { data, error } = await supabase
-    .from('launch_templates')
-    .select('*')
-    .eq('id', id)
-    .or(`user_id.eq.${user.id},is_shared.eq.true`)
-    .single()
+  // get_launch_templates returns all accessible templates; filter to the requested id
+  const { data, error } = await supabase.rpc('get_launch_templates')
 
   if (error) {
-    const status = error.code === 'PGRST116' ? 404 : 500
-    return NextResponse.json({ error: error.message }, { status })
+    console.error('[launch-builder/template/load]', error)
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json(data)
+  const template = Array.isArray(data) ? data.find((t: { id: string }) => t.id === id) : null
+  if (!template) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  return NextResponse.json(template)
 }
