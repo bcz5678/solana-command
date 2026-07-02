@@ -52,6 +52,7 @@ export default function BaseNodeShell({
                     accent.border,
                     selected ? `ring-2 ring-offset-1 ring-offset-background ${accent.border.replace('border-', 'ring-')}` : '',
                 ].join(' ')}
+                onDoubleClick={(e) => { e.stopPropagation(); onConfigure?.() }}
             >
                 <div className="flex items-center gap-2 px-3">
                     <span className={['flex size-6 shrink-0 items-center justify-center rounded-md', accent.bg].join(' ')}>

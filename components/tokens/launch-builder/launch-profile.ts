@@ -1,6 +1,8 @@
 import type { Node, Edge } from '@xyflow/react'
 import { BuilderNodeCategory, BuilderNodeData, BuilderNodeType, BuilderSubtype } from './types'
 
+type Callbacks = Pick<BuilderNodeData, 'onConfigure' | 'onDelete'>
+
 export const LAUNCH_PROFILE_SCHEMA_VERSION = 1
 
 export type LaunchProfileNode = {
@@ -40,6 +42,40 @@ export type LaunchProfileMeta = {
  * Pure and side-effect free — callers (UI, future save API) re-run this
  * whenever nodes/edges change rather than maintaining a parallel copy.
  */
+/**
+ * Reconstructs live xyflow nodes/edges from a saved LaunchProfile.
+ * Callbacks (onConfigure, onDelete) are re-created via makeCallbacks since
+ * they are stripped from the profile on save (functions aren't JSON-serialisable).
+ */
+export function applyLaunchProfile(
+    profile: LaunchProfile,
+    makeCallbacks: (id: string) => Callbacks,
+): { nodes: Node[]; edges: Edge[] } {
+    const nodes: Node[] = profile.nodes.map((pn) => ({
+        id: pn.id,
+        type: pn.type,
+        position: pn.position,
+        data: {
+            category: pn.category,
+            subtype: pn.subtype,
+            label: pn.label,
+            config: pn.config,
+            ...makeCallbacks(pn.id),
+        } as unknown as Record<string, unknown>,
+    }))
+
+    const edges: Edge[] = profile.edges.map((pe) => ({
+        id: pe.id,
+        source: pe.source,
+        sourceHandle: pe.sourceHandle,
+        target: pe.target,
+        targetHandle: pe.targetHandle,
+        type: 'deletable',
+    }))
+
+    return { nodes, edges }
+}
+
 export function buildLaunchProfile(
     nodes: Node[],
     edges: Edge[],
