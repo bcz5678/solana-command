@@ -48,6 +48,7 @@ export default function TriggerNode({ data, selected }: NodeProps) {
             onDelete={d.onDelete}
             awaitingContinue={d.awaitingContinue}
             onContinue={d.onContinue}
+            countdown={d.runCountdown}
         />
     )
 }

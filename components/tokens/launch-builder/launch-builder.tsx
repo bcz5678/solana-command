@@ -58,11 +58,15 @@ function LaunchBuilderInner() {
             const entryIds = getExecEntryNodeIds(execNodeId, edgesRef.current)
             if (entryIds.length === 0) return
 
-            setNodes((nds) => nds.map((n) => ({ ...n, selected: false, data: { ...n.data, awaitingContinue: false } })))
+            setNodes((nds) => nds.map((n) => ({
+                ...n,
+                selected: false,
+                data: { ...n.data, awaitingContinue: false, runCountdown: undefined },
+            })))
 
             // Each branch walks independently on its own timer — a Human In The
-            // Loop pause only blocks the branch it's on, not sibling branches
-            // that forked off earlier (e.g. from a Switch/If-Then/Loop).
+            // Loop pause or a Timer countdown only blocks the branch it's on,
+            // not sibling branches that forked off earlier (e.g. from a Switch).
             const activeIds = new Set<string>()
             const hitlWaiting = new Map<string, () => void>()
             const visited = new Set<string>()
@@ -73,6 +77,21 @@ function LaunchBuilderInner() {
                 new Promise<void>((resolve) => {
                     hitlWaiting.set(nodeId, resolve)
                     setNodes((nds) => nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, awaitingContinue: true } } : n)))
+                })
+            const countdown = (nodeId: string, totalSeconds: number) =>
+                new Promise<void>((resolve) => {
+                    let remaining = Math.max(0, Math.round(totalSeconds))
+                    const tick = () => {
+                        if (remaining <= 0) {
+                            setNodes((nds) => nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, runCountdown: undefined } } : n)))
+                            resolve()
+                            return
+                        }
+                        setNodes((nds) => nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, runCountdown: remaining } } : n)))
+                        remaining -= 1
+                        setTimeout(tick, 1000)
+                    }
+                    tick()
                 })
 
             continueNodeRef.current = (nodeId: string) => {
@@ -93,6 +112,14 @@ function LaunchBuilderInner() {
                 const data = nodesRef.current.find((n) => n.id === nodeId)?.data as unknown as BuilderNodeData | undefined
                 if (data?.subtype === 'humanInTheLoop') {
                     await waitForContinue(nodeId)
+                } else if (data?.subtype === 'timerSet') {
+                    await countdown(nodeId, Number(data.config?.seconds ?? 5))
+                } else if (data?.subtype === 'timerRandomInterval') {
+                    const min = Number(data.config?.minSeconds ?? 5)
+                    const max = Number(data.config?.maxSeconds ?? 30)
+                    const lo = Math.min(min, max)
+                    const hi = Math.max(min, max)
+                    await countdown(nodeId, lo + Math.random() * (hi - lo))
                 } else {
                     await wait(RUN_STEP_MS)
                 }

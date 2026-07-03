@@ -1,7 +1,7 @@
 'use client'
 
 import { Handle, Position } from '@xyflow/react'
-import { Settings2, Trash2, Play, LucideIcon } from 'lucide-react'
+import { Settings2, Trash2, Play, Timer, LucideIcon } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { BuilderNodeCategory, HandleDataType } from '../types'
 import { CATEGORY_ACCENT } from '../node-palette-config'
@@ -28,6 +28,8 @@ type Props = {
     awaitingContinue?: boolean
     /** Human In The Loop trigger only — resumes a paused dry-run past this node. */
     onContinue?: () => void
+    /** Timer triggers only — whole seconds remaining while the dry-run engine counts down. */
+    countdown?: number
 }
 
 export default function BaseNodeShell({
@@ -47,6 +49,7 @@ export default function BaseNodeShell({
     onRun,
     awaitingContinue,
     onContinue,
+    countdown,
 }: Props) {
     const accent = CATEGORY_ACCENT[category]
     const inputHandleMeta  = HANDLE_TYPE_META[inputTypes?.[0]  ?? 'config']
@@ -72,7 +75,9 @@ export default function BaseNodeShell({
                     accent.border,
                     awaitingContinue
                         ? 'ring-2 ring-offset-1 ring-offset-background ring-amber-500 animate-pulse'
-                        : selected ? `ring-2 ring-offset-1 ring-offset-background ${accent.border.replace('border-', 'ring-')}` : '',
+                        : typeof countdown === 'number'
+                            ? 'ring-2 ring-offset-1 ring-offset-background ring-lime-500 animate-pulse'
+                            : selected ? `ring-2 ring-offset-1 ring-offset-background ${accent.border.replace('border-', 'ring-')}` : '',
                 ].join(' ')}
                 onDoubleClick={(e) => { e.stopPropagation(); onConfigure?.() }}
             >
@@ -119,6 +124,15 @@ export default function BaseNodeShell({
                             <Play className="size-3" />
                             Continue
                         </button>
+                    </div>
+                )}
+
+                {typeof countdown === 'number' && (
+                    <div className="px-3 pt-2">
+                        <div className="flex w-full items-center justify-center gap-1.5 rounded-md border border-lime-500/40 bg-lime-500/10 px-2 py-1.5 text-xs font-medium text-lime-400">
+                            <Timer className="size-3" />
+                            {countdown}s remaining
+                        </div>
                     </div>
                 )}
 

@@ -77,4 +77,6 @@ export type BuilderNodeData = {
     awaitingContinue?: boolean
     /** Human In The Loop trigger only — resumes a paused dry-run past this node. */
     onContinue?: () => void
+    /** Timer triggers only — whole seconds remaining, set by the dry-run engine while counting down. */
+    runCountdown?: number
 }
