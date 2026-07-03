@@ -6,6 +6,7 @@ import { BuilderNodeData } from '../types'
 import { PALETTE_ITEMS } from '../node-palette-config'
 
 function subLabelFor(data: BuilderNodeData): string | undefined {
+    const dir = (data.config?.direction as string) === 'below' ? '≤' : '≥'
     switch (data.subtype) {
         case 'timerSet':
             return `${data.config?.seconds ?? 5}s`
@@ -13,6 +14,16 @@ function subLabelFor(data: BuilderNodeData): string | undefined {
             return `${data.config?.minSeconds ?? 5}s – ${data.config?.maxSeconds ?? 30}s`
         case 'humanInTheLoop':
             return (data.config?.instructions as string) || 'Waits for manual continue'
+        case 'marketCapThreshold':
+            return `${dir} $${Number(data.config?.targetMarketCapUSD ?? 50000).toLocaleString()}`
+        case 'holderCountThreshold':
+            return `${dir} ${Number(data.config?.targetHolderCount ?? 100).toLocaleString()} holders`
+        case 'volumeThreshold':
+            return `${dir} ${data.config?.targetVolumeSol ?? 10} SOL vol`
+        case 'priceTarget':
+            return `${dir} $${data.config?.targetPriceUSD ?? 0.001}`
+        case 'retryBackoff':
+            return `${data.config?.maxRetries ?? 3} retries · ${data.config?.initialDelaySeconds ?? 5}s base`
         default:
             return undefined
     }

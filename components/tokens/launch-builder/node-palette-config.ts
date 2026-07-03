@@ -6,6 +6,7 @@ import {
     Network,
     Layers,
     Shuffle,
+    TrendingDown,
     Users,
     TrendingUp,
     UserPlus,
@@ -17,6 +18,13 @@ import {
     RotateCw,
     GitBranch,
     SplitSquareHorizontal,
+    Database,
+    Webhook,
+    BarChart3,
+    Users2,
+    Activity,
+    DollarSign,
+    RefreshCw,
 } from 'lucide-react'
 import { BuilderNodeCategory, PaletteNodeDef } from './types'
 
@@ -29,6 +37,7 @@ export const CATEGORY_LABELS: Record<BuilderNodeCategory, string> = {
     trade: 'Trades',
     trigger: 'Trigger',
     conditional: 'Conditionals',
+    utility: 'Utility',
 }
 
 export const CATEGORY_ACCENT: Record<BuilderNodeCategory, { border: string; bg: string; text: string }> = {
@@ -37,6 +46,7 @@ export const CATEGORY_ACCENT: Record<BuilderNodeCategory, { border: string; bg: 
     trade:       { border: 'border-emerald-500', bg: 'bg-emerald-500/5', text: 'text-emerald-500' },
     trigger:     { border: 'border-amber-500',   bg: 'bg-amber-500/5',   text: 'text-amber-500' },
     conditional: { border: 'border-rose-500',    bg: 'bg-rose-500/5',    text: 'text-rose-500' },
+    utility:     { border: 'border-cyan-500',    bg: 'bg-cyan-500/5',    text: 'text-cyan-500' },
 }
 
 export const PALETTE_ITEMS: PaletteNodeDef[] = [
@@ -130,6 +140,19 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         outputs: 1,
         inputTypes: ['config'],
         outputTypes: ['config'],
+    },
+    {
+        category: 'trade',
+        nodeType: 'tradeNode',
+        subtype: 'staggeredSell',
+        label: 'Staggered Sell',
+        description: 'Time-spread sells across wallets with randomized delay. Sell % applied to live balances at runtime.',
+        icon: TrendingDown,
+        inputs: 1,
+        outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['config'],
+        defaultData: { sellPct: 100, delayMinSeconds: 5, delayMaxSeconds: 30 },
     },
     {
         category: 'trade',
@@ -231,6 +254,98 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         inputTypes: ['config'],
         outputTypes: ['signal'],
     },
+    {
+        category: 'trigger',
+        nodeType: 'triggerNode',
+        subtype: 'marketCapThreshold',
+        label: 'Market Cap Threshold',
+        description: 'Polls until the token market cap crosses a target value.',
+        icon: BarChart3,
+        inputs: 1,
+        outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['signal'],
+        defaultData: { targetMarketCapUSD: 50000, direction: 'above', pollIntervalSeconds: 10 },
+    },
+    {
+        category: 'trigger',
+        nodeType: 'triggerNode',
+        subtype: 'holderCountThreshold',
+        label: 'Holder Count Threshold',
+        description: 'Polls until the number of unique token holders crosses a target.',
+        icon: Users2,
+        inputs: 1,
+        outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['signal'],
+        defaultData: { targetHolderCount: 100, direction: 'above', pollIntervalSeconds: 15 },
+    },
+    {
+        category: 'trigger',
+        nodeType: 'triggerNode',
+        subtype: 'volumeThreshold',
+        label: 'Volume Threshold',
+        description: 'Polls until cumulative trading volume crosses a target SOL amount.',
+        icon: Activity,
+        inputs: 1,
+        outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['signal'],
+        defaultData: { targetVolumeSol: 10, pollIntervalSeconds: 10 },
+    },
+    {
+        category: 'trigger',
+        nodeType: 'triggerNode',
+        subtype: 'priceTarget',
+        label: 'Price Target',
+        description: 'Polls until the token price crosses a target value.',
+        icon: DollarSign,
+        inputs: 1,
+        outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['signal'],
+        defaultData: { targetPriceUSD: 0.001, direction: 'above', pollIntervalSeconds: 5 },
+    },
+    {
+        category: 'trigger',
+        nodeType: 'triggerNode',
+        subtype: 'retryBackoff',
+        label: 'Retry / Backoff',
+        description: 'Retries the previous step with exponential backoff on failure.',
+        icon: RefreshCw,
+        inputs: 1,
+        outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['signal'],
+        defaultData: { maxRetries: 3, initialDelaySeconds: 5, multiplier: 2, maxDelaySeconds: 60 },
+    },
+
+    // ── Utility ────────────────────────────────────────────────────────────
+    {
+        category: 'utility',
+        nodeType: 'dataNode',
+        subtype: 'dataMapper',
+        label: 'Data',
+        description: 'Extracts token and launch context into a named key-value payload for downstream nodes.',
+        icon: Database,
+        inputs: 1,
+        outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['data'],
+    },
+    {
+        category: 'utility',
+        nodeType: 'webhookNode',
+        subtype: 'webhook',
+        label: 'Webhook',
+        description: 'POSTs the incoming data payload to an HTTP endpoint and waits for a response.',
+        icon: Webhook,
+        inputs: 1,
+        outputs: 1,
+        inputTypes: ['data'],
+        outputTypes: ['signal'],
+        defaultData: { url: '', authType: 'none', authValue: '', customHeaders: [] },
+    },
 
     // ── Conditionals ───────────────────────────────────────────────────────
     {
@@ -275,7 +390,7 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
 ]
 
 export const PALETTE_GROUPS: { category: BuilderNodeCategory; items: PaletteNodeDef[] }[] = (
-    ['token', 'launchType', 'trade', 'trigger', 'conditional'] as BuilderNodeCategory[]
+    ['token', 'launchType', 'trade', 'trigger', 'conditional', 'utility'] as BuilderNodeCategory[]
 ).map((category) => ({
     category,
     items: PALETTE_ITEMS.filter((item) => item.category === category),

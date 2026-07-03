@@ -28,6 +28,8 @@ import LaunchTypeNode from './nodes/launch-type-node'
 import TradeNode from './nodes/trade-node'
 import TriggerNode from './nodes/trigger-node'
 import ConditionalNode from './nodes/conditional-node'
+import DataNode from './nodes/data-node'
+import WebhookNode from './nodes/webhook-node'
 import DeletableEdge from './edges/deletable-edge'
 import { CATEGORY_LABELS, SINGLE_INSTANCE_CATEGORIES } from './node-palette-config'
 import { PaletteNodeDef, BuilderNodeData } from './types'
@@ -39,6 +41,8 @@ const nodeTypes = {
     tradeNode: TradeNode,
     triggerNode: TriggerNode,
     conditionalNode: ConditionalNode,
+    dataNode: DataNode,
+    webhookNode: WebhookNode,
 }
 
 const edgeTypes = {

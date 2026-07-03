@@ -24,7 +24,7 @@ import { WalletTradeDTO } from '@/lib/types/wallet'
 import { solStringToLamports } from '@/lib/lamports'
 import StrategyWalletSelector from '@/components/trade/strategy-trade/strategy-wallet-selector'
 import { SlippageControl } from '@/components/trade/trade/SlippageControl'
-import { BuilderNodeData, LaunchTypeSubtype, TradeSubtype, TriggerSubtype, ConditionalSubtype } from './types'
+import { BuilderNodeData, LaunchTypeSubtype, TradeSubtype, TriggerSubtype, ConditionalSubtype, UtilitySubtype } from './types'
 import { PALETTE_ITEMS } from './node-palette-config'
 import { findTokenNodeData } from './handle-types'
 
@@ -136,6 +136,17 @@ function ConfigBody({
 
                 {data.category === 'conditional' && (
                     <ConditionalFields subtype={data.subtype as ConditionalSubtype} config={config} patch={patch} />
+                )}
+
+                {data.category === 'utility' && (
+                    <UtilityFields
+                        subtype={data.subtype as UtilitySubtype}
+                        config={config}
+                        patch={patch}
+                        nodeId={nodeId}
+                        nodes={nodes}
+                        edges={edges}
+                    />
                 )}
             </div>
 
@@ -313,27 +324,12 @@ function TradeFields({
                 )}
             </div>
 
-            {subtype === 'staggeredBuy' && (
-                <div className="flex gap-3">
-                    <div className="flex flex-col gap-1.5">
-                        <Label className="text-xs">Min Delay (s)</Label>
-                        <Input
-                            type="number" min={0}
-                            value={(config.delayMinSeconds as string) ?? '5'}
-                            onChange={(e) => patch({ delayMinSeconds: e.target.value })}
-                            className="w-28"
-                        />
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                        <Label className="text-xs">Max Delay (s)</Label>
-                        <Input
-                            type="number" min={0}
-                            value={(config.delayMaxSeconds as string) ?? '30'}
-                            onChange={(e) => patch({ delayMaxSeconds: e.target.value })}
-                            className="w-28"
-                        />
-                    </div>
-                </div>
+            {(subtype === 'staggeredBuy' || subtype === 'staggeredSell') && (
+                <StaggerDelayInputs config={config} patch={patch} />
+            )}
+
+            {subtype === 'staggeredSell' && (
+                <StaggeredSellFields config={config} patch={patch} />
             )}
 
             {subtype === 'humanVolume' && (
@@ -379,6 +375,79 @@ function TradeFields({
                 tradeAmounts={tradeAmounts}
                 defaultTypeName="Trader"
             />
+        </div>
+    )
+}
+
+function StaggerDelayInputs({ config, patch }: { config: Record<string, unknown>; patch: (p: Record<string, unknown>) => void }) {
+    return (
+        <div className="flex gap-3">
+            <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">Min Delay (s)</Label>
+                <Input
+                    type="number" min={0}
+                    value={(config.delayMinSeconds as string) ?? '5'}
+                    onChange={(e) => patch({ delayMinSeconds: e.target.value })}
+                    className="w-28"
+                />
+            </div>
+            <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">Max Delay (s)</Label>
+                <Input
+                    type="number" min={0}
+                    value={(config.delayMaxSeconds as string) ?? '30'}
+                    onChange={(e) => patch({ delayMaxSeconds: e.target.value })}
+                    className="w-28"
+                />
+            </div>
+        </div>
+    )
+}
+
+function StaggeredSellFields({ config, patch }: { config: Record<string, unknown>; patch: (p: Record<string, unknown>) => void }) {
+    const sellPct = (config.sellPct as number) ?? 100
+
+    function setSellPct(v: number) {
+        patch({ sellPct: Math.min(100, Math.max(1, v)) })
+    }
+
+    return (
+        <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">Sell Amount</Label>
+                <div className="flex gap-1.5">
+                    {[25, 50, 75, 100].map((p) => (
+                        <button
+                            key={p}
+                            type="button"
+                            onClick={() => setSellPct(p)}
+                            className={[
+                                'rounded-md border px-3 py-1.5 text-xs font-medium transition-colors',
+                                sellPct === p
+                                    ? 'border-red-500 bg-red-500/10 text-red-400'
+                                    : 'border-border text-muted-foreground hover:border-red-400 hover:text-foreground',
+                            ].join(' ')}
+                        >
+                            {p}%
+                        </button>
+                    ))}
+                    <Input
+                        type="number" min={1} max={100}
+                        value={sellPct}
+                        onChange={(e) => setSellPct(Number(e.target.value))}
+                        className="w-20 text-xs"
+                    />
+                </div>
+            </div>
+
+            <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
+                <span className="mt-0.5 shrink-0 text-amber-400">⚠</span>
+                <p className="text-xs text-amber-300/80">
+                    Token balances are unknown until after launch and buys complete.
+                    The sell % will be applied to each wallet&apos;s live balance at execution time.
+                    WSS balance streaming will be wired in to keep these up to date.
+                </p>
+            </div>
         </div>
     )
 }
@@ -447,12 +516,152 @@ function TriggerFields({
                     This trigger gates on confirmation automatically — no configuration needed.
                 </p>
             )
+        case 'marketCapThreshold':
+            return (
+                <div className="flex flex-col gap-4">
+                    <DirectionToggle config={config} patch={patch} />
+                    <div className="flex flex-col gap-1.5">
+                        <Label className="text-xs">Target Market Cap (USD)</Label>
+                        <Input
+                            type="number" min={0}
+                            value={(config.targetMarketCapUSD as number) ?? 50000}
+                            onChange={(e) => patch({ targetMarketCapUSD: Number(e.target.value) })}
+                        />
+                    </div>
+                    <PollInterval config={config} patch={patch} defaultSeconds={10} />
+                </div>
+            )
+        case 'holderCountThreshold':
+            return (
+                <div className="flex flex-col gap-4">
+                    <DirectionToggle config={config} patch={patch} />
+                    <div className="flex flex-col gap-1.5">
+                        <Label className="text-xs">Target Holder Count</Label>
+                        <Input
+                            type="number" min={1}
+                            value={(config.targetHolderCount as number) ?? 100}
+                            onChange={(e) => patch({ targetHolderCount: Number(e.target.value) })}
+                        />
+                    </div>
+                    <PollInterval config={config} patch={patch} defaultSeconds={15} />
+                </div>
+            )
+        case 'volumeThreshold':
+            return (
+                <div className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-1.5">
+                        <Label className="text-xs">Target Volume (SOL)</Label>
+                        <Input
+                            type="number" min={0}
+                            value={(config.targetVolumeSol as number) ?? 10}
+                            onChange={(e) => patch({ targetVolumeSol: Number(e.target.value) })}
+                        />
+                    </div>
+                    <PollInterval config={config} patch={patch} defaultSeconds={10} />
+                </div>
+            )
+        case 'priceTarget':
+            return (
+                <div className="flex flex-col gap-4">
+                    <DirectionToggle config={config} patch={patch} />
+                    <div className="flex flex-col gap-1.5">
+                        <Label className="text-xs">Target Price (USD)</Label>
+                        <Input
+                            type="number" min={0} step="any"
+                            value={(config.targetPriceUSD as number) ?? 0.001}
+                            onChange={(e) => patch({ targetPriceUSD: Number(e.target.value) })}
+                        />
+                    </div>
+                    <PollInterval config={config} patch={patch} defaultSeconds={5} />
+                </div>
+            )
+        case 'retryBackoff':
+            return (
+                <div className="flex flex-col gap-4">
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="flex flex-col gap-1.5">
+                            <Label className="text-xs">Max Retries</Label>
+                            <Input
+                                type="number" min={1} max={20}
+                                value={(config.maxRetries as number) ?? 3}
+                                onChange={(e) => patch({ maxRetries: Number(e.target.value) })}
+                            />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                            <Label className="text-xs">Initial Delay (s)</Label>
+                            <Input
+                                type="number" min={1}
+                                value={(config.initialDelaySeconds as number) ?? 5}
+                                onChange={(e) => patch({ initialDelaySeconds: Number(e.target.value) })}
+                            />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                            <Label className="text-xs">Multiplier</Label>
+                            <Input
+                                type="number" min={1} max={10} step={0.5}
+                                value={(config.multiplier as number) ?? 2}
+                                onChange={(e) => patch({ multiplier: Number(e.target.value) })}
+                            />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                            <Label className="text-xs">Max Delay (s)</Label>
+                            <Input
+                                type="number" min={1}
+                                value={(config.maxDelaySeconds as number) ?? 60}
+                                onChange={(e) => patch({ maxDelaySeconds: Number(e.target.value) })}
+                            />
+                        </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                        Delays: {(config.initialDelaySeconds as number) ?? 5}s → {((config.initialDelaySeconds as number) ?? 5) * ((config.multiplier as number) ?? 2)}s → {Math.min(((config.initialDelaySeconds as number) ?? 5) * Math.pow((config.multiplier as number) ?? 2, 2), (config.maxDelaySeconds as number) ?? 60)}s …
+                    </p>
+                </div>
+            )
         default:
             return null
     }
 }
 
-// ── Conditional ──────────────────────────────────────────────────────────
+function DirectionToggle({ config, patch }: { config: Record<string, unknown>; patch: (p: Record<string, unknown>) => void }) {
+    const direction = (config.direction as string) ?? 'above'
+    return (
+        <div className="flex flex-col gap-1.5">
+            <Label className="text-xs">Direction</Label>
+            <div className="flex gap-2">
+                {(['above', 'below'] as const).map((d) => (
+                    <button
+                        key={d}
+                        type="button"
+                        onClick={() => patch({ direction: d })}
+                        className={[
+                            'rounded-md border px-3 py-1 text-xs transition-colors',
+                            direction === d
+                                ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                                : 'border-border text-muted-foreground hover:border-muted-foreground',
+                        ].join(' ')}
+                    >
+                        {d === 'above' ? '≥ Above' : '≤ Below'}
+                    </button>
+                ))}
+            </div>
+        </div>
+    )
+}
+
+function PollInterval({ config, patch, defaultSeconds }: { config: Record<string, unknown>; patch: (p: Record<string, unknown>) => void; defaultSeconds: number }) {
+    return (
+        <div className="flex w-40 flex-col gap-1.5">
+            <Label className="text-xs">Poll Interval (s)</Label>
+            <Input
+                type="number" min={1}
+                value={(config.pollIntervalSeconds as number) ?? defaultSeconds}
+                onChange={(e) => patch({ pollIntervalSeconds: Number(e.target.value) })}
+            />
+        </div>
+    )
+}
+
+// ── Conditional ─��──────────────────���──────────────────────────────���──────
 
 function ConditionalFields({
     subtype,
@@ -522,6 +731,251 @@ function ConditionalFields({
                         <Input value={label} onChange={(e) => setBranchLabel(i, e.target.value)} />
                     </div>
                 ))}
+            </div>
+        </div>
+    )
+}
+
+// ── Utility (Data + Webhook) ─────────────────────────────────────────────
+
+function UtilityFields({
+    subtype,
+    config,
+    patch,
+    nodeId,
+    nodes,
+    edges,
+}: {
+    subtype: UtilitySubtype
+    config: Record<string, unknown>
+    patch: (p: Record<string, unknown>) => void
+    nodeId: string
+    nodes: Node[]
+    edges: Edge[]
+}) {
+    if (subtype === 'dataMapper') {
+        return <DataFields config={config} patch={patch} nodeId={nodeId} nodes={nodes} edges={edges} />
+    }
+    return <WebhookFields config={config} patch={patch} />
+}
+
+// ── Data Fields ──────────────────────────────────────────────────────────
+
+const SYSTEM_FIELDS: { key: string; label: string; source: (d: BuilderNodeData | null) => string }[] = [
+    { key: 'tokenMint',          label: 'Token Mint',            source: (d) => (d?.config.tokenMint   as string) ?? '' },
+    { key: 'tokenName',          label: 'Token Name',            source: (d) => (d?.config.tokenName   as string) ?? '' },
+    { key: 'tokenSymbol',        label: 'Token Symbol',          source: (d) => (d?.config.tokenSymbol as string) ?? '' },
+    { key: 'devWalletPublicKey', label: 'Dev Wallet Public Key', source: (d) => (d?.config.devWalletId as string) ?? '' },
+]
+
+function DataFields({
+    config,
+    patch,
+    nodeId,
+    nodes,
+    edges,
+}: {
+    config: Record<string, unknown>
+    patch: (p: Record<string, unknown>) => void
+    nodeId: string
+    nodes: Node[]
+    edges: Edge[]
+}) {
+    const tokenData = findTokenNodeData(nodeId, nodes, edges)
+    const [customFields, setCustomFields] = useState<{ key: string; value: string }[]>(
+        (config.customFields as { key: string; value: string }[]) ?? [],
+    )
+
+    function updateCustomFields(next: { key: string; value: string }[]) {
+        setCustomFields(next)
+        patch({ customFields: next })
+    }
+
+    function addField() { updateCustomFields([...customFields, { key: '', value: '' }]) }
+
+    function updateField(i: number, field: Partial<{ key: string; value: string }>) {
+        updateCustomFields(customFields.map((f, idx) => (idx === i ? { ...f, ...field } : f)))
+    }
+
+    function removeField(i: number) { updateCustomFields(customFields.filter((_, idx) => idx !== i)) }
+
+    return (
+        <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-2">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">System Fields</p>
+                <p className="text-xs text-muted-foreground">
+                    Always included — resolved from the connected Token node at runtime.
+                </p>
+                <div className="rounded-md border border-border divide-y divide-border">
+                    {SYSTEM_FIELDS.map(({ key, label, source }) => {
+                        const resolved = source(tokenData)
+                        return (
+                            <div key={key} className="flex items-center gap-3 px-3 py-2">
+                                <span className="w-40 shrink-0 font-mono text-xs text-foreground">{key}</span>
+                                <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+                                    {resolved || <span className="italic opacity-50">{label} — connect Token node</span>}
+                                </span>
+                            </div>
+                        )
+                    })}
+                </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Custom Fields</p>
+                {customFields.length === 0 && (
+                    <p className="text-xs text-muted-foreground">No custom fields yet.</p>
+                )}
+                {customFields.map((field, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                        <Input
+                            placeholder="key"
+                            value={field.key}
+                            onChange={(e) => updateField(i, { key: e.target.value })}
+                            className="w-36 font-mono text-xs"
+                        />
+                        <span className="shrink-0 text-muted-foreground">=</span>
+                        <Input
+                            placeholder="value"
+                            value={field.value}
+                            onChange={(e) => updateField(i, { value: e.target.value })}
+                            className="flex-1 font-mono text-xs"
+                        />
+                        <button
+                            type="button"
+                            onClick={() => removeField(i)}
+                            className="shrink-0 px-1 text-xs text-muted-foreground transition-colors hover:text-destructive"
+                        >
+                            ✕
+                        </button>
+                    </div>
+                ))}
+                <button
+                    type="button"
+                    onClick={addField}
+                    className="self-start text-xs text-muted-foreground transition-colors hover:text-foreground"
+                >
+                    + Add field
+                </button>
+            </div>
+        </div>
+    )
+}
+
+// ── Webhook Fields ───────────────────────────────────────────────────────
+
+type AuthType = 'none' | 'bearer' | 'apiKey'
+
+function WebhookFields({
+    config,
+    patch,
+}: {
+    config: Record<string, unknown>
+    patch: (p: Record<string, unknown>) => void
+}) {
+    const [url,           setUrl]           = useState<string>((config.url        as string)   ?? '')
+    const [authType,      setAuthType]      = useState<AuthType>((config.authType as AuthType) ?? 'none')
+    const [authValue,     setAuthValue]     = useState<string>((config.authValue  as string)   ?? '')
+    const [customHeaders, setCustomHeaders] = useState<{ key: string; value: string }[]>(
+        (config.customHeaders as { key: string; value: string }[]) ?? [],
+    )
+
+    function updateUrl(v: string)          { setUrl(v);       patch({ url: v }) }
+    function updateAuthType(v: AuthType)   { setAuthType(v);  patch({ authType: v }) }
+    function updateAuthValue(v: string)    { setAuthValue(v); patch({ authValue: v }) }
+
+    function updateHeaders(next: { key: string; value: string }[]) {
+        setCustomHeaders(next)
+        patch({ customHeaders: next })
+    }
+
+    function addHeader() { updateHeaders([...customHeaders, { key: '', value: '' }]) }
+    function updateHeader(i: number, field: Partial<{ key: string; value: string }>) {
+        updateHeaders(customHeaders.map((h, idx) => (idx === i ? { ...h, ...field } : h)))
+    }
+    function removeHeader(i: number) { updateHeaders(customHeaders.filter((_, idx) => idx !== i)) }
+
+    return (
+        <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">Endpoint URL</Label>
+                <Input
+                    placeholder="https://hooks.example.com/launch"
+                    value={url}
+                    onChange={(e) => updateUrl(e.target.value)}
+                    className="font-mono text-xs"
+                />
+                <p className="text-xs text-muted-foreground">
+                    Receives a POST with the data payload as JSON body. Waits for a 2xx response before continuing.
+                </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+                <Label className="text-xs">Authentication</Label>
+                <div className="flex gap-2">
+                    {(['none', 'bearer', 'apiKey'] as AuthType[]).map((t) => (
+                        <button
+                            key={t}
+                            type="button"
+                            onClick={() => updateAuthType(t)}
+                            className={[
+                                'rounded-md border px-3 py-1 text-xs transition-colors',
+                                authType === t
+                                    ? 'border-cyan-500 bg-cyan-500/10 text-cyan-400'
+                                    : 'border-border text-muted-foreground hover:border-muted-foreground',
+                            ].join(' ')}
+                        >
+                            {t === 'none' ? 'None' : t === 'bearer' ? 'Bearer Token' : 'API Key'}
+                        </button>
+                    ))}
+                </div>
+                {authType !== 'none' && (
+                    <Input
+                        placeholder={authType === 'bearer' ? 'Bearer token value' : 'API key value'}
+                        value={authValue}
+                        onChange={(e) => updateAuthValue(e.target.value)}
+                        type="password"
+                        className="font-mono text-xs"
+                    />
+                )}
+            </div>
+
+            <div className="flex flex-col gap-2">
+                <Label className="text-xs">Custom Headers</Label>
+                {customHeaders.length === 0 && (
+                    <p className="text-xs text-muted-foreground">No custom headers.</p>
+                )}
+                {customHeaders.map((header, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                        <Input
+                            placeholder="Header-Name"
+                            value={header.key}
+                            onChange={(e) => updateHeader(i, { key: e.target.value })}
+                            className="w-40 font-mono text-xs"
+                        />
+                        <span className="shrink-0 text-muted-foreground">:</span>
+                        <Input
+                            placeholder="value"
+                            value={header.value}
+                            onChange={(e) => updateHeader(i, { value: e.target.value })}
+                            className="flex-1 font-mono text-xs"
+                        />
+                        <button
+                            type="button"
+                            onClick={() => removeHeader(i)}
+                            className="shrink-0 px-1 text-xs text-muted-foreground transition-colors hover:text-destructive"
+                        >
+                            ✕
+                        </button>
+                    </div>
+                ))}
+                <button
+                    type="button"
+                    onClick={addHeader}
+                    className="self-start text-xs text-muted-foreground transition-colors hover:text-foreground"
+                >
+                    + Add header
+                </button>
             </div>
         </div>
     )

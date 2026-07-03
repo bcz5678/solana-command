@@ -10,9 +10,14 @@ export default function TradeNode({ data, selected }: NodeProps) {
     const def = PALETTE_ITEMS.find((i) => i.subtype === d.subtype)
     const tokenSymbol = d.config?.tokenSymbol as string | undefined
     const walletCount = d.config?.selectedWalletIds as string[] | undefined
+    const sellPct     = d.config?.sellPct as number | undefined
 
     const subLabelParts: string[] = []
-    if (tokenSymbol) subLabelParts.push(tokenSymbol)
+    if (d.subtype === 'staggeredSell') {
+        subLabelParts.push(sellPct != null ? `${sellPct}% sell` : 'Sell %?')
+    } else if (tokenSymbol) {
+        subLabelParts.push(tokenSymbol)
+    }
     if (walletCount?.length) subLabelParts.push(`${walletCount.length} wallets`)
 
     return (

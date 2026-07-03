@@ -1,6 +1,6 @@
 import { LucideIcon } from 'lucide-react'
 
-export type BuilderNodeCategory = 'token' | 'launchType' | 'trade' | 'trigger' | 'conditional'
+export type BuilderNodeCategory = 'token' | 'launchType' | 'trade' | 'trigger' | 'conditional' | 'utility'
 
 export type BuilderNodeType =
     | 'tokenNode'
@@ -8,14 +8,27 @@ export type BuilderNodeType =
     | 'tradeNode'
     | 'triggerNode'
     | 'conditionalNode'
+    | 'dataNode'
+    | 'webhookNode'
 
 export type TokenSubtype = 'tokenToLaunch'
 export type LaunchTypeSubtype = 'dev0DevOnly' | 'dev0DevBundle' | 'bundled' | 'swarm'
-export type TradeSubtype = 'bundledJito' | 'staggeredBuy' | 'humanVolume' | 'trendingVolume' | 'holdersMaker'
-export type TriggerSubtype = 'launchConfirmation' | 'txConfirmation' | 'timerSet' | 'timerRandomInterval' | 'humanInTheLoop'
+export type TradeSubtype = 'bundledJito' | 'staggeredBuy' | 'staggeredSell' | 'humanVolume' | 'trendingVolume' | 'holdersMaker'
+export type TriggerSubtype =
+    | 'launchConfirmation'
+    | 'txConfirmation'
+    | 'timerSet'
+    | 'timerRandomInterval'
+    | 'humanInTheLoop'
+    | 'marketCapThreshold'
+    | 'holderCountThreshold'
+    | 'volumeThreshold'
+    | 'priceTarget'
+    | 'retryBackoff'
 export type ConditionalSubtype = 'loop' | 'ifThen' | 'switch'
+export type UtilitySubtype = 'dataMapper' | 'webhook'
 
-export type BuilderSubtype = TokenSubtype | LaunchTypeSubtype | TradeSubtype | TriggerSubtype | ConditionalSubtype
+export type BuilderSubtype = TokenSubtype | LaunchTypeSubtype | TradeSubtype | TriggerSubtype | ConditionalSubtype | UtilitySubtype
 
 /**
  * The data type carried by a handle wire.
@@ -24,8 +37,9 @@ export type BuilderSubtype = TokenSubtype | LaunchTypeSubtype | TradeSubtype | T
  *   config → full execution context flowing through trade nodes
  *   signal → control-flow gate from a trigger
  *   branch → one output arm from a conditional node
+ *   data   → structured key-value payload from a Data node
  */
-export type HandleDataType = 'token' | 'config' | 'signal' | 'branch'
+export type HandleDataType = 'token' | 'config' | 'signal' | 'branch' | 'data'
 
 export type PaletteNodeDef = {
     category: BuilderNodeCategory

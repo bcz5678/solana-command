@@ -13,6 +13,7 @@ export const HANDLE_TYPE_META: Record<HandleDataType, {
     config: { label: 'Config', border: 'border-violet-500',  bg: 'bg-violet-500',  text: 'text-violet-500' },
     signal: { label: 'Signal', border: 'border-emerald-400', bg: 'bg-emerald-400', text: 'text-emerald-400' },
     branch: { label: 'Branch', border: 'border-rose-400',    bg: 'bg-rose-400',    text: 'text-rose-400' },
+    data:   { label: 'Data',   border: 'border-cyan-400',    bg: 'bg-cyan-400',    text: 'text-cyan-400' },
 }
 
 // ── Compatibility ─────────────────────────────────────────��──────────────────
@@ -29,8 +30,11 @@ export const HANDLE_TYPE_META: Record<HandleDataType, {
 const TYPE_COMPATIBLE: Record<HandleDataType, HandleDataType[]> = {
     token:  ['token'],
     config: ['config'],
-    signal: ['signal'],
+    // signal carries the execution context forward through a timing gate,
+    // so it can feed anything that accepts a plain config as well
+    signal: ['signal', 'config'],
     branch: ['config', 'signal'],
+    data:   ['data'],
 }
 
 export function isCompatibleConnection(
