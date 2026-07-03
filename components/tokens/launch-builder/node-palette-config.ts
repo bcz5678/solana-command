@@ -1,4 +1,5 @@
 import {
+    Play,
     Coins,
     Rocket,
     User,
@@ -32,6 +33,7 @@ import { BuilderNodeCategory, PaletteNodeDef } from './types'
 export const SINGLE_INSTANCE_CATEGORIES: BuilderNodeCategory[] = ['token', 'launchType']
 
 export const CATEGORY_LABELS: Record<BuilderNodeCategory, string> = {
+    execution: 'Execution',
     token: 'Token',
     launchType: 'Launch Type',
     trade: 'Trades',
@@ -41,6 +43,7 @@ export const CATEGORY_LABELS: Record<BuilderNodeCategory, string> = {
 }
 
 export const CATEGORY_ACCENT: Record<BuilderNodeCategory, { border: string; bg: string; text: string }> = {
+    execution:   { border: 'border-lime-500',    bg: 'bg-lime-500/5',    text: 'text-lime-500' },
     token:       { border: 'border-blue-500',    bg: 'bg-blue-500/5',    text: 'text-blue-500' },
     launchType:  { border: 'border-violet-500',  bg: 'bg-violet-500/5',  text: 'text-violet-500' },
     trade:       { border: 'border-emerald-500', bg: 'bg-emerald-500/5', text: 'text-emerald-500' },
@@ -50,6 +53,20 @@ export const CATEGORY_ACCENT: Record<BuilderNodeCategory, { border: string; bg: 
 }
 
 export const PALETTE_ITEMS: PaletteNodeDef[] = [
+    // ── Execution ──────────────────────────────────────────────────────────
+    {
+        category: 'execution',
+        nodeType: 'executionNode',
+        subtype: 'manualRun',
+        label: 'Manual Run',
+        description: 'Manually starts execution at whatever node it connects to. Drop one anywhere to test a webhook, a trade chain, or a full launch in isolation — connect its output to any node’s left-side exec pin.',
+        icon: Play,
+        inputs: 0,
+        outputs: 1,
+        inputTypes: [],
+        outputTypes: ['exec'],
+    },
+
     // ── Token ──────────────────────────────────────────────────────────────
     {
         category: 'token',
@@ -390,7 +407,7 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
 ]
 
 export const PALETTE_GROUPS: { category: BuilderNodeCategory; items: PaletteNodeDef[] }[] = (
-    ['token', 'launchType', 'trade', 'trigger', 'conditional', 'utility'] as BuilderNodeCategory[]
+    ['execution', 'token', 'launchType', 'trade', 'trigger', 'conditional', 'utility'] as BuilderNodeCategory[]
 ).map((category) => ({
     category,
     items: PALETTE_ITEMS.filter((item) => item.category === category),

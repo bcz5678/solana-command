@@ -93,6 +93,14 @@ function ConfigBody({
             </DialogHeader>
 
             <div className="max-h-[65vh] overflow-y-auto pr-1">
+                {data.category === 'execution' && (
+                    <p className="text-xs text-muted-foreground">
+                        No configuration needed. Drag a connection from this node&apos;s bottom handle to the
+                        lime pin on the left edge of any node to make that node the entry point when you
+                        run this graph manually.
+                    </p>
+                )}
+
                 {data.category === 'token' && (
                     <LaunchTokenSelect
                         selectedId={(config.tokenId as string) ?? null}

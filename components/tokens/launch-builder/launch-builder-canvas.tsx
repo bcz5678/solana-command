@@ -23,6 +23,7 @@ import {
     DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import ExecutionNode from './nodes/execution-node'
 import TokenNode from './nodes/token-node'
 import LaunchTypeNode from './nodes/launch-type-node'
 import TradeNode from './nodes/trade-node'
@@ -36,6 +37,7 @@ import { PaletteNodeDef, BuilderNodeData } from './types'
 import { isCompatibleConnection, getNodeOutputTypes } from './handle-types'
 
 const nodeTypes = {
+    executionNode: ExecutionNode,
     tokenNode: TokenNode,
     launchTypeNode: LaunchTypeNode,
     tradeNode: TradeNode,
@@ -89,7 +91,9 @@ export default function LaunchBuilderCanvas({
                 outputIdx = parseInt(connection.sourceHandle.replace('output-', ''), 10)
             }
             const srcType = outTypes[outputIdx]
-            const tgtType = inTypes[0]
+            // "exec-in" is the universal manual-start pin every node exposes alongside
+            // its normal typed input — it isn't part of that node's declared inputTypes.
+            const tgtType = connection.targetHandle === 'exec-in' ? 'exec' : inTypes[0]
             if (!srcType || !tgtType) return false
             return isCompatibleConnection(srcType, tgtType)
         },

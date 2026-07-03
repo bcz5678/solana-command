@@ -1,8 +1,9 @@
 import { LucideIcon } from 'lucide-react'
 
-export type BuilderNodeCategory = 'token' | 'launchType' | 'trade' | 'trigger' | 'conditional' | 'utility'
+export type BuilderNodeCategory = 'execution' | 'token' | 'launchType' | 'trade' | 'trigger' | 'conditional' | 'utility'
 
 export type BuilderNodeType =
+    | 'executionNode'
     | 'tokenNode'
     | 'launchTypeNode'
     | 'tradeNode'
@@ -11,6 +12,7 @@ export type BuilderNodeType =
     | 'dataNode'
     | 'webhookNode'
 
+export type ExecutionSubtype = 'manualRun'
 export type TokenSubtype = 'tokenToLaunch'
 export type LaunchTypeSubtype = 'dev0DevOnly' | 'dev0DevBundle' | 'bundled' | 'swarm'
 export type TradeSubtype = 'bundledJito' | 'staggeredBuy' | 'staggeredSell' | 'humanVolume' | 'trendingVolume' | 'holdersMaker'
@@ -28,18 +30,19 @@ export type TriggerSubtype =
 export type ConditionalSubtype = 'loop' | 'ifThen' | 'switch'
 export type UtilitySubtype = 'dataMapper' | 'webhook'
 
-export type BuilderSubtype = TokenSubtype | LaunchTypeSubtype | TradeSubtype | TriggerSubtype | ConditionalSubtype | UtilitySubtype
+export type BuilderSubtype = ExecutionSubtype | TokenSubtype | LaunchTypeSubtype | TradeSubtype | TriggerSubtype | ConditionalSubtype | UtilitySubtype
 
 /**
  * The data type carried by a handle wire.
  *
+ *   exec   → manual "start here" control signal from an Execution node
  *   token  → raw token identity (mint, name, dev wallet)
  *   config → full execution context flowing through trade nodes
  *   signal → control-flow gate from a trigger
  *   branch → one output arm from a conditional node
  *   data   → structured key-value payload from a Data node
  */
-export type HandleDataType = 'token' | 'config' | 'signal' | 'branch' | 'data'
+export type HandleDataType = 'exec' | 'token' | 'config' | 'signal' | 'branch' | 'data'
 
 export type PaletteNodeDef = {
     category: BuilderNodeCategory
@@ -68,4 +71,10 @@ export type BuilderNodeData = {
     outputTypes?: HandleDataType[]
     onConfigure?: () => void
     onDelete?: () => void
+    /** Manual Execution node only — triggers a visual dry-run walk downstream from this node. */
+    onRun?: () => void
+    /** Human In The Loop trigger only — set true by the dry-run engine while it's paused waiting on this node. */
+    awaitingContinue?: boolean
+    /** Human In The Loop trigger only — resumes a paused dry-run past this node. */
+    onContinue?: () => void
 }

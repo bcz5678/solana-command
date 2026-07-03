@@ -9,6 +9,7 @@ export const HANDLE_TYPE_META: Record<HandleDataType, {
     bg: string       // Tailwind bg-* class (solid, for the filled dot state)
     text: string     // Tailwind text-* class
 }> = {
+    exec:   { label: 'Exec',   border: 'border-lime-400',    bg: 'bg-lime-400',    text: 'text-lime-400' },
     token:  { label: 'Token',  border: 'border-amber-400',   bg: 'bg-amber-400',   text: 'text-amber-400' },
     config: { label: 'Config', border: 'border-violet-500',  bg: 'bg-violet-500',  text: 'text-violet-500' },
     signal: { label: 'Signal', border: 'border-emerald-400', bg: 'bg-emerald-400', text: 'text-emerald-400' },
@@ -21,6 +22,7 @@ export const HANDLE_TYPE_META: Record<HandleDataType, {
 /**
  * Maps each output type to the input types it may connect to.
  *
+ *   exec   → exec    (Execution node → the universal "exec-in" pin every node exposes)
  *   token  → token   (Token → LaunchType only)
  *   config → config  (LaunchType → Trade, Trade → Trade)
  *   signal → signal  (Trigger → Conditional)
@@ -28,6 +30,7 @@ export const HANDLE_TYPE_META: Record<HandleDataType, {
  *          | signal  (branch can also feed another trigger/conditional)
  */
 const TYPE_COMPATIBLE: Record<HandleDataType, HandleDataType[]> = {
+    exec:   ['exec'],
     token:  ['token'],
     config: ['config'],
     // signal carries the execution context forward through a timing gate,
@@ -67,6 +70,26 @@ export function getNodeOutputTypes(data: BuilderNodeData): HandleDataType[] {
  * reachable.  Used by node config dialogs to inherit token data without
  * scanning the entire canvas.
  */
+/**
+ * Direct nodes wired to an Execution node's "exec-in" pin — the dry-run
+ * entry points. Each one becomes an independent branch walker so a Human In
+ * The Loop pause on one branch doesn't stall sibling branches.
+ */
+export function getExecEntryNodeIds(execNodeId: string, edges: Edge[]): string[] {
+    return Array.from(new Set(
+        edges
+            .filter((e) => e.source === execNodeId && e.targetHandle === 'exec-in')
+            .map((e) => e.target),
+    ))
+}
+
+/** Nodes directly downstream of a node, following normal (non-exec) edges. */
+export function getDownstreamNodeIds(nodeId: string, edges: Edge[]): string[] {
+    return edges
+        .filter((e) => e.source === nodeId && e.targetHandle !== 'exec-in')
+        .map((e) => e.target)
+}
+
 export function findTokenNodeData(
     startNodeId: string,
     nodes: Node[],

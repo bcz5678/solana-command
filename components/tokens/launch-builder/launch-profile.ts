@@ -2,7 +2,7 @@ import type { Node, Edge } from '@xyflow/react'
 import { BuilderNodeCategory, BuilderNodeData, BuilderNodeType, BuilderSubtype } from './types'
 import { PALETTE_ITEMS } from './node-palette-config'
 
-type Callbacks = Pick<BuilderNodeData, 'onConfigure' | 'onDelete'>
+type Callbacks = Pick<BuilderNodeData, 'onConfigure' | 'onDelete' | 'onRun' | 'onContinue'>
 
 export const LAUNCH_PROFILE_SCHEMA_VERSION = 1
 

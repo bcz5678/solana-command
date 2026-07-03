@@ -1,7 +1,7 @@
 'use client'
 
 import { Handle, Position } from '@xyflow/react'
-import { Settings2, Trash2, LucideIcon } from 'lucide-react'
+import { Settings2, Trash2, Play, LucideIcon } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { BuilderNodeCategory, HandleDataType } from '../types'
 import { CATEGORY_ACCENT } from '../node-palette-config'
@@ -17,9 +17,17 @@ type Props = {
     outputLabels?: string[]
     inputTypes?: HandleDataType[]
     outputTypes?: HandleDataType[]
+    /** Renders the universal "exec-in" pin so a Manual Execution node can attach here. Off for the Execution node itself. */
+    allowExecInput?: boolean
     selected?: boolean
     onConfigure?: () => void
     onDelete?: () => void
+    /** Manual Execution node only — triggers a visual dry-run walk downstream from this node. */
+    onRun?: () => void
+    /** Human In The Loop trigger only — dry-run engine is paused waiting on this node. */
+    awaitingContinue?: boolean
+    /** Human In The Loop trigger only — resumes a paused dry-run past this node. */
+    onContinue?: () => void
 }
 
 export default function BaseNodeShell({
@@ -32,13 +40,18 @@ export default function BaseNodeShell({
     outputLabels,
     inputTypes,
     outputTypes,
+    allowExecInput = true,
     selected,
     onConfigure,
     onDelete,
+    onRun,
+    awaitingContinue,
+    onContinue,
 }: Props) {
     const accent = CATEGORY_ACCENT[category]
     const inputHandleMeta  = HANDLE_TYPE_META[inputTypes?.[0]  ?? 'config']
     const outputHandleMeta = (i: number) => HANDLE_TYPE_META[outputTypes?.[i] ?? outputTypes?.[0] ?? 'config']
+    const execHandleMeta   = HANDLE_TYPE_META.exec
 
     return (
         <div className="relative">
@@ -57,7 +70,9 @@ export default function BaseNodeShell({
                 className={[
                     'w-56 border-l-4 py-2.5 transition-colors',
                     accent.border,
-                    selected ? `ring-2 ring-offset-1 ring-offset-background ${accent.border.replace('border-', 'ring-')}` : '',
+                    awaitingContinue
+                        ? 'ring-2 ring-offset-1 ring-offset-background ring-amber-500 animate-pulse'
+                        : selected ? `ring-2 ring-offset-1 ring-offset-background ${accent.border.replace('border-', 'ring-')}` : '',
                 ].join(' ')}
                 onDoubleClick={(e) => { e.stopPropagation(); onConfigure?.() }}
             >
@@ -71,6 +86,17 @@ export default function BaseNodeShell({
                             <span className="truncate text-[10px] text-muted-foreground leading-tight">{subLabel}</span>
                         )}
                     </div>
+                    {onRun && (
+                        <button
+                            type="button"
+                            onClick={onRun}
+                            title="Run from here (visual dry-run)"
+                            className="nodrag flex shrink-0 items-center justify-center rounded p-1 text-lime-500 hover:bg-lime-500/10 transition-colors"
+                        >
+                            <Play className="size-3.5" />
+                        </button>
+                    )}
+
                     {onConfigure && (
                         <button
                             type="button"
@@ -83,11 +109,36 @@ export default function BaseNodeShell({
                     )}
                 </div>
 
+                {awaitingContinue && (
+                    <div className="px-3 pt-2">
+                        <button
+                            type="button"
+                            onClick={onContinue}
+                            className="nodrag flex w-full items-center justify-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs font-medium text-amber-400 transition-colors hover:bg-amber-500/20"
+                        >
+                            <Play className="size-3" />
+                            Continue
+                        </button>
+                    </div>
+                )}
+
                 {inputs === 1 && (
                     <Handle
+                        id="data-in"
                         type="target"
                         position={Position.Top}
                         className={['size-2.5! border-2! bg-background! outline-2! outline-offset-1! outline-border', inputHandleMeta.border].join(' ')}
+                    />
+                )}
+
+                {allowExecInput && (
+                    <Handle
+                        id="exec-in"
+                        type="target"
+                        position={Position.Left}
+                        title="Manual execution start"
+                        style={{ top: 16 }}
+                        className={['size-2.5! border-2! bg-background! outline-2! outline-offset-1! outline-border', execHandleMeta.border].join(' ')}
                     />
                 )}
 
