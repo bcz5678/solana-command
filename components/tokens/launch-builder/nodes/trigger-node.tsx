@@ -51,6 +51,7 @@ export default function TriggerNode({ data, selected }: NodeProps) {
             awaitingContinue={d.awaitingContinue}
             onContinue={d.onContinue}
             countdown={d.runCountdown}
+            resultBadge={d.executionResult}
         />
     )
 }

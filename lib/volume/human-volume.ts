@@ -28,6 +28,13 @@ export interface HumanVolumeBotConfig {
     maxSellTranches?: number               // max partial sells before forcing 100% exit (default 3)
     buysPerCycleMin?: number               // minimum buys attempted per cycle (default 1)
     buysPerCycleMax?: number               // maximum buys attempted per cycle (default 3)
+    /**
+     * Skip real SOL transfers (top-up / consolidation) entirely — logs what
+     * would have happened instead. Trade bundles are simulate-only whenever
+     * `executor` was itself created with `simulateOnly: true`; this flag
+     * additionally covers the transfers that bypass the executor.
+     */
+    dryRun?: boolean
 }
 
 export interface WalletRecord {
@@ -84,6 +91,7 @@ export class HumanVolumeBot<T = void> {
     private maxSellTranches: number
     private buysPerCycleMin: number
     private buysPerCycleMax: number
+    private dryRun: boolean
 
     private walletPool: WalletRecord[]
 
@@ -114,6 +122,7 @@ export class HumanVolumeBot<T = void> {
             maxSellTranches,
             buysPerCycleMin,
             buysPerCycleMax,
+            dryRun,
         } = config
 
         this.connection = connection;
@@ -132,6 +141,7 @@ export class HumanVolumeBot<T = void> {
         this.maxSellTranches   = maxSellTranches ?? 2;
         this.buysPerCycleMin   = buysPerCycleMin ?? 1;
         this.buysPerCycleMax   = buysPerCycleMax ?? 3;
+        this.dryRun            = dryRun ?? false;
 
         this.executor  = executor;
         this.onlineSdk = new OnlinePumpSdk(connection);
@@ -685,7 +695,12 @@ export class HumanVolumeBot<T = void> {
     }
 
     async sendLamports(senderWalletId: string, receiver: WalletRecord, amountLamports: BN): Promise<boolean> {
-    
+
+        if (this.dryRun) {
+            console.log(`[simulate] would transfer ${amountLamports.toString()} lamports: wallet=${senderWalletId} -> wallet=${receiver.id}`)
+            return true
+        }
+
         let senderKeypair: Keypair | null = null
         try {
             senderKeypair = await getWalletKeypairById(senderWalletId)
@@ -718,6 +733,11 @@ export class HumanVolumeBot<T = void> {
     }
 
     async consolidateSOL(wallet: WalletRecord): Promise<void> {
+        if (this.dryRun) {
+            console.log(`[simulate] would consolidate SOL: wallet=${wallet.id} -> funding wallet=${this.fundingWallet.id}`)
+            return
+        }
+
         let walletKeypair: Keypair | null = null
 
         try {

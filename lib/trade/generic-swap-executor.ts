@@ -19,17 +19,21 @@ export class GenericSwapExecutor {
   private readonly wallet: Keypair
   private readonly defaultSlippageBps: number
   private readonly maxRetries: number
+  private readonly dryRun: boolean
 
   constructor(opts: {
     connection: Connection
     wallet: Keypair
     defaultSlippage?: number   // decimal, e.g. 0.05 = 5%
     maxRetries?: number
+    /** Sign and simulate every swap instead of broadcasting it. */
+    dryRun?: boolean
   }) {
     this.connection = opts.connection
     this.wallet = opts.wallet
     this.defaultSlippageBps = Math.round((opts.defaultSlippage ?? 0.05) * 10_000)
     this.maxRetries = opts.maxRetries ?? 2
+    this.dryRun = opts.dryRun ?? false
   }
 
   get publicKey(): PublicKey {
@@ -88,7 +92,7 @@ export class GenericSwapExecutor {
         const tx = VersionedTransaction.deserialize(Buffer.from(swapTransaction, 'base64'))
         tx.sign([this.wallet])
         return { tx, blockhash: tx.message.recentBlockhash, lastValidBlockHeight }
-      }, this.maxRetries)
+      }, this.maxRetries, this.dryRun)
 
       console.log(`JUP ${label} ${inputMint.slice(0, 8)}…→${outputMint.slice(0, 8)}… | in=${amount.toString()} out=${outAmount.toString()} | sig=${signature.slice(0, 16)}…`)
 

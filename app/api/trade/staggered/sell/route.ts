@@ -9,7 +9,7 @@ export const dynamic    = 'force-dynamic';
 export const maxDuration = 120;
 
 export async function POST(request: Request) {
-    let body: { walletId: string; mintAddress: string; tokenAmount: string; slippage: number; sellPct?: number }
+    let body: { walletId: string; mintAddress: string; tokenAmount: string; slippage: number; sellPct?: number; dryRun?: boolean }
     try {
         body = await request.json()
     } catch {
@@ -19,7 +19,7 @@ export async function POST(request: Request) {
         })
     }
 
-    const { walletId, mintAddress, tokenAmount, slippage, sellPct } = body
+    const { walletId, mintAddress, tokenAmount, slippage, sellPct, dryRun } = body
     if (!walletId || !mintAddress || !tokenAmount) {
         return new Response(JSON.stringify({ error: 'walletId, mintAddress, and tokenAmount are required.' }), {
             status: 400,
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     try {
         keypair = await getWalletKeypairById(walletId)
         const connection = initializeConnection()
-        const executor   = new Executor({ connection, wallet: keypair, defaultSlippage: slippage ?? 0.01 })
+        const executor   = new Executor({ connection, wallet: keypair, defaultSlippage: slippage ?? 0.01, dryRun })
         const mint       = new PublicKey(mintAddress)
 
         // Use sellAll for 100% sells — reads live on-chain balance and uses the

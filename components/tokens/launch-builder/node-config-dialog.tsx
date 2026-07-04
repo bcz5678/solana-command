@@ -41,7 +41,7 @@ export default function NodeConfigDialog({ node, nodes, edges, onOpenChange, onS
 
     return (
         <Dialog open={!!node} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-lg">
+            <DialogContent className="w-[95vw] sm:max-w-5xl">
                 {node && data && (
                     <ConfigBody
                         key={node.id}

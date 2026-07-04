@@ -9,7 +9,7 @@ export const dynamic    = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function POST(request: Request) {
-    let body: { walletId: string; mintAddress: string; solAmountLamports: string; slippage: number }
+    let body: { walletId: string; mintAddress: string; solAmountLamports: string; slippage: number; dryRun?: boolean }
     try {
         body = await request.json()
     } catch {
@@ -19,7 +19,7 @@ export async function POST(request: Request) {
         })
     }
 
-    const { walletId, mintAddress, solAmountLamports, slippage } = body
+    const { walletId, mintAddress, solAmountLamports, slippage, dryRun } = body
     if (!walletId || !mintAddress || !solAmountLamports) {
         return new Response(JSON.stringify({ error: 'walletId, mintAddress, and solAmountLamports are required.' }), {
             status: 400,
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     try {
         keypair = await getWalletKeypairById(walletId)
         const connection = initializeConnection()
-        const executor   = new Executor({ connection, wallet: keypair, defaultSlippage: slippage ?? 0.01 })
+        const executor   = new Executor({ connection, wallet: keypair, defaultSlippage: slippage ?? 0.01, dryRun })
         const mint       = new PublicKey(mintAddress)
         const solAmount  = new BN(solAmountLamports)
 

@@ -68,10 +68,14 @@ export async function POST(request: Request) {
         );
     }
 
+    // Signs a real transaction with real keys but simulates instead of
+    // broadcasting, and never mutates the draft's launch_status.
+    const dryRun: boolean = body.dryRun === true;
+
     // ── 3. Route to the correct launch processor ───────────────
     switch (launchConfig.launchType) {
         case LaunchType.block0:
-            return processLaunchBlock0(admin, launchConfig);
+            return processLaunchBlock0(admin, launchConfig, dryRun);
         case LaunchType.swarm:
             return processLaunchSwarm(admin, launchConfig);
         case LaunchType.staggered:
@@ -88,7 +92,8 @@ export async function POST(request: Request) {
 // ============================================================
 async function processLaunchBlock0(
     admin:        SupabaseClient,
-    launchConfig: LaunchConfig
+    launchConfig: LaunchConfig,
+    dryRun:       boolean
 ): Promise<Response> {
 
     const mintId = launchConfig.token?.id;
@@ -137,15 +142,19 @@ async function processLaunchBlock0(
 
     // ── C. Lock the draft — transition to 'launching' ──────────
     // Prevents a concurrent request from double-launching.
-    const { error: lockError } = await admin
-        .rpc('mark_token_launching', { p_mint_id: mintId });
+    // Skipped entirely for dry runs — a simulation must never touch the
+    // draft's real launch_status.
+    if (!dryRun) {
+        const { error: lockError } = await admin
+            .rpc('mark_token_launching', { p_mint_id: mintId });
 
-    if (lockError) {
-        console.error('[launch] mark_token_launching error:', lockError.message);
-        return Response.json(
-            { error: 'Token is already launching or not in draft state' },
-            { status: 409 }
-        );
+        if (lockError) {
+            console.error('[launch] mark_token_launching error:', lockError.message);
+            return Response.json(
+                { error: 'Token is already launching or not in draft state' },
+                { status: 409 }
+            );
+        }
     }
 
     // ── D. Fetch both secret keys from Vault ───────────────────
@@ -195,10 +204,13 @@ async function processLaunchBlock0(
         creator?.secretKey.fill(0);
         mint?.secretKey.fill(0);
 
-        await admin.rpc('fail_token_launch', {
-            p_mint_id: mintId,
-            p_reason:  `key load failed: ${(err as Error).message}`
-        });
+        // Nothing to revert in dry-run mode — the draft was never locked.
+        if (!dryRun) {
+            await admin.rpc('fail_token_launch', {
+                p_mint_id: mintId,
+                p_reason:  `key load failed: ${(err as Error).message}`
+            });
+        }
 
         const reason = (err as Error).message;
         console.error('[launch] key load error:', reason);
@@ -208,8 +220,9 @@ async function processLaunchBlock0(
         );
     }
 
-    // ── E. Build, sign, and send the launch transaction ────────
+    // ── E. Build, sign, and send/simulate the launch transaction ────────
     let signature: string;
+    let simulated = false;
 
     try {
         // ── Determine instruction set based on buyer count ────────
@@ -265,10 +278,12 @@ async function processLaunchBlock0(
             creator.secretKey.fill(0);
             mint.secretKey.fill(0);
 
-            await admin.rpc('fail_token_launch', {
-                p_mint_id: mintId,
-                p_reason:  'multi-wallet block0 buy not yet implemented',
-            });
+            if (!dryRun) {
+                await admin.rpc('fail_token_launch', {
+                    p_mint_id: mintId,
+                    p_reason:  'multi-wallet block0 buy not yet implemented',
+                });
+            }
 
             return Response.json(
                 { message: 'Multi-wallet block0 launch not implemented yet' },
@@ -290,34 +305,51 @@ async function processLaunchBlock0(
         // Both creator AND mint must sign
         tx.sign([creator, mint]);
 
-        // Send and confirm
-        signature = await quicknodeSolana.connection.sendTransaction(tx, {
-            skipPreflight:       false,
-            preflightCommitment: 'confirmed',
-            maxRetries:          3
-        });
+        if (dryRun) {
+            // Real keys, real signature — just never broadcast. Simulation
+            // still catches real on-chain errors (funds, program errors, etc).
+            // replaceRecentBlockhash avoids a spurious BlockhashNotFound when the
+            // RPC's own blockhash cache lags behind what we just fetched — safe
+            // here since this transaction is never broadcast.
+            const simulation = await quicknodeSolana.connection.simulateTransaction(tx, { sigVerify: false, replaceRecentBlockhash: true });
+            if (simulation.value.err) {
+                throw new Error(`Simulation failed: ${JSON.stringify(simulation.value.err)}`);
+            }
+            signature = `simulated-${Date.now()}`;
+            simulated = true;
+        } else {
+            // Send and confirm
+            signature = await quicknodeSolana.connection.sendTransaction(tx, {
+                skipPreflight:       false,
+                preflightCommitment: 'confirmed',
+                maxRetries:          3
+            });
 
-        const latestBlockhash = await quicknodeSolana.connection
-            .getLatestBlockhash('confirmed');
+            const latestBlockhash = await quicknodeSolana.connection
+                .getLatestBlockhash('confirmed');
 
-        await quicknodeSolana.connection.confirmTransaction(
-            {
-                signature,
-                blockhash:            latestBlockhash.blockhash,
-                lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
-            },
-            'confirmed'
-        );
+            await quicknodeSolana.connection.confirmTransaction(
+                {
+                    signature,
+                    blockhash:            latestBlockhash.blockhash,
+                    lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
+                },
+                'confirmed'
+            );
+        }
 
     } catch (err) {
         // Tx failed — wipe keys, revert draft for retry
         creator.secretKey.fill(0);
         mint.secretKey.fill(0);
 
-        await admin.rpc('fail_token_launch', {
-            p_mint_id: mintId,
-            p_reason:  `tx failed: ${(err as Error).message}`
-        });
+        // Nothing to revert in dry-run mode — the draft was never locked.
+        if (!dryRun) {
+            await admin.rpc('fail_token_launch', {
+                p_mint_id: mintId,
+                p_reason:  `tx failed: ${(err as Error).message}`
+            });
+        }
 
         console.error('[launch] tx error:', (err as Error).message);
         return Response.json(
@@ -332,6 +364,23 @@ async function processLaunchBlock0(
     }
 
     // ── F. Mark launched + retire vanity keypair ───────────────
+    // Skipped for dry runs — the draft was never locked, so there's nothing
+    // to complete. Simulation success just means the transaction would land.
+    if (dryRun) {
+        return Response.json(
+            {
+                message:     'Simulation succeeded — no transaction was broadcast',
+                simulated,
+                signature,
+                mintId,
+                mintAddress: launchData.mint_public_key,
+                tokenName:   launchData.token_name,
+                tokenSymbol: launchData.token_symbol,
+            },
+            { status: 200 }
+        );
+    }
+
     const { error: completeError } = await admin
         .rpc('complete_token_launch', {
             p_mint_id:      mintId,

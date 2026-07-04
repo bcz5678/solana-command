@@ -34,7 +34,7 @@ export default function WebhookNode({ data, selected }: NodeProps) {
             selected={selected}
             onConfigure={d.onConfigure}
             onDelete={d.onDelete}
-            resultBadge={d.webhookResult}
+            resultBadge={d.executionResult}
         />
     )
 }

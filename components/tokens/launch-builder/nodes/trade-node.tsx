@@ -35,6 +35,7 @@ export default function TradeNode({ data, selected }: NodeProps) {
             selected={selected}
             onConfigure={d.onConfigure}
             onDelete={d.onDelete}
+            resultBadge={d.executionResult}
         />
     )
 }

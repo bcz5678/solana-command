@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import {
-    Braces, Check, Copy, Save, FolderOpen, Bookmark, BookOpen, Loader2, Trash2,
+    Braces, Check, Copy, Save, FolderOpen, Bookmark, BookOpen, Loader2, Trash2, FlaskConical, TriangleAlert,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,7 @@ import {
     DialogHeader,
     DialogTitle,
     DialogDescription,
+    DialogFooter,
 } from '@/components/ui/dialog'
 import type { LaunchProfile } from './launch-profile'
 import type { SavedLaunchConfig, LaunchTemplate } from '@/lib/types/launch-builder'
@@ -26,6 +27,8 @@ type Props = {
     onSave: () => Promise<string | null>
     onSaveAsTemplate: () => Promise<boolean>
     onLoadProfile: (profile: LaunchProfile, name: string, source?: { type: 'config' | 'template'; id: string }) => void
+    testMode: boolean
+    onTestModeChange: (testMode: boolean) => void
 }
 
 export default function LaunchBuilderToolbar({
@@ -35,7 +38,10 @@ export default function LaunchBuilderToolbar({
     onSave,
     onSaveAsTemplate,
     onLoadProfile,
+    testMode,
+    onTestModeChange,
 }: Props) {
+    const [liveConfirmOpen, setLiveConfirmOpen] = useState(false)
     const [jsonOpen, setJsonOpen]           = useState(false)
     const [copied, setCopied]               = useState(false)
     const [loadOpen, setLoadOpen]           = useState(false)
@@ -91,6 +97,21 @@ export default function LaunchBuilderToolbar({
             .catch((e) => { setTemplatesError(String(e)); setTemplates([]) })
             .finally(() => setLoadingTemplates(false))
     }, [templatesOpen])
+
+    function handleToggleTestMode() {
+        if (testMode) {
+            // Turning test mode off means the next Run executes real
+            // transactions with real funds — always confirm first.
+            setLiveConfirmOpen(true)
+        } else {
+            onTestModeChange(true)
+        }
+    }
+
+    function confirmGoLive() {
+        setLiveConfirmOpen(false)
+        onTestModeChange(false)
+    }
 
     function copyJson() {
         navigator.clipboard.writeText(json)
@@ -173,6 +194,7 @@ export default function LaunchBuilderToolbar({
     }
 
     return (
+        <div className="flex flex-col shrink-0">
         <div className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-card/40 px-3">
             <Input
                 value={profileName}
@@ -186,6 +208,18 @@ export default function LaunchBuilderToolbar({
             </span>
 
             <div className="ml-auto flex items-center gap-2">
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleToggleTestMode}
+                    className={testMode
+                        ? 'border-lime-500/40 bg-lime-500/10 text-lime-500 hover:bg-lime-500/20'
+                        : 'border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20'}
+                >
+                    {testMode ? <FlaskConical className="size-3.5" /> : <TriangleAlert className="size-3.5" />}
+                    {testMode ? 'Test Mode' : 'LIVE — real funds'}
+                </Button>
+
                 <Button variant="ghost" size="sm" onClick={() => setTemplatesOpen(true)}>
                     <BookOpen className="size-3.5" />
                     Templates
@@ -233,6 +267,30 @@ export default function LaunchBuilderToolbar({
                     JSON
                 </Button>
             </div>
+        </div>
+
+        {!testMode && (
+            <div className="flex h-7 shrink-0 items-center justify-center gap-1.5 bg-destructive/15 text-[11px] font-medium text-destructive">
+                <TriangleAlert className="size-3" />
+                LIVE MODE — Run executes real transactions with real funds
+            </div>
+        )}
+
+        {/* ── Confirm switching off Test Mode ─────────────────────────── */}
+        <Dialog open={liveConfirmOpen} onOpenChange={setLiveConfirmOpen}>
+            <DialogContent className="sm:max-w-sm">
+                <DialogHeader>
+                    <DialogTitle>Turn off Test Mode?</DialogTitle>
+                    <DialogDescription>
+                        This will execute real transactions with real funds the next time you hit Run — nothing will be simulated.
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => setLiveConfirmOpen(false)}>Cancel</Button>
+                    <Button variant="destructive" onClick={confirmGoLive}>Go live</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
 
             {/* ── JSON viewer ─────────────────────────────────────────────── */}
             <Dialog open={jsonOpen} onOpenChange={setJsonOpen}>

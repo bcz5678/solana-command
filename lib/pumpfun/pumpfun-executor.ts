@@ -29,17 +29,21 @@ export class PumpfunExecutor {
   private readonly wallet: Keypair;
   private readonly defaultSlippage: number;
   private readonly maxRetries: number;
+  private readonly dryRun: boolean;
 
   constructor(opts: {
     connection: Connection;
     wallet: Keypair;
     defaultSlippage?: number;
     maxRetries?: number;
+    /** Sign and simulate every trade instead of broadcasting it. */
+    dryRun?: boolean;
   }) {
     this.connection = opts.connection;
     this.wallet = opts.wallet;
     this.defaultSlippage = opts.defaultSlippage ?? 0.05; // 5%
     this.maxRetries = opts.maxRetries ?? 2;
+    this.dryRun = opts.dryRun ?? false;
     this.onlineSdk = new OnlinePumpSdk(this.connection);
   }
 
@@ -99,6 +103,7 @@ export class PumpfunExecutor {
         this.connection,
         async () => signInstructions(this.connection, this.wallet, await buildInstructions()),
         this.maxRetries,
+        this.dryRun,
       );
       console.log(`BUY ${mint.toBase58().slice(0, 8)}… | ${(solAmount.toNumber() / 1e9).toFixed(4)} SOL → ${tokenAmount.toString()} tokens | sig=${signature.slice(0, 16)}…`);
       return { success: true, signature, solAmount, tokenAmount, tokensRemaining: ZERO, price };
@@ -157,6 +162,7 @@ export class PumpfunExecutor {
         this.connection,
         async () => signInstructions(this.connection, this.wallet, await buildInstructions()),
         this.maxRetries,
+        this.dryRun,
       );
       console.log(`SELL ${mint.toBase58().slice(0, 8)}… | ${tokenAmount.toString()} tokens | sig=${signature.slice(0, 16)}…`);
       return { success: true, signature, solAmount: ZERO, tokenAmount, tokensRemaining: ZERO, price: 0 };
@@ -196,6 +202,7 @@ export class PumpfunExecutor {
         this.connection,
         async () => signInstructions(this.connection, this.wallet, await buildInstructions()),
         this.maxRetries,
+        this.dryRun,
       );
       console.log(`SELL ALL ${mint.toBase58().slice(0, 8)}… | ${balance.toString()} tokens | sig=${signature.slice(0, 16)}…`);
       return { success: true, signature, solAmount: ZERO, tokenAmount: balance, tokensRemaining: ZERO, price: 0 };

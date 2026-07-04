@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { jitoTipInLamports, tradesList, useJito = true, useQuicknodeJito = true } = body
+  const { jitoTipInLamports, tradesList, useJito = true, useQuicknodeJito = true, dryRun } = body
 
   if (!jitoTipInLamports || !tradesList?.length) {
     return NextResponse.json(
@@ -179,8 +179,9 @@ export async function POST(req: NextRequest) {
       }
 
       const executor = await QuicknodeJitoExecutor.create({
-        endpoint:    process.env.SOLANA_RPC_URL!,
-        tipLamports: Number(jitoTipInLamports),
+        endpoint:     process.env.SOLANA_RPC_URL!,
+        tipLamports:  Number(jitoTipInLamports),
+        simulateOnly: dryRun,
       })
 
       const [{ blockhash }, tipAccount] = await Promise.all([

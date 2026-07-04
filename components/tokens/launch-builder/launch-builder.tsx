@@ -16,7 +16,8 @@ import LaunchBuilderToolbar from './launch-builder-toolbar'
 import NodeConfigDialog from './node-config-dialog'
 import { BuilderNodeData } from './types'
 import { buildLaunchProfile, applyLaunchProfile, type LaunchProfile } from './launch-profile'
-import { getExecEntryNodeIds, getDownstreamNodeIds, buildDataNodePayload } from './handle-types'
+import { getExecEntryNodeIds, getDownstreamNodeIds, buildDataNodePayload, findTokenNodeData } from './handle-types'
+import { LaunchType } from '@/components/tokens/launch/types'
 
 const RUN_STEP_MS = 550
 
@@ -39,6 +40,9 @@ function LaunchBuilderInner() {
     // since diverged, the next Save Template forks a new row instead of
     // overwriting the original template.
     const [templateName, setTemplateName]  = useState<string | null>(null)
+    // Defaults on every session — flipping it off (real funds, real trades)
+    // requires an explicit confirmation in the toolbar.
+    const [testMode, setTestMode]          = useState(true)
 
     const profile = useMemo(
         () => buildLaunchProfile(nodes, edges, { name: profileName }),
@@ -52,6 +56,8 @@ function LaunchBuilderInner() {
     useEffect(() => { edgesRef.current = edges }, [edges])
     const nodesRef = useRef<Node[]>(nodes)
     useEffect(() => { nodesRef.current = nodes }, [nodes])
+    const testModeRef = useRef(testMode)
+    useEffect(() => { testModeRef.current = testMode }, [testMode])
 
     // Resolves the Continue click for whichever Human In The Loop node(s) the
     // active dry-run session is currently paused on. Reassigned per run.
@@ -66,7 +72,7 @@ function LaunchBuilderInner() {
             setNodes((nds) => nds.map((n) => ({
                 ...n,
                 selected: false,
-                data: { ...n.data, awaitingContinue: false, runCountdown: undefined, webhookResult: undefined },
+                data: { ...n.data, awaitingContinue: false, runCountdown: undefined, executionResult: undefined },
             })))
 
             // Each branch walks independently on its own timer — a Human In The
@@ -75,6 +81,13 @@ function LaunchBuilderInner() {
             const activeIds = new Set<string>()
             const hitlWaiting = new Map<string, () => void>()
             const visited = new Set<string>()
+            // Plain synchronous map, not React state — a downstream Confirmation
+            // node's checkConfirmation() runs immediately after its upstream
+            // node's setResult() in the same walk() continuation, well before a
+            // setNodes()-triggered re-render (and the nodesRef effect that mirrors
+            // it) would actually land. Reading from nodesRef here would almost
+            // always see the pre-result stale state.
+            const executionResults = new Map<string, { ok: boolean; status?: number; message: string; signature?: string }>()
 
             const sync = () => setNodes((nds) => nds.map((n) => ({ ...n, selected: activeIds.has(n.id) })))
             const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -107,7 +120,7 @@ function LaunchBuilderInner() {
                 if (!url) {
                     console.warn(`[launch-builder] Webhook node ${nodeId} has no URL configured — skipping call.`)
                     setNodes((nds) => nds.map((n) => (n.id === nodeId
-                        ? { ...n, data: { ...n.data, webhookResult: { ok: false, message: 'No URL configured' } } }
+                        ? { ...n, data: { ...n.data, executionResult: { ok: false, message: 'No URL configured' } } }
                         : n)))
                     return
                 }
@@ -142,7 +155,7 @@ function LaunchBuilderInner() {
                             ...n,
                             data: {
                                 ...n.data,
-                                webhookResult: res.ok
+                                executionResult: res.ok
                                     ? { ok: true, status: result.status, message: `${result.status} OK` }
                                     : { ok: false, status: result.status, message: result.error ?? `HTTP ${res.status}` },
                             },
@@ -151,9 +164,310 @@ function LaunchBuilderInner() {
                 } catch (err) {
                     console.error(`[launch-builder] Webhook POST ${url} failed`, err)
                     setNodes((nds) => nds.map((n) => (n.id === nodeId
-                        ? { ...n, data: { ...n.data, webhookResult: { ok: false, message: String(err) } } }
+                        ? { ...n, data: { ...n.data, executionResult: { ok: false, message: String(err) } } }
                         : n)))
                 }
+            }
+
+            const setResult = (nodeId: string, result: { ok: boolean; status?: number; message: string; signature?: string }) => {
+                executionResults.set(nodeId, result)
+                setNodes((nds) => nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, executionResult: result } } : n)))
+            }
+
+            // Launch Type — only "Dev 0 (Dev Only)" has a real execution path
+            // server-side today (single dev-wallet buy). Real keys are loaded
+            // and the transaction is signed either way; testMode simulates
+            // instead of broadcasting and never touches the draft's DB status.
+            const callLaunch = async (nodeId: string, config: Record<string, unknown>) => {
+                const tokenData = findTokenNodeData(nodeId, nodesRef.current, edgesRef.current)
+                const tokenId = tokenData?.config?.tokenId as string | undefined
+                if (!tokenId) {
+                    console.warn(`[launch-builder] Launch node ${nodeId} has no Token node connected — skipping.`)
+                    setResult(nodeId, { ok: false, message: 'No Token node connected' })
+                    return
+                }
+
+                const payload = {
+                    launchConfig: {
+                        launchType: LaunchType.block0,
+                        token: { id: tokenId },
+                        totalSOLInLamports: String(config.totalSOLInLamports ?? '0'),
+                        tokensTotal: '0',
+                        percentOfSupply: '0',
+                        marketCap: '0',
+                        walletTrades: config.walletTrades ?? [],
+                    },
+                    dryRun: testModeRef.current,
+                }
+
+                try {
+                    const res = await fetch('/api/pumpfun/launch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    })
+                    const result = await res.json()
+                    console.log(`[launch-builder] Launch POST /api/pumpfun/launch →`, { status: res.status, ok: res.ok, payload, response: result })
+
+                    setResult(nodeId, res.ok
+                        ? {
+                            ok: true,
+                            message: result.simulated ? 'Simulated OK' : `Launched — ${String(result.signature ?? '').slice(0, 10)}…`,
+                            signature: result.signature,
+                        }
+                        : { ok: false, message: result.error ?? `HTTP ${res.status}` })
+                } catch (err) {
+                    console.error(`[launch-builder] Launch call failed`, err)
+                    setResult(nodeId, { ok: false, message: String(err) })
+                }
+            }
+
+            // Staggered Buy/Sell — mirrors the schedule pattern already used by
+            // the standalone staggered-buy-wizard: shuffle selected wallets,
+            // hit the trade one wallet at a time with a randomized delay between.
+            const callStaggeredTrade = async (nodeId: string, subtype: 'staggeredBuy' | 'staggeredSell', config: Record<string, unknown>) => {
+                const tokenData = findTokenNodeData(nodeId, nodesRef.current, edgesRef.current)
+                const mintAddress = tokenData?.config?.tokenMint as string | undefined
+                const selectedWalletIds = (config.selectedWalletIds as string[] | undefined) ?? []
+
+                if (!mintAddress) {
+                    setResult(nodeId, { ok: false, message: 'No Token node connected' })
+                    return
+                }
+                if (selectedWalletIds.length === 0) {
+                    setResult(nodeId, { ok: false, message: 'No wallets selected' })
+                    return
+                }
+
+                const tradeAmounts = (config.tradeAmounts as Record<string, string> | undefined) ?? {}
+                const slippage = (config.slippage as number | undefined) ?? 0.05
+                const sellPct = config.sellPct as number | undefined
+                const delayMinMs = Number(config.delayMinSeconds ?? 5) * 1000
+                const delayMaxMs = Number(config.delayMaxSeconds ?? 30) * 1000
+
+                // Shuffle so wallet order isn't predictable on-chain, same as the wizard.
+                const order = [...selectedWalletIds].sort(() => Math.random() - 0.5)
+                const endpoint = subtype === 'staggeredBuy' ? '/api/trade/staggered/buy' : '/api/trade/staggered/sell'
+                let failCount = 0
+                let lastSignature: string | undefined
+
+                for (let i = 0; i < order.length; i++) {
+                    const walletId = order[i]
+                    const body = subtype === 'staggeredBuy'
+                        ? {
+                            walletId,
+                            mintAddress,
+                            solAmountLamports: Math.round((parseFloat(tradeAmounts[walletId] ?? '0') || 0) * 1e9).toString(),
+                            slippage,
+                            dryRun: testModeRef.current,
+                        }
+                        : {
+                            walletId,
+                            mintAddress,
+                            tokenAmount: tradeAmounts[walletId] ?? '0',
+                            slippage,
+                            sellPct,
+                            dryRun: testModeRef.current,
+                        }
+
+                    try {
+                        const res = await fetch(endpoint, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(body),
+                        })
+                        const result = await res.json()
+                        console.log(`[launch-builder] ${subtype} POST ${endpoint} wallet=${walletId} →`, { status: res.status, result })
+                        if (!res.ok || result.success === false) {
+                            failCount++
+                        } else if (result.signature) {
+                            lastSignature = result.signature
+                        }
+                    } catch (err) {
+                        console.error(`[launch-builder] ${subtype} call failed wallet=${walletId}`, err)
+                        failCount++
+                    }
+
+                    if (i < order.length - 1) {
+                        await wait(delayMinMs + Math.random() * (delayMaxMs - delayMinMs))
+                    }
+                }
+
+                setResult(nodeId, failCount === 0
+                    ? { ok: true, message: `${order.length}/${order.length} ${testModeRef.current ? 'simulated' : 'landed'}`, signature: lastSignature }
+                    : { ok: false, message: `${failCount}/${order.length} failed` })
+            }
+
+            // Bundled Jito — QuickNode/Lil Jito path only, per scope.
+            const callBundledTrade = async (nodeId: string, config: Record<string, unknown>) => {
+                const tokenData = findTokenNodeData(nodeId, nodesRef.current, edgesRef.current)
+                const mintAddress = tokenData?.config?.tokenMint as string | undefined
+                const selectedWalletIds = (config.selectedWalletIds as string[] | undefined) ?? []
+
+                if (!mintAddress) {
+                    setResult(nodeId, { ok: false, message: 'No Token node connected' })
+                    return
+                }
+                if (selectedWalletIds.length === 0) {
+                    setResult(nodeId, { ok: false, message: 'No wallets selected' })
+                    return
+                }
+
+                const tradeAmounts = (config.tradeAmounts as Record<string, string> | undefined) ?? {}
+                const slippage = (config.slippage as number | undefined) ?? 0.05
+                const tradesList = selectedWalletIds.map((walletId) => ({
+                    walletId,
+                    mintAddress,
+                    amountInSol: Math.round((parseFloat(tradeAmounts[walletId] ?? '0') || 0) * 1e9).toString(),
+                    slippage,
+                }))
+
+                try {
+                    const res = await fetch('/api/trade/bundle/buy', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            jitoTipInLamports: '1000000',
+                            tradesList,
+                            useQuicknodeJito: true,
+                            dryRun: testModeRef.current,
+                        }),
+                    })
+                    const result = await res.json()
+                    console.log(`[launch-builder] Bundled Jito POST /api/trade/bundle/buy →`, { status: res.status, result })
+
+                    // Jito bundles don't have a single tx signature — the bundle id
+                    // is the closest analog for a downstream confirmation to reference.
+                    setResult(nodeId, res.ok
+                        ? { ok: true, message: result.simulated ? 'Simulated OK' : 'Bundle landed', signature: result.bundleId }
+                        : { ok: false, message: result.error ?? `HTTP ${res.status}` })
+                } catch (err) {
+                    console.error(`[launch-builder] Bundled Jito call failed`, err)
+                    setResult(nodeId, { ok: false, message: String(err) })
+                }
+            }
+
+            // Human Volume — a persistent bot, not a single call/response. Start
+            // it, let it run a couple of cycles, then fully shut it down so a
+            // Run never leaves anything running in the background. The node's
+            // config doesn't yet have dedicated funding-wallet / amount-range
+            // fields, so those are derived from what's already there — the
+            // first selected wallet stands in as the funding wallet, and the
+            // buy range is a ±20% band around the average configured amount.
+            const callHumanVolume = async (nodeId: string, config: Record<string, unknown>) => {
+                const tokenData = findTokenNodeData(nodeId, nodesRef.current, edgesRef.current)
+                const mintAddress = tokenData?.config?.tokenMint as string | undefined
+                const selectedWalletIds = (config.selectedWalletIds as string[] | undefined) ?? []
+
+                if (!mintAddress) {
+                    setResult(nodeId, { ok: false, message: 'No Token node connected' })
+                    return
+                }
+                if (selectedWalletIds.length === 0) {
+                    setResult(nodeId, { ok: false, message: 'No wallets selected' })
+                    return
+                }
+
+                try {
+                    const walletsRes = await fetch('/api/wallets/explorer')
+                    const walletsData = await walletsRes.json()
+                    const allWallets = (walletsData?.wallets as { id: string; public_key: string }[] | undefined) ?? []
+                    const pool = allWallets.filter((w) => selectedWalletIds.includes(w.id))
+                    if (pool.length === 0) throw new Error('Selected wallets not found')
+
+                    const fundingWallet = pool[0]
+                    const tradeAmounts = (config.tradeAmounts as Record<string, string> | undefined) ?? {}
+                    const amounts = pool.map((w) => parseFloat(tradeAmounts[w.id] ?? '0.01') || 0.01)
+                    const avgSol = amounts.reduce((a, b) => a + b, 0) / amounts.length
+                    const buyMinLamports = Math.max(1, Math.round(avgSol * 0.8 * 1e9))
+                    const buyMaxLamports = Math.max(buyMinLamports, Math.round(avgSol * 1.2 * 1e9))
+
+                    const startRes = await fetch('/api/auto/human', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            tokenMint: mintAddress,
+                            fundingWallet: { id: fundingWallet.id, publicKey: fundingWallet.public_key },
+                            walletsList: pool.map((w) => ({ id: w.id, publicKey: w.public_key })),
+                            buyAmountLamports: { min: buyMinLamports, max: buyMaxLamports },
+                            sellPercent: { min: 20, max: 50 },
+                            dryRun: testModeRef.current,
+                        }),
+                    })
+                    const startResult = await startRes.json()
+                    console.log(`[launch-builder] Human Volume start →`, { status: startRes.status, result: startResult })
+
+                    if (!startRes.ok) {
+                        setResult(nodeId, { ok: false, message: startResult.error ?? `HTTP ${startRes.status}` })
+                        return
+                    }
+
+                    // Let it run a couple of cycles, then fully close out.
+                    await wait(18_000)
+
+                    const stopRes = await fetch('/api/auto/human?action=shutdown', { method: 'DELETE' })
+                    const stopResult = await stopRes.json()
+                    console.log(`[launch-builder] Human Volume shutdown →`, { status: stopRes.status, result: stopResult })
+
+                    setResult(nodeId, stopRes.ok
+                        ? { ok: true, message: testModeRef.current ? 'Simulated run complete' : 'Run complete' }
+                        : { ok: false, message: stopResult.error ?? `HTTP ${stopRes.status}` })
+                } catch (err) {
+                    console.error(`[launch-builder] Human Volume flow failed`, err)
+                    setResult(nodeId, { ok: false, message: String(err) })
+                }
+            }
+
+            // Launch/Tx Confirmation — reads the outcome already recorded on the
+            // node directly upstream (its executionResult) rather than
+            // independently re-verifying on-chain. A passthrough today since the
+            // node before it already ran and knows whether it succeeded; the
+            // signature is carried along for later steps to reference.
+            //
+            // Gate is strictly signature-based: a real tx signature (or Jito
+            // bundle id) must be present to continue, no matter what the
+            // upstream's own `ok` flag says — an "ok" result with nothing to
+            // confirm (e.g. a bot run with no discrete signature) doesn't count.
+            //
+            // Walks backward through the (non-exec) edge chain until it finds a
+            // node that actually recorded an executionResult — not just the
+            // single immediate predecessor, which might be a pass-through node
+            // (a Timer, another Trigger, etc.) that never ran a real call itself.
+            const findUpstreamResult = (startNodeId: string) => {
+                const seen = new Set<string>()
+                let currentId = startNodeId
+                while (!seen.has(currentId)) {
+                    seen.add(currentId)
+                    const inEdge = edgesRef.current.find((e) => e.target === currentId && e.targetHandle !== 'exec-in')
+                    if (!inEdge) return undefined
+                    if (executionResults.has(inEdge.source)) return executionResults.get(inEdge.source)
+                    currentId = inEdge.source
+                }
+                return undefined
+            }
+
+            const checkConfirmation = (nodeId: string): boolean => {
+                const upstreamResult = findUpstreamResult(nodeId)
+
+                console.log(`[launch-builder] checkConfirmation(${nodeId})`, {
+                    upstreamResult,
+                    allResultsSoFar: Array.from(executionResults.entries()),
+                    allIncomingEdges: edgesRef.current.filter((e) => e.target === nodeId),
+                })
+
+                if (upstreamResult?.signature) {
+                    setResult(nodeId, {
+                        ok: true,
+                        message: `Confirmed — ${upstreamResult.signature.slice(0, 10)}…`,
+                        signature: upstreamResult.signature,
+                    })
+                    return true
+                }
+
+                const reason = !upstreamResult ? 'no upstream execution result found' : upstreamResult.message
+                console.warn(`[launch-builder] Confirmation node ${nodeId} stopping — no tx signature to confirm (${reason})`)
+                setResult(nodeId, { ok: false, message: `No signature to confirm — flow stopped (${reason})` })
+                return false
             }
 
             continueNodeRef.current = (nodeId: string) => {
@@ -172,7 +486,11 @@ function LaunchBuilderInner() {
                 sync()
 
                 const data = nodesRef.current.find((n) => n.id === nodeId)?.data as unknown as BuilderNodeData | undefined
-                if (data?.subtype === 'humanInTheLoop') {
+                let stopBranch = false
+
+                if (data?.subtype === 'launchConfirmation' || data?.subtype === 'txConfirmation') {
+                    stopBranch = !checkConfirmation(nodeId)
+                } else if (data?.subtype === 'humanInTheLoop') {
                     await waitForContinue(nodeId)
                 } else if (data?.subtype === 'timerSet') {
                     await countdown(nodeId, Number(data.config?.seconds ?? 5))
@@ -184,12 +502,33 @@ function LaunchBuilderInner() {
                     await countdown(nodeId, lo + Math.random() * (hi - lo))
                 } else if (data?.subtype === 'webhook') {
                     await callWebhook(nodeId, data.config ?? {})
+                } else if (data?.category === 'launchType' && data.subtype === 'dev0DevOnly') {
+                    await callLaunch(nodeId, data.config ?? {})
+                } else if (data?.category === 'launchType') {
+                    // dev0DevBundle / bundled / swarm — no real execution backend yet.
+                    setResult(nodeId, { ok: false, message: 'Not executable yet — no backend for this launch type' })
+                    await wait(RUN_STEP_MS)
+                } else if (data?.category === 'trade' && (data.subtype === 'staggeredBuy' || data.subtype === 'staggeredSell')) {
+                    await callStaggeredTrade(nodeId, data.subtype, data.config ?? {})
+                } else if (data?.category === 'trade' && data.subtype === 'bundledJito') {
+                    await callBundledTrade(nodeId, data.config ?? {})
+                } else if (data?.category === 'trade' && data.subtype === 'humanVolume') {
+                    await callHumanVolume(nodeId, data.config ?? {})
+                } else if (data?.category === 'trade') {
+                    // trendingVolume / holdersMaker — no backend at all yet.
+                    setResult(nodeId, { ok: false, message: 'Not executable yet — no backend for this trade type' })
+                    await wait(RUN_STEP_MS)
                 } else {
                     await wait(RUN_STEP_MS)
                 }
 
                 activeIds.delete(nodeId)
                 sync()
+
+                if (stopBranch) {
+                    console.log(`[launch-builder] Branch stopped at ${nodeId} (subtype: ${data?.subtype})`)
+                    return
+                }
 
                 const children = getDownstreamNodeIds(nodeId, edgesRef.current)
                 await Promise.all(children.map(walk))
@@ -374,6 +713,8 @@ function LaunchBuilderInner() {
                 onSave={onSave}
                 onSaveAsTemplate={onSaveAsTemplate}
                 onLoadProfile={onLoadProfile}
+                testMode={testMode}
+                onTestModeChange={setTestMode}
             />
             <div className="flex min-h-0 flex-1 w-full">
                 <LaunchBuilderPalette nodes={nodes} />

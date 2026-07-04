@@ -19,6 +19,8 @@ export interface BundleBuyBody {
   useJito?:          boolean
   /** Set true to use the QuickNode Lil Jito addon executor (single-wallet bundles only) */
   useQuicknodeJito?: boolean
+  /** Simulate the bundle and stop — never calls sendBundle. QuickNode path only. */
+  dryRun?:           boolean
 }
 
 export interface BundleSellBody {

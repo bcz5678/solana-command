@@ -32,6 +32,8 @@ export class Executor {
     wallet: Keypair;
     defaultSlippage?: number;
     maxRetries?: number;
+    /** Sign and simulate every trade instead of broadcasting it. */
+    dryRun?: boolean;
   }) {
     this.connection = opts.connection;
     this.wallet = opts.wallet;

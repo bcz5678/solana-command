@@ -30,6 +30,8 @@ interface StartBotBody {
     maxSellTranches?:       number
     buysPerCycleMin?:       number
     buysPerCycleMax?:       number
+    /** Simulate trade bundles and skip real top-up/consolidation transfers. */
+    dryRun?:                boolean
 }
 
 // ── GET: status ───────────────────────────────────────────────────────────────
@@ -83,6 +85,7 @@ export async function POST(req: NextRequest) {
         maxSellTranches,
         buysPerCycleMin,
         buysPerCycleMax,
+        dryRun,
     } = body
 
     if (!tokenMint || !fundingWallet?.id || !fundingWallet?.publicKey || !walletsList?.length) {
@@ -104,8 +107,9 @@ export async function POST(req: NextRequest) {
         const connection = initializeQuickNodeSolana().connection
 
         const executor = await QuicknodeJitoExecutor.create({
-            endpoint:    process.env.SOLANA_RPC_URL!,
-            tipLamports: jitoTipLamports ?? 1_000_000,
+            endpoint:     process.env.SOLANA_RPC_URL!,
+            tipLamports:  jitoTipLamports ?? 1_000_000,
+            simulateOnly: dryRun,
         })
 
         bot = new HumanVolumeBot({
@@ -129,6 +133,7 @@ export async function POST(req: NextRequest) {
             maxSellTranches,
             buysPerCycleMin,
             buysPerCycleMax,
+            dryRun,
         })
 
         bot.initializeWalletPool(walletsList)

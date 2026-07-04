@@ -83,6 +83,11 @@ export type BuilderNodeData = {
     onContinue?: () => void
     /** Timer triggers only — whole seconds remaining, set by the dry-run engine while counting down. */
     runCountdown?: number
-    /** Webhook node only — result of the last dry-run POST, for the response badge. */
-    webhookResult?: { ok: boolean; status?: number; message: string }
+    /**
+     * Webhook/LaunchType/Trade/Confirmation-trigger nodes — result of the last
+     * dry-run/live call, for the response badge. `signature` carries the raw
+     * tx signature (or Jito bundle id) so a downstream confirmation trigger
+     * can read it off its immediate predecessor.
+     */
+    executionResult?: { ok: boolean; status?: number; message: string; signature?: string }
 }
