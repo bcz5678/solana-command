@@ -174,6 +174,19 @@ function LaunchBuilderInner() {
                 setNodes((nds) => nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, executionResult: result } } : n)))
             }
 
+            // A trade node reads REAL on-chain bonding-curve state to price a
+            // buy (pump-sdk's fetchBuyState) — that's a plain RPC read, not
+            // something dryRun can simulate around. A simulated Launch never
+            // broadcasts, so it never actually creates that account, and any
+            // downstream trade against the same token hits this. Surface the
+            // real cause instead of a bare SDK error string.
+            const explainTradeError = (message: string | undefined): string => {
+                if (message && /bonding curve account not found/i.test(message)) {
+                    return `${message} — this token hasn't actually been created on-chain (a simulated Launch never broadcasts). Test trades against a token that's already been launched for real.`
+                }
+                return message ?? 'Unknown error'
+            }
+
             // Launch Type — only "Dev 0 (Dev Only)" has a real execution path
             // server-side today (single dev-wallet buy). Real keys are loaded
             // and the transaction is signed either way; testMode simulates
@@ -212,10 +225,12 @@ function LaunchBuilderInner() {
                     setResult(nodeId, res.ok
                         ? {
                             ok: true,
-                            message: result.simulated ? 'Simulated OK' : `Launched — ${String(result.signature ?? '').slice(0, 10)}…`,
+                            message: result.alreadyLaunched
+                                ? 'Already launched — treated as confirmed'
+                                : result.simulated ? 'Simulated OK' : `Launched — ${String(result.signature ?? '').slice(0, 10)}…`,
                             signature: result.signature,
                         }
-                        : { ok: false, message: result.error ?? `HTTP ${res.status}` })
+                        : { ok: false, message: explainTradeError(result.error) })
                 } catch (err) {
                     console.error(`[launch-builder] Launch call failed`, err)
                     setResult(nodeId, { ok: false, message: String(err) })
@@ -250,6 +265,7 @@ function LaunchBuilderInner() {
                 const endpoint = subtype === 'staggeredBuy' ? '/api/trade/staggered/buy' : '/api/trade/staggered/sell'
                 let failCount = 0
                 let lastSignature: string | undefined
+                let lastError: string | undefined
 
                 for (let i = 0; i < order.length; i++) {
                     const walletId = order[i]
@@ -280,12 +296,14 @@ function LaunchBuilderInner() {
                         console.log(`[launch-builder] ${subtype} POST ${endpoint} wallet=${walletId} →`, { status: res.status, result })
                         if (!res.ok || result.success === false) {
                             failCount++
+                            lastError = result.error ?? `HTTP ${res.status}`
                         } else if (result.signature) {
                             lastSignature = result.signature
                         }
                     } catch (err) {
                         console.error(`[launch-builder] ${subtype} call failed wallet=${walletId}`, err)
                         failCount++
+                        lastError = String(err)
                     }
 
                     if (i < order.length - 1) {
@@ -295,7 +313,7 @@ function LaunchBuilderInner() {
 
                 setResult(nodeId, failCount === 0
                     ? { ok: true, message: `${order.length}/${order.length} ${testModeRef.current ? 'simulated' : 'landed'}`, signature: lastSignature }
-                    : { ok: false, message: `${failCount}/${order.length} failed` })
+                    : { ok: false, message: `${failCount}/${order.length} failed — ${explainTradeError(lastError)}` })
             }
 
             // Bundled Jito — QuickNode/Lil Jito path only, per scope.
@@ -340,10 +358,10 @@ function LaunchBuilderInner() {
                     // is the closest analog for a downstream confirmation to reference.
                     setResult(nodeId, res.ok
                         ? { ok: true, message: result.simulated ? 'Simulated OK' : 'Bundle landed', signature: result.bundleId }
-                        : { ok: false, message: result.error ?? `HTTP ${res.status}` })
+                        : { ok: false, message: explainTradeError(result.error) })
                 } catch (err) {
                     console.error(`[launch-builder] Bundled Jito call failed`, err)
-                    setResult(nodeId, { ok: false, message: String(err) })
+                    setResult(nodeId, { ok: false, message: explainTradeError(String(err)) })
                 }
             }
 
@@ -398,7 +416,7 @@ function LaunchBuilderInner() {
                     console.log(`[launch-builder] Human Volume start →`, { status: startRes.status, result: startResult })
 
                     if (!startRes.ok) {
-                        setResult(nodeId, { ok: false, message: startResult.error ?? `HTTP ${startRes.status}` })
+                        setResult(nodeId, { ok: false, message: explainTradeError(startResult.error) })
                         return
                     }
 
@@ -411,10 +429,10 @@ function LaunchBuilderInner() {
 
                     setResult(nodeId, stopRes.ok
                         ? { ok: true, message: testModeRef.current ? 'Simulated run complete' : 'Run complete' }
-                        : { ok: false, message: stopResult.error ?? `HTTP ${stopRes.status}` })
+                        : { ok: false, message: explainTradeError(stopResult.error) })
                 } catch (err) {
                     console.error(`[launch-builder] Human Volume flow failed`, err)
-                    setResult(nodeId, { ok: false, message: String(err) })
+                    setResult(nodeId, { ok: false, message: explainTradeError(String(err)) })
                 }
             }
 
@@ -734,6 +752,7 @@ function LaunchBuilderInner() {
                     edges={edges}
                     onOpenChange={(open) => { if (!open) setConfigNodeId(null) }}
                     onSave={onSaveConfig}
+                    testMode={testMode}
                 />
             </div>
         </div>

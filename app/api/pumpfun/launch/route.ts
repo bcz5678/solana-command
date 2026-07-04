@@ -116,6 +116,29 @@ async function processLaunchBlock0(
 
     // ── B. Guard: must be a draft, must have a dev wallet ──────
     if (launchData.launch_status !== 'draft') {
+        // In Test Mode, an already-launched token is a valid choice — it's how
+        // downstream Trade nodes get a real bonding curve to read against
+        // (see the Launch Builder's Token picker). There's nothing to actually
+        // simulate here (the mint already exists), so treat it as a confirmed
+        // pass-through instead of blocking the whole chain. Any other non-draft
+        // status (e.g. 'launching', 'failed') still blocks — those are real
+        // conflicts, not the "already launched" test-mode case.
+        if (dryRun && launchData.launch_status === 'launched') {
+            return Response.json(
+                {
+                    message:        'Token is already launched — treated as confirmed for this test run',
+                    simulated:      true,
+                    alreadyLaunched: true,
+                    signature:      `already-launched-${mintId}`,
+                    mintId,
+                    mintAddress:    launchData.mint_public_key,
+                    tokenName:      launchData.token_name,
+                    tokenSymbol:    launchData.token_symbol,
+                },
+                { status: 200 }
+            );
+        }
+
         return Response.json(
             {
                 error:        'Token cannot be launched',

@@ -19,9 +19,13 @@ import { TokenMint } from '@/lib/types/token-mint'
 type Props = {
     selectedId: string | null
     onSelect: (token: TokenMint) => void
+    /** Clicking the already-selected token deselects it back to "none selected" instead of re-selecting. */
+    onClear?: () => void
+    /** Lets already-launched tokens be selected too — for the Launch Builder's Test Mode, where a Trade node needs a token with a real on-chain bonding curve to test against. */
+    allowLaunched?: boolean
 }
 
-export default function LaunchTokenSelect({ selectedId, onSelect }: Props) {
+export default function LaunchTokenSelect({ selectedId, onSelect, onClear, allowLaunched = false }: Props) {
     const [tokens, setTokens] = useState<TokenMint[]>([])
     const [loading, setLoading] = useState(true)
     const [openItem, setOpenItem] = useState<string>('')
@@ -106,6 +110,7 @@ export default function LaunchTokenSelect({ selectedId, onSelect }: Props) {
                     >
                         {filtered.map((token) => {
                             const isLaunched = token.launch_status === 'launched'
+                            const isBlocked = isLaunched && !allowLaunched
                             const isSelected = selectedId === token.id
 
                             return (
@@ -115,7 +120,7 @@ export default function LaunchTokenSelect({ selectedId, onSelect }: Props) {
                                     className={[
                                         'transition-colors',
                                         isSelected ? 'bg-blue-500/5 border-l-2 border-l-blue-500' : '',
-                                        isLaunched ? 'opacity-50' : '',
+                                        isBlocked ? 'opacity-50' : '',
                                     ].join(' ')}
                                 >
                                     <AccordionTrigger className="hover:no-underline px-1 gap-4">
@@ -125,18 +130,20 @@ export default function LaunchTokenSelect({ selectedId, onSelect }: Props) {
                                                 <span
                                                     className={[
                                                         'w-5 shrink-0 flex items-center justify-center',
-                                                        isLaunched ? 'cursor-not-allowed' : 'cursor-pointer',
+                                                        isBlocked ? 'cursor-not-allowed' : 'cursor-pointer',
                                                     ].join(' ')}
                                                     onClick={(e) => {
                                                         e.stopPropagation()
-                                                        if (!isLaunched) onSelect(token)
+                                                        if (isBlocked) return
+                                                        if (isSelected && onClear) onClear()
+                                                        else onSelect(token)
                                                     }}
                                                 >
                                                     <span className={[
                                                         'size-4 rounded-full border-2 flex items-center justify-center transition-colors shrink-0',
                                                         isSelected
                                                             ? 'border-blue-500 bg-blue-500'
-                                                            : isLaunched
+                                                            : isBlocked
                                                             ? 'border-muted-foreground/20 bg-muted'
                                                             : 'border-muted-foreground/40 hover:border-blue-400',
                                                     ].join(' ')}>
@@ -146,9 +153,14 @@ export default function LaunchTokenSelect({ selectedId, onSelect }: Props) {
                                                     </span>
                                                 </span>
                                             </TooltipTrigger>
-                                            {isLaunched && (
+                                            {isBlocked && (
                                                 <TooltipContent side="top">
                                                     This token has already been launched
+                                                </TooltipContent>
+                                            )}
+                                            {isLaunched && allowLaunched && (
+                                                <TooltipContent side="top">
+                                                    Already launched — selectable for testing
                                                 </TooltipContent>
                                             )}
                                         </Tooltip>

@@ -34,9 +34,11 @@ type Props = {
     edges: Edge[]
     onOpenChange: (open: boolean) => void
     onSave: (nodeId: string, config: Record<string, unknown>) => void
+    /** Test Mode — relaxes the Token node's picker to allow already-launched tokens, needed to test Trade nodes against a real bonding curve. */
+    testMode: boolean
 }
 
-export default function NodeConfigDialog({ node, nodes, edges, onOpenChange, onSave }: Props) {
+export default function NodeConfigDialog({ node, nodes, edges, onOpenChange, onSave, testMode }: Props) {
     const data = node?.data as unknown as BuilderNodeData | undefined
 
     return (
@@ -51,6 +53,7 @@ export default function NodeConfigDialog({ node, nodes, edges, onOpenChange, onS
                         edges={edges}
                         onSave={onSave}
                         onClose={() => onOpenChange(false)}
+                        testMode={testMode}
                     />
                 )}
             </DialogContent>
@@ -65,6 +68,7 @@ function ConfigBody({
     edges,
     onSave,
     onClose,
+    testMode,
 }: {
     nodeId: string
     data: BuilderNodeData
@@ -72,6 +76,7 @@ function ConfigBody({
     edges: Edge[]
     onSave: Props['onSave']
     onClose: () => void
+    testMode: boolean
 }) {
     const [config, setConfig] = useState<Record<string, unknown>>({ ...data.config })
     const def = PALETTE_ITEMS.find((i) => i.subtype === data.subtype)
@@ -113,6 +118,16 @@ function ConfigBody({
                                 devWalletId: token.dev_wallet_id,
                             })
                         }
+                        onClear={() =>
+                            patch({
+                                tokenId: undefined,
+                                tokenName: undefined,
+                                tokenSymbol: undefined,
+                                tokenMint: undefined,
+                                devWalletId: undefined,
+                            })
+                        }
+                        allowLaunched={testMode}
                     />
                 )}
 
