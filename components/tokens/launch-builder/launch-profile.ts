@@ -2,7 +2,7 @@ import type { Node, Edge } from '@xyflow/react'
 import { BuilderNodeCategory, BuilderNodeData, BuilderNodeType, BuilderSubtype } from './types'
 import { PALETTE_ITEMS } from './node-palette-config'
 
-type Callbacks = Pick<BuilderNodeData, 'onConfigure' | 'onDelete' | 'onRun' | 'onContinue'>
+type Callbacks = Pick<BuilderNodeData, 'onConfigure' | 'onDelete' | 'onRun' | 'onContinue' | 'onRename'>
 
 export const LAUNCH_PROFILE_SCHEMA_VERSION = 1
 
@@ -12,6 +12,8 @@ export type LaunchProfileNode = {
     category: BuilderNodeCategory
     subtype: BuilderSubtype
     label: string
+    /** user-set custom name for this node instance, for referencing steps in the workflow */
+    displayName?: string
     position: { x: number; y: number }
     /** node-specific config populated via the configure modal — already JSON-safe (no functions) */
     config: Record<string, unknown>
@@ -62,6 +64,7 @@ export function applyLaunchProfile(
                 category: pn.category,
                 subtype: pn.subtype,
                 label: pn.label,
+                displayName: pn.displayName,
                 config: pn.config,
                 inputTypes:  paletteDef?.inputTypes  ?? [],
                 outputTypes: paletteDef?.outputTypes ?? [],
@@ -99,6 +102,7 @@ export function buildLaunchProfile(
                 category: data.category,
                 subtype: data.subtype,
                 label: data.label,
+                displayName: data.displayName,
                 position: { x: node.position.x, y: node.position.y },
                 config: data.config,
             }

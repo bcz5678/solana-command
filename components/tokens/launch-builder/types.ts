@@ -64,6 +64,8 @@ export type BuilderNodeData = {
     category: BuilderNodeCategory
     subtype: BuilderSubtype
     label: string
+    /** user-set custom name for this node instance, for referencing steps in the workflow. Falls back to `label` when unset. */
+    displayName?: string
     /** node-specific config populated via the configure modal */
     config: Record<string, unknown>
     /** typed I/O declarations — set on drop, restored on load */
@@ -71,6 +73,8 @@ export type BuilderNodeData = {
     outputTypes?: HandleDataType[]
     onConfigure?: () => void
     onDelete?: () => void
+    /** Renames this node instance (empty string clears back to the default type label). */
+    onRename?: (name: string) => void
     /** Manual Execution node only — triggers a visual dry-run walk downstream from this node. */
     onRun?: () => void
     /** Human In The Loop trigger only — set true by the dry-run engine while it's paused waiting on this node. */
@@ -79,4 +83,6 @@ export type BuilderNodeData = {
     onContinue?: () => void
     /** Timer triggers only — whole seconds remaining, set by the dry-run engine while counting down. */
     runCountdown?: number
+    /** Webhook node only — result of the last dry-run POST, for the response badge. */
+    webhookResult?: { ok: boolean; status?: number; message: string }
 }

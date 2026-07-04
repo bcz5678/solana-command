@@ -38,6 +38,8 @@ export default function TriggerNode({ data, selected }: NodeProps) {
             icon={def?.icon ?? PALETTE_ITEMS[0].icon}
             category="trigger"
             label={d.label}
+            displayName={d.displayName}
+            onRename={d.onRename}
             subLabel={subLabelFor(d)}
             inputs={1}
             outputCount={1}

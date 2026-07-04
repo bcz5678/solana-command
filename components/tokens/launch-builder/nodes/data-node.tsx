@@ -15,6 +15,8 @@ export default function DataNode({ data, selected }: NodeProps) {
             icon={Database}
             category="utility"
             label={d.label}
+            displayName={d.displayName}
+            onRename={d.onRename}
             subLabel={customCount > 0 ? `+${customCount} custom field${customCount !== 1 ? 's' : ''}` : 'System fields only'}
             inputs={1}
             outputCount={1}

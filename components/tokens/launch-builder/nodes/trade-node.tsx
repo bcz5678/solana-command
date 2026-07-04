@@ -25,6 +25,8 @@ export default function TradeNode({ data, selected }: NodeProps) {
             icon={def?.icon ?? PALETTE_ITEMS[0].icon}
             category="trade"
             label={d.label}
+            displayName={d.displayName}
+            onRename={d.onRename}
             subLabel={subLabelParts.length ? subLabelParts.join(' · ') : 'Not configured'}
             inputs={1}
             outputCount={1}

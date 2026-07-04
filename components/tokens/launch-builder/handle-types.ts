@@ -8,13 +8,14 @@ export const HANDLE_TYPE_META: Record<HandleDataType, {
     border: string   // Tailwind border-* class
     bg: string       // Tailwind bg-* class (solid, for the filled dot state)
     text: string     // Tailwind text-* class
+    stroke: string   // Tailwind stroke-* class, for the SVG output-triangle glyph
 }> = {
-    exec:   { label: 'Exec',   border: 'border-lime-400',    bg: 'bg-lime-400',    text: 'text-lime-400' },
-    token:  { label: 'Token',  border: 'border-amber-400',   bg: 'bg-amber-400',   text: 'text-amber-400' },
-    config: { label: 'Config', border: 'border-violet-500',  bg: 'bg-violet-500',  text: 'text-violet-500' },
-    signal: { label: 'Signal', border: 'border-emerald-400', bg: 'bg-emerald-400', text: 'text-emerald-400' },
-    branch: { label: 'Branch', border: 'border-rose-400',    bg: 'bg-rose-400',    text: 'text-rose-400' },
-    data:   { label: 'Data',   border: 'border-cyan-400',    bg: 'bg-cyan-400',    text: 'text-cyan-400' },
+    exec:   { label: 'Exec',   border: 'border-lime-400',    bg: 'bg-lime-400',    text: 'text-lime-400',    stroke: 'stroke-lime-400' },
+    token:  { label: 'Token',  border: 'border-amber-400',   bg: 'bg-amber-400',   text: 'text-amber-400',   stroke: 'stroke-amber-400' },
+    config: { label: 'Config', border: 'border-violet-500',  bg: 'bg-violet-500',  text: 'text-violet-500',  stroke: 'stroke-violet-500' },
+    signal: { label: 'Signal', border: 'border-emerald-400', bg: 'bg-emerald-400', text: 'text-emerald-400', stroke: 'stroke-emerald-400' },
+    branch: { label: 'Branch', border: 'border-rose-400',    bg: 'bg-rose-400',    text: 'text-rose-400',    stroke: 'stroke-rose-400' },
+    data:   { label: 'Data',   border: 'border-cyan-400',    bg: 'bg-cyan-400',    text: 'text-cyan-400',    stroke: 'stroke-cyan-400' },
 }
 
 // ── Compatibility ─────────────────────────────────────────��──────────────────
@@ -88,6 +89,41 @@ export function getDownstreamNodeIds(nodeId: string, edges: Edge[]): string[] {
     return edges
         .filter((e) => e.source === nodeId && e.targetHandle !== 'exec-in')
         .map((e) => e.target)
+}
+
+/**
+ * Single source of truth for the Data node's "system fields" — resolved from
+ * whatever Token node is reachable upstream. Shared by the config dialog
+ * (display) and the dry-run engine (actual webhook payload) so they can't drift.
+ */
+export const DATA_NODE_SYSTEM_FIELDS: { key: string; label: string; source: (d: BuilderNodeData | null) => string }[] = [
+    { key: 'tokenMint',          label: 'Token Mint',            source: (d) => (d?.config.tokenMint   as string) ?? '' },
+    { key: 'tokenName',          label: 'Token Name',            source: (d) => (d?.config.tokenName   as string) ?? '' },
+    { key: 'tokenSymbol',        label: 'Token Symbol',          source: (d) => (d?.config.tokenSymbol as string) ?? '' },
+    { key: 'devWalletPublicKey', label: 'Dev Wallet Public Key', source: (d) => (d?.config.devWalletId as string) ?? '' },
+]
+
+/** Builds the flat JSON payload a Data node resolves to: system fields + custom fields. */
+export function buildDataNodePayload(
+    dataNodeId: string,
+    nodes: Node[],
+    edges: Edge[],
+    dataNodeConfig: Record<string, unknown>,
+): Record<string, unknown> {
+    const tokenData = findTokenNodeData(dataNodeId, nodes, edges)
+    const payload: Record<string, unknown> = {}
+
+    DATA_NODE_SYSTEM_FIELDS.forEach(({ key, source }) => {
+        payload[key] = source(tokenData)
+    })
+
+    const customFields = (dataNodeConfig.customFields as { key: string; value: string }[] | undefined) ?? []
+    customFields.forEach(({ key, value }) => {
+        const trimmed = key.trim()
+        if (trimmed) payload[trimmed] = value
+    })
+
+    return payload
 }
 
 export function findTokenNodeData(

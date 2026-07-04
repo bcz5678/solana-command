@@ -14,6 +14,8 @@ export default function TokenNode({ data, selected }: NodeProps) {
             icon={Coins}
             category="token"
             label={d.label}
+            displayName={d.displayName}
+            onRename={d.onRename}
             subLabel={symbol ? `${symbol}` : 'No token selected'}
             inputs={0}
             outputCount={1}

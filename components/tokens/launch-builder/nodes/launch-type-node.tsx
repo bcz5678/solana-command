@@ -25,6 +25,8 @@ export default function LaunchTypeNode({ data, selected }: NodeProps) {
             icon={def?.icon ?? PALETTE_ITEMS[0].icon}
             category="launchType"
             label={d.label}
+            displayName={d.displayName}
+            onRename={d.onRename}
             subLabel={subLabel}
             inputs={1}
             outputCount={1}

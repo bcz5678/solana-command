@@ -42,14 +42,14 @@ export const CATEGORY_LABELS: Record<BuilderNodeCategory, string> = {
     utility: 'Utility',
 }
 
-export const CATEGORY_ACCENT: Record<BuilderNodeCategory, { border: string; bg: string; text: string }> = {
-    execution:   { border: 'border-lime-500',    bg: 'bg-lime-500/5',    text: 'text-lime-500' },
-    token:       { border: 'border-blue-500',    bg: 'bg-blue-500/5',    text: 'text-blue-500' },
-    launchType:  { border: 'border-violet-500',  bg: 'bg-violet-500/5',  text: 'text-violet-500' },
-    trade:       { border: 'border-emerald-500', bg: 'bg-emerald-500/5', text: 'text-emerald-500' },
-    trigger:     { border: 'border-amber-500',   bg: 'bg-amber-500/5',   text: 'text-amber-500' },
-    conditional: { border: 'border-rose-500',    bg: 'bg-rose-500/5',    text: 'text-rose-500' },
-    utility:     { border: 'border-cyan-500',    bg: 'bg-cyan-500/5',    text: 'text-cyan-500' },
+export const CATEGORY_ACCENT: Record<BuilderNodeCategory, { border: string; bg: string; text: string; ring: string }> = {
+    execution:   { border: 'border-lime-500',    bg: 'bg-lime-500/5',    text: 'text-lime-500',    ring: 'ring-lime-500' },
+    token:       { border: 'border-blue-500',    bg: 'bg-blue-500/5',    text: 'text-blue-500',    ring: 'ring-blue-500' },
+    launchType:  { border: 'border-violet-500',  bg: 'bg-violet-500/5',  text: 'text-violet-500',  ring: 'ring-violet-500' },
+    trade:       { border: 'border-emerald-500', bg: 'bg-emerald-500/5', text: 'text-emerald-500', ring: 'ring-emerald-500' },
+    trigger:     { border: 'border-amber-500',   bg: 'bg-amber-500/5',   text: 'text-amber-500',   ring: 'ring-amber-500' },
+    conditional: { border: 'border-rose-500',    bg: 'bg-rose-500/5',    text: 'text-rose-500',    ring: 'ring-rose-500' },
+    utility:     { border: 'border-cyan-500',    bg: 'bg-cyan-500/5',    text: 'text-cyan-500',    ring: 'ring-cyan-500' },
 }
 
 export const PALETTE_ITEMS: PaletteNodeDef[] = [

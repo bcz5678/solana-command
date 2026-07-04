@@ -44,6 +44,8 @@ export default function ConditionalNode({ id, data, selected }: NodeProps) {
             icon={def?.icon ?? PALETTE_ITEMS[0].icon}
             category="conditional"
             label={d.label}
+            displayName={d.displayName}
+            onRename={d.onRename}
             inputs={1}
             outputCount={outputCount}
             outputLabels={outputLabelsFor(d)}

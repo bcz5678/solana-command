@@ -16,7 +16,7 @@ import LaunchBuilderToolbar from './launch-builder-toolbar'
 import NodeConfigDialog from './node-config-dialog'
 import { BuilderNodeData } from './types'
 import { buildLaunchProfile, applyLaunchProfile, type LaunchProfile } from './launch-profile'
-import { getExecEntryNodeIds, getDownstreamNodeIds } from './handle-types'
+import { getExecEntryNodeIds, getDownstreamNodeIds, buildDataNodePayload } from './handle-types'
 
 const RUN_STEP_MS = 550
 
@@ -34,6 +34,11 @@ function LaunchBuilderInner() {
     const [configNodeId, setConfigNodeId]  = useState<string | null>(null)
     const [profileName, setProfileName]    = useState('Untitled Launch')
     const [configId, setConfigId]          = useState<string | null>(null)
+    const [templateId, setTemplateId]      = useState<string | null>(null)
+    // Name the current templateId was loaded/saved under — if the name has
+    // since diverged, the next Save Template forks a new row instead of
+    // overwriting the original template.
+    const [templateName, setTemplateName]  = useState<string | null>(null)
 
     const profile = useMemo(
         () => buildLaunchProfile(nodes, edges, { name: profileName }),
@@ -61,7 +66,7 @@ function LaunchBuilderInner() {
             setNodes((nds) => nds.map((n) => ({
                 ...n,
                 selected: false,
-                data: { ...n.data, awaitingContinue: false, runCountdown: undefined },
+                data: { ...n.data, awaitingContinue: false, runCountdown: undefined, webhookResult: undefined },
             })))
 
             // Each branch walks independently on its own timer — a Human In The
@@ -94,6 +99,63 @@ function LaunchBuilderInner() {
                     tick()
                 })
 
+            // Finds the Data node feeding this Webhook node, builds its payload,
+            // POSTs it to the existing webhook execute API, and waits for the
+            // response before the branch continues downstream.
+            const callWebhook = async (nodeId: string, webhookConfig: Record<string, unknown>) => {
+                const url = (webhookConfig.url as string | undefined)?.trim()
+                if (!url) {
+                    console.warn(`[launch-builder] Webhook node ${nodeId} has no URL configured — skipping call.`)
+                    setNodes((nds) => nds.map((n) => (n.id === nodeId
+                        ? { ...n, data: { ...n.data, webhookResult: { ok: false, message: 'No URL configured' } } }
+                        : n)))
+                    return
+                }
+
+                const inEdge = edgesRef.current.find((e) => e.target === nodeId && e.targetHandle !== 'exec-in')
+                const dataNode = inEdge ? nodesRef.current.find((n) => n.id === inEdge.source) : undefined
+                if (!dataNode) {
+                    console.warn(`[launch-builder] Webhook node ${nodeId} has no Data node connected — sending an empty payload.`)
+                }
+                const dataNodeData = dataNode?.data as unknown as BuilderNodeData | undefined
+                const payload = dataNode
+                    ? buildDataNodePayload(dataNode.id, nodesRef.current, edgesRef.current, dataNodeData?.config ?? {})
+                    : {}
+
+                try {
+                    const res = await fetch('/api/launch-builder/webhook/execute', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            url,
+                            authType: webhookConfig.authType ?? 'none',
+                            authValue: webhookConfig.authValue ?? '',
+                            customHeaders: webhookConfig.customHeaders ?? [],
+                            payload,
+                        }),
+                    })
+                    const result = await res.json()
+                    console.log(`[launch-builder] Webhook POST ${url} →`, { status: res.status, ok: res.ok, payload, response: result })
+
+                    setNodes((nds) => nds.map((n) => (n.id === nodeId
+                        ? {
+                            ...n,
+                            data: {
+                                ...n.data,
+                                webhookResult: res.ok
+                                    ? { ok: true, status: result.status, message: `${result.status} OK` }
+                                    : { ok: false, status: result.status, message: result.error ?? `HTTP ${res.status}` },
+                            },
+                        }
+                        : n)))
+                } catch (err) {
+                    console.error(`[launch-builder] Webhook POST ${url} failed`, err)
+                    setNodes((nds) => nds.map((n) => (n.id === nodeId
+                        ? { ...n, data: { ...n.data, webhookResult: { ok: false, message: String(err) } } }
+                        : n)))
+                }
+            }
+
             continueNodeRef.current = (nodeId: string) => {
                 const resolve = hitlWaiting.get(nodeId)
                 if (!resolve) return
@@ -120,6 +182,8 @@ function LaunchBuilderInner() {
                     const lo = Math.min(min, max)
                     const hi = Math.max(min, max)
                     await countdown(nodeId, lo + Math.random() * (hi - lo))
+                } else if (data?.subtype === 'webhook') {
+                    await callWebhook(nodeId, data.config ?? {})
                 } else {
                     await wait(RUN_STEP_MS)
                 }
@@ -143,16 +207,34 @@ function LaunchBuilderInner() {
         [setEdges],
     )
 
+    const onRenameNode = useCallback(
+        (nodeId: string, name: string) => {
+            setNodes((nds) =>
+                nds.map((n) => {
+                    if (n.id !== nodeId) return n
+                    const data = n.data as unknown as BuilderNodeData
+                    return { ...n, data: { ...data, displayName: name || undefined } }
+                }),
+            )
+        },
+        [setNodes],
+    )
+
     const onAddNode = useCallback(
         (node: Node) => {
             const data = node.data as unknown as BuilderNodeData
             const withCallbacks = {
                 ...node,
-                data: { ...data, onRun: () => runDryRun(node.id), onContinue: () => onContinueNode(node.id) },
+                data: {
+                    ...data,
+                    onRun: () => runDryRun(node.id),
+                    onContinue: () => onContinueNode(node.id),
+                    onRename: (name: string) => onRenameNode(node.id, name),
+                },
             }
             setNodes((nds) => nds.concat(withCallbacks))
         },
-        [setNodes, runDryRun, onContinueNode],
+        [setNodes, runDryRun, onContinueNode, onRenameNode],
     )
 
     const onConfigureNode = useCallback((nodeId: string) => setConfigNodeId(nodeId), [])
@@ -224,11 +306,16 @@ function LaunchBuilderInner() {
 
     const onSaveAsTemplate = useCallback(async (): Promise<boolean> => {
         const launchType = profile.nodes.find((n) => n.category === 'launchType')?.subtype ?? 'dev0DevOnly'
+        // Renaming an existing template forks a new row instead of overwriting
+        // the one it was loaded from — the original stays intact under its name.
+        const renamed = templateId !== null && templateName !== null && profile.name !== templateName
+        const idToSave = renamed ? null : templateId
         try {
             const res = await fetch('/api/launch-builder/template/save', {
                 method:  'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
+                    id:          idToSave,
                     name:        profile.name,
                     description: profile.description,
                     launchType,
@@ -236,14 +323,21 @@ function LaunchBuilderInner() {
                     settings:    {},
                 }),
             })
-            return res.ok
+            if (!res.ok) return false
+            const data = await res.json()
+            const newId: string | null = data?.id ?? data?.template_id ?? null
+            if (newId) {
+                setTemplateId(newId)
+                setTemplateName(profile.name)
+            }
+            return true
         } catch {
             return false
         }
-    }, [profile])
+    }, [profile, templateId, templateName])
 
     const onLoadProfile = useCallback(
-        (loadedProfile: LaunchProfile, name: string) => {
+        (loadedProfile: LaunchProfile, name: string, source?: { type: 'config' | 'template'; id: string }) => {
             const { nodes: newNodes, edges: newEdges } = applyLaunchProfile(
                 loadedProfile,
                 (id) => ({
@@ -251,15 +345,20 @@ function LaunchBuilderInner() {
                     onDelete:    () => onDeleteNode(id),
                     onRun:       () => runDryRun(id),
                     onContinue:  () => onContinueNode(id),
+                    onRename:    (name: string) => onRenameNode(id, name),
                 }),
             )
             setNodes(newNodes)
             setEdges(newEdges)
             setProfileName(name)
-            setConfigId(null)
+            // Remember which saved row we just loaded so the next Save / Save
+            // Template updates it in place instead of creating a duplicate.
+            setConfigId(source?.type === 'config' ? source.id : null)
+            setTemplateId(source?.type === 'template' ? source.id : null)
+            setTemplateName(source?.type === 'template' ? name : null)
             setConfigNodeId(null)
         },
-        [onConfigureNode, onDeleteNode, runDryRun, onContinueNode, setNodes, setEdges],
+        [onConfigureNode, onDeleteNode, runDryRun, onContinueNode, onRenameNode, setNodes, setEdges],
     )
 
     // ─────────────────────────────────────────────────────────────────────────

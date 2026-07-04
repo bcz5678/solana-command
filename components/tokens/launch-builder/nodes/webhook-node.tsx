@@ -24,6 +24,8 @@ export default function WebhookNode({ data, selected }: NodeProps) {
             icon={Webhook}
             category="utility"
             label={d.label}
+            displayName={d.displayName}
+            onRename={d.onRename}
             subLabel={subLabel ?? 'No URL configured'}
             inputs={1}
             outputCount={1}
@@ -32,6 +34,7 @@ export default function WebhookNode({ data, selected }: NodeProps) {
             selected={selected}
             onConfigure={d.onConfigure}
             onDelete={d.onDelete}
+            resultBadge={d.webhookResult}
         />
     )
 }

@@ -25,7 +25,7 @@ type Props = {
     profile: LaunchProfile
     onSave: () => Promise<string | null>
     onSaveAsTemplate: () => Promise<boolean>
-    onLoadProfile: (profile: LaunchProfile, name: string) => void
+    onLoadProfile: (profile: LaunchProfile, name: string, source?: { type: 'config' | 'template'; id: string }) => void
 }
 
 export default function LaunchBuilderToolbar({
@@ -117,14 +117,14 @@ export default function LaunchBuilderToolbar({
         try {
             // Full object already loaded — fetch only if graph is missing
             if (cfg.graph) {
-                onLoadProfile(cfg.graph, cfg.name)
+                onLoadProfile(cfg.graph, cfg.name, { type: 'config', id: cfg.id })
                 setLoadOpen(false)
                 return
             }
             const res = await fetch(`/api/launch-builder/config/load?id=${cfg.id}`)
             if (!res.ok) return
             const full = (await res.json()) as SavedLaunchConfig
-            onLoadProfile(full.graph, full.name)
+            onLoadProfile(full.graph, full.name, { type: 'config', id: cfg.id })
             setLoadOpen(false)
         } finally {
             setApplyingId(null)
@@ -147,14 +147,14 @@ export default function LaunchBuilderToolbar({
         try {
             // Graph included in list response — no second fetch needed
             if (tpl.graph) {
-                onLoadProfile(tpl.graph, tpl.name)
+                onLoadProfile(tpl.graph, tpl.name, { type: 'template', id: tpl.id })
                 setTemplatesOpen(false)
                 return
             }
             const res = await fetch(`/api/launch-builder/template/load?id=${tpl.id}`)
             if (!res.ok) return
             const full = (await res.json()) as LaunchTemplate
-            onLoadProfile(full.graph, full.name)
+            onLoadProfile(full.graph, full.name, { type: 'template', id: tpl.id })
             setTemplatesOpen(false)
         } finally {
             setApplyingId(null)

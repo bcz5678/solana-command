@@ -26,7 +26,7 @@ import StrategyWalletSelector from '@/components/trade/strategy-trade/strategy-w
 import { SlippageControl } from '@/components/trade/trade/SlippageControl'
 import { BuilderNodeData, LaunchTypeSubtype, TradeSubtype, TriggerSubtype, ConditionalSubtype, UtilitySubtype } from './types'
 import { PALETTE_ITEMS } from './node-palette-config'
-import { findTokenNodeData } from './handle-types'
+import { findTokenNodeData, DATA_NODE_SYSTEM_FIELDS } from './handle-types'
 
 type Props = {
     node: Node | null
@@ -769,13 +769,6 @@ function UtilityFields({
 
 // ── Data Fields ──────────────────────────────────────────────────────────
 
-const SYSTEM_FIELDS: { key: string; label: string; source: (d: BuilderNodeData | null) => string }[] = [
-    { key: 'tokenMint',          label: 'Token Mint',            source: (d) => (d?.config.tokenMint   as string) ?? '' },
-    { key: 'tokenName',          label: 'Token Name',            source: (d) => (d?.config.tokenName   as string) ?? '' },
-    { key: 'tokenSymbol',        label: 'Token Symbol',          source: (d) => (d?.config.tokenSymbol as string) ?? '' },
-    { key: 'devWalletPublicKey', label: 'Dev Wallet Public Key', source: (d) => (d?.config.devWalletId as string) ?? '' },
-]
-
 function DataFields({
     config,
     patch,
@@ -815,7 +808,7 @@ function DataFields({
                     Always included — resolved from the connected Token node at runtime.
                 </p>
                 <div className="rounded-md border border-border divide-y divide-border">
-                    {SYSTEM_FIELDS.map(({ key, label, source }) => {
+                    {DATA_NODE_SYSTEM_FIELDS.map(({ key, label, source }) => {
                         const resolved = source(tokenData)
                         return (
                             <div key={key} className="flex items-center gap-3 px-3 py-2">

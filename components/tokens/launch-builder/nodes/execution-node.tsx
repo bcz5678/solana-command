@@ -13,6 +13,8 @@ export default function ExecutionNode({ data, selected }: NodeProps) {
             icon={Play}
             category="execution"
             label={d.label}
+            displayName={d.displayName}
+            onRename={d.onRename}
             subLabel="Connect to any node’s left pin to start there"
             inputs={0}
             outputCount={1}
