@@ -779,7 +779,10 @@ function UtilityFields({
     if (subtype === 'dataMapper') {
         return <DataFields config={config} patch={patch} nodeId={nodeId} nodes={nodes} edges={edges} />
     }
-    return <WebhookFields config={config} patch={patch} />
+    if (subtype === 'webhook') {
+        return <WebhookFields config={config} patch={patch} />
+    }
+    return <p className="text-xs text-muted-foreground">No configuration needed — pure passthrough.</p>
 }
 
 // ── Data Fields ──────────────────────────────────────────────────────────

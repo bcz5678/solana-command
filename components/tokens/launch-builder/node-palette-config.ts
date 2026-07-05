@@ -26,6 +26,7 @@ import {
     Activity,
     DollarSign,
     RefreshCw,
+    ArrowRight,
 } from 'lucide-react'
 import { BuilderNodeCategory, PaletteNodeDef } from './types'
 
@@ -362,6 +363,18 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         inputTypes: ['data'],
         outputTypes: ['signal'],
         defaultData: { url: '', authType: 'none', authValue: '', customHeaders: [] },
+    },
+    {
+        category: 'utility',
+        nodeType: 'noOpNode',
+        subtype: 'noOp',
+        label: 'No-Op',
+        description: 'Pure passthrough — no configuration, no effect on the flow. Use to space out and organize a long chain visually.',
+        icon: ArrowRight,
+        inputs: 1,
+        outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['config'],
     },
 
     // ── Conditionals ───────────────────────────────────────────────────────

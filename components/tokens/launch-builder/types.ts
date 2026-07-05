@@ -11,6 +11,7 @@ export type BuilderNodeType =
     | 'conditionalNode'
     | 'dataNode'
     | 'webhookNode'
+    | 'noOpNode'
 
 export type ExecutionSubtype = 'manualRun'
 export type TokenSubtype = 'tokenToLaunch'
@@ -28,7 +29,7 @@ export type TriggerSubtype =
     | 'priceTarget'
     | 'retryBackoff'
 export type ConditionalSubtype = 'loop' | 'ifThen' | 'switch'
-export type UtilitySubtype = 'dataMapper' | 'webhook'
+export type UtilitySubtype = 'dataMapper' | 'webhook' | 'noOp'
 
 export type BuilderSubtype = ExecutionSubtype | TokenSubtype | LaunchTypeSubtype | TradeSubtype | TriggerSubtype | ConditionalSubtype | UtilitySubtype
 
