@@ -17,6 +17,7 @@ import {
     Dices,
     UserCheck,
     RotateCw,
+    RotateCcw,
     GitBranch,
     SplitSquareHorizontal,
     Database,
@@ -27,6 +28,8 @@ import {
     DollarSign,
     RefreshCw,
     ArrowRight,
+    Percent,
+    LogOut,
 } from 'lucide-react'
 import { BuilderNodeCategory, PaletteNodeDef } from './types'
 
@@ -171,6 +174,31 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         inputTypes: ['config'],
         outputTypes: ['config'],
         defaultData: { sellPct: 100, delayMinSeconds: 5, delayMaxSeconds: 30 },
+    },
+    {
+        category: 'trade',
+        nodeType: 'tradeNode',
+        subtype: 'sellPercent',
+        label: 'Sell Percent',
+        description: 'Immediately sells a percentage of each selected wallet\'s live token balance — no stagger delay.',
+        icon: Percent,
+        inputs: 1,
+        outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['config'],
+        defaultData: { sellPct: 50 },
+    },
+    {
+        category: 'trade',
+        nodeType: 'tradeNode',
+        subtype: 'sellAll',
+        label: 'Sell All',
+        description: 'Sells each selected wallet\'s entire token balance atomically in a single Jito bundle — up to 10 wallets per run.',
+        icon: LogOut,
+        inputs: 1,
+        outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['config'],
     },
     {
         category: 'trade',
@@ -336,6 +364,19 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         inputTypes: ['config'],
         outputTypes: ['signal'],
         defaultData: { maxRetries: 3, initialDelaySeconds: 5, multiplier: 2, maxDelaySeconds: 60 },
+    },
+    {
+        category: 'trigger',
+        nodeType: 'triggerNode',
+        subtype: 'branchReset',
+        label: 'Branch Reset',
+        description: 'Re-triggers everything wired downstream, re-arming any Human In The Loop nodes so a branch can be manually run again. Wire its output back to an earlier node to form a cycle.',
+        icon: RotateCcw,
+        inputs: 1,
+        outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['signal'],
+        defaultData: { maxResets: 10 },
     },
 
     // ── Utility ────────────────────────────────────────────────────────────

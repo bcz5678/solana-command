@@ -16,7 +16,7 @@ import LaunchBuilderToolbar from './launch-builder-toolbar'
 import NodeConfigDialog from './node-config-dialog'
 import { BuilderNodeData } from './types'
 import { buildLaunchProfile, applyLaunchProfile, type LaunchProfile } from './launch-profile'
-import { getExecEntryNodeIds, getDownstreamNodeIds, buildDataNodePayload, findTokenNodeData } from './handle-types'
+import { getExecEntryNodeIds, getDownstreamNodeIds, getDownstreamNodeIdsByHandle, buildDataNodePayload, findTokenNodeData } from './handle-types'
 import { LaunchType } from '@/components/tokens/launch/types'
 
 const RUN_STEP_MS = 550
@@ -59,10 +59,21 @@ function LaunchBuilderInner() {
     const testModeRef = useRef(testMode)
     useEffect(() => { testModeRef.current = testMode }, [testMode])
 
-    // Resolves the Continue click for whichever Human In The Loop node(s) the
-    // active dry-run session is currently paused on. Reassigned per run.
-    const continueNodeRef = useRef<(nodeId: string) => void>(() => {})
-    const onContinueNode = useCallback((nodeId: string) => continueNodeRef.current(nodeId), [])
+    // Pending Human In The Loop pauses, keyed by node id — persistent across
+    // runs (not per-run), since node ids are unique and a HITL node inside a
+    // Loop's body pauses again on every iteration. Previously this map was
+    // recreated per runDryRun() call and resolved through a single "current
+    // run" ref, so starting a second run (or a second loop iteration) while
+    // an earlier pause was still pending silently orphaned it — its Continue
+    // button kept rendering but no longer did anything.
+    const hitlWaitingRef = useRef<Map<string, () => void>>(new Map())
+    const onContinueNode = useCallback((nodeId: string) => {
+        const resolve = hitlWaitingRef.current.get(nodeId)
+        if (!resolve) return
+        hitlWaitingRef.current.delete(nodeId)
+        setNodes((nds) => nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, awaitingContinue: false } } : n)))
+        resolve()
+    }, [setNodes])
 
     const runDryRun = useCallback(
         (execNodeId: string) => {
@@ -79,8 +90,6 @@ function LaunchBuilderInner() {
             // Loop pause or a Timer countdown only blocks the branch it's on,
             // not sibling branches that forked off earlier (e.g. from a Switch).
             const activeIds = new Set<string>()
-            const hitlWaiting = new Map<string, () => void>()
-            const visited = new Set<string>()
             // Plain synchronous map, not React state — a downstream Confirmation
             // node's checkConfirmation() runs immediately after its upstream
             // node's setResult() in the same walk() continuation, well before a
@@ -88,12 +97,16 @@ function LaunchBuilderInner() {
             // it) would actually land. Reading from nodesRef here would almost
             // always see the pre-result stale state.
             const executionResults = new Map<string, { ok: boolean; status?: number; message: string; signature?: string }>()
+            // Keyed by Branch Reset node id — persists across an entire Run, since
+            // a single Branch Reset node can be re-entered many times via its own
+            // cycle-back edge (that's the whole point of the node).
+            const resetCounts = new Map<string, number>()
 
             const sync = () => setNodes((nds) => nds.map((n) => ({ ...n, selected: activeIds.has(n.id) })))
             const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
             const waitForContinue = (nodeId: string) =>
                 new Promise<void>((resolve) => {
-                    hitlWaiting.set(nodeId, resolve)
+                    hitlWaitingRef.current.set(nodeId, resolve)
                     setNodes((nds) => nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, awaitingContinue: true } } : n)))
                 })
             const countdown = (nodeId: string, totalSeconds: number) =>
@@ -240,7 +253,7 @@ function LaunchBuilderInner() {
             // Staggered Buy/Sell — mirrors the schedule pattern already used by
             // the standalone staggered-buy-wizard: shuffle selected wallets,
             // hit the trade one wallet at a time with a randomized delay between.
-            const callStaggeredTrade = async (nodeId: string, subtype: 'staggeredBuy' | 'staggeredSell', config: Record<string, unknown>) => {
+            const callStaggeredTrade = async (nodeId: string, subtype: 'staggeredBuy' | 'staggeredSell' | 'sellPercent', config: Record<string, unknown>) => {
                 const tokenData = findTokenNodeData(nodeId, nodesRef.current, edgesRef.current)
                 const mintAddress = tokenData?.config?.tokenMint as string | undefined
                 const selectedWalletIds = (config.selectedWalletIds as string[] | undefined) ?? []
@@ -257,6 +270,9 @@ function LaunchBuilderInner() {
                 const tradeAmounts = (config.tradeAmounts as Record<string, string> | undefined) ?? {}
                 const slippage = (config.slippage as number | undefined) ?? 0.05
                 const sellPct = config.sellPct as number | undefined
+                // Only the two Staggered nodes spread wallets out with a randomized
+                // delay — Sell Percent fires sequentially with no gap.
+                const isStaggered = subtype === 'staggeredBuy' || subtype === 'staggeredSell'
                 const delayMinMs = Number(config.delayMinSeconds ?? 5) * 1000
                 const delayMaxMs = Number(config.delayMaxSeconds ?? 30) * 1000
 
@@ -306,7 +322,7 @@ function LaunchBuilderInner() {
                         lastError = String(err)
                     }
 
-                    if (i < order.length - 1) {
+                    if (isStaggered && i < order.length - 1) {
                         await wait(delayMinMs + Math.random() * (delayMaxMs - delayMinMs))
                     }
                 }
@@ -361,6 +377,58 @@ function LaunchBuilderInner() {
                         : { ok: false, message: explainTradeError(result.error) })
                 } catch (err) {
                     console.error(`[launch-builder] Bundled Jito call failed`, err)
+                    setResult(nodeId, { ok: false, message: explainTradeError(String(err)) })
+                }
+            }
+
+            // Sell All — sells every selected wallet's full balance atomically in
+            // one Jito bundle instead of sequentially, so no wallet's sell can be
+            // front-run by an earlier one in the same action (each sequential sell
+            // drops the price for whoever sells next). Reuses the same bundle-sell
+            // route the (buy-only, until now) Bundled Jito node already calls.
+            const callBundleSell = async (nodeId: string, config: Record<string, unknown>) => {
+                const tokenData = findTokenNodeData(nodeId, nodesRef.current, edgesRef.current)
+                const mintAddress = tokenData?.config?.tokenMint as string | undefined
+                const selectedWalletIds = (config.selectedWalletIds as string[] | undefined) ?? []
+
+                if (!mintAddress) {
+                    setResult(nodeId, { ok: false, message: 'No Token node connected' })
+                    return
+                }
+                if (selectedWalletIds.length === 0) {
+                    setResult(nodeId, { ok: false, message: 'No wallets selected' })
+                    return
+                }
+
+                const slippage = (config.slippage as number | undefined) ?? 0.05
+                // No tokenAmount needed — the route resolves each wallet's sell
+                // amount from its live on-chain balance at execution time.
+                const tradesList = selectedWalletIds.map((walletId) => ({
+                    walletId,
+                    mintAddress,
+                    sellPct: 100,
+                    slippage,
+                }))
+
+                try {
+                    const res = await fetch('/api/trade/bundle/sell', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            jitoTipInLamports: '1000000',
+                            tradesList,
+                            useQuicknodeJito: true,
+                            dryRun: testModeRef.current,
+                        }),
+                    })
+                    const result = await res.json()
+                    console.log(`[launch-builder] Sell All POST /api/trade/bundle/sell →`, { status: res.status, result })
+
+                    setResult(nodeId, res.ok
+                        ? { ok: true, message: result.simulated ? 'Simulated OK' : 'Bundle landed', signature: result.bundleId }
+                        : { ok: false, message: explainTradeError(result.error) })
+                } catch (err) {
+                    console.error(`[launch-builder] Sell All call failed`, err)
                     setResult(nodeId, { ok: false, message: explainTradeError(String(err)) })
                 }
             }
@@ -488,15 +556,59 @@ function LaunchBuilderInner() {
                 return false
             }
 
-            continueNodeRef.current = (nodeId: string) => {
-                const resolve = hitlWaiting.get(nodeId)
-                if (!resolve) return
-                hitlWaiting.delete(nodeId)
-                setNodes((nds) => nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, awaitingContinue: false } } : n)))
-                resolve()
+            // Body (output-0) is repeated maxIterations times, each with its own
+            // fresh local `visited` so nodes inside it (including a HITL pause)
+            // can re-fire every iteration; Done (output-1) runs once afterward
+            // through the caller's own `visited`, same as any other node.
+            const runLoop = async (nodeId: string, config: Record<string, unknown>, outerVisited: Set<string>) => {
+                const bodyTargets = getDownstreamNodeIdsByHandle(nodeId, edgesRef.current, 'output-0')
+                const doneTargets = getDownstreamNodeIdsByHandle(nodeId, edgesRef.current, 'output-1')
+                const maxIterations = Math.max(1, Number(config.maxIterations ?? 3))
+
+                if (bodyTargets.length === 0) {
+                    setResult(nodeId, { ok: false, message: 'No Body branch connected' })
+                } else {
+                    for (let iter = 1; iter <= maxIterations; iter++) {
+                        setResult(nodeId, { ok: true, message: `Looping — iteration ${iter}/${maxIterations}` })
+                        const iterationVisited = new Set<string>()
+                        await Promise.all(bodyTargets.map((id) => walk(id, iterationVisited)))
+                    }
+                    setResult(nodeId, { ok: true, message: `Looped ${maxIterations}/${maxIterations} iterations` })
+                }
+
+                await Promise.all(doneTargets.map((id) => walk(id, outerVisited)))
             }
 
-            const walk = async (nodeId: string) => {
+            // Branch Reset re-arms and re-runs everything wired downstream of it,
+            // every time flow reaches it — including via its own cycle-back edge
+            // (its output wired back to an earlier node, e.g. a Human In The Loop
+            // trigger). Each pass gets a brand-new `visited` set scoped to just
+            // that pass, so nodes it re-triggers (including this Branch Reset
+            // node itself, reached again via the cycle) aren't blocked by the
+            // generic "already ran this session" guard in walk(). A maxResets
+            // safety cap stops it from running forever if the operator never
+            // stops looping the branch manually.
+            const runBranchReset = async (nodeId: string, config: Record<string, unknown>) => {
+                const maxResets = Math.max(1, Number(config.maxResets ?? 10))
+                const count = (resetCounts.get(nodeId) ?? 0) + 1
+                resetCounts.set(nodeId, count)
+
+                const targets = getDownstreamNodeIds(nodeId, edgesRef.current)
+                if (targets.length === 0) {
+                    setResult(nodeId, { ok: false, message: 'No downstream branch connected' })
+                    return
+                }
+                if (count > maxResets) {
+                    setResult(nodeId, { ok: false, message: `Reset limit reached (${maxResets}/${maxResets}) — branch stopped` })
+                    return
+                }
+
+                setResult(nodeId, { ok: true, message: `Branch reset ${count}/${maxResets}` })
+                const passVisited = new Set<string>()
+                await Promise.all(targets.map((id) => walk(id, passVisited)))
+            }
+
+            const walk = async (nodeId: string, visited: Set<string>) => {
                 if (visited.has(nodeId)) return
                 visited.add(nodeId)
 
@@ -505,9 +617,16 @@ function LaunchBuilderInner() {
 
                 const data = nodesRef.current.find((n) => n.id === nodeId)?.data as unknown as BuilderNodeData | undefined
                 let stopBranch = false
+                let handledOwnChildren = false
 
                 if (data?.subtype === 'launchConfirmation' || data?.subtype === 'txConfirmation') {
                     stopBranch = !checkConfirmation(nodeId)
+                } else if (data?.subtype === 'loop') {
+                    handledOwnChildren = true
+                    await runLoop(nodeId, data.config ?? {}, visited)
+                } else if (data?.subtype === 'branchReset') {
+                    handledOwnChildren = true
+                    await runBranchReset(nodeId, data.config ?? {})
                 } else if (data?.subtype === 'humanInTheLoop') {
                     await waitForContinue(nodeId)
                 } else if (data?.subtype === 'timerSet') {
@@ -526,8 +645,10 @@ function LaunchBuilderInner() {
                     // dev0DevBundle / bundled / swarm — no real execution backend yet.
                     setResult(nodeId, { ok: false, message: 'Not executable yet — no backend for this launch type' })
                     await wait(RUN_STEP_MS)
-                } else if (data?.category === 'trade' && (data.subtype === 'staggeredBuy' || data.subtype === 'staggeredSell')) {
+                } else if (data?.category === 'trade' && (data.subtype === 'staggeredBuy' || data.subtype === 'staggeredSell' || data.subtype === 'sellPercent')) {
                     await callStaggeredTrade(nodeId, data.subtype, data.config ?? {})
+                } else if (data?.category === 'trade' && data.subtype === 'sellAll') {
+                    await callBundleSell(nodeId, data.config ?? {})
                 } else if (data?.category === 'trade' && data.subtype === 'bundledJito') {
                     await callBundledTrade(nodeId, data.config ?? {})
                 } else if (data?.category === 'trade' && data.subtype === 'humanVolume') {
@@ -547,14 +668,14 @@ function LaunchBuilderInner() {
                     console.log(`[launch-builder] Branch stopped at ${nodeId} (subtype: ${data?.subtype})`)
                     return
                 }
+                if (handledOwnChildren) return
 
                 const children = getDownstreamNodeIds(nodeId, edgesRef.current)
-                await Promise.all(children.map(walk))
+                await Promise.all(children.map((id) => walk(id, visited)))
             }
 
-            Promise.all(entryIds.map(walk)).then(() => {
-                continueNodeRef.current = () => {}
-            })
+            const sessionVisited = new Set<string>()
+            void Promise.all(entryIds.map((id) => walk(id, sessionVisited)))
         },
         [setNodes],
     )

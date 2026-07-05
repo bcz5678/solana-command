@@ -91,6 +91,13 @@ export function getDownstreamNodeIds(nodeId: string, edges: Edge[]): string[] {
         .map((e) => e.target)
 }
 
+/** Nodes downstream of one specific output handle (e.g. Loop's 'output-0' Body arm). */
+export function getDownstreamNodeIdsByHandle(nodeId: string, edges: Edge[], sourceHandle: string): string[] {
+    return edges
+        .filter((e) => e.source === nodeId && e.targetHandle !== 'exec-in' && e.sourceHandle === sourceHandle)
+        .map((e) => e.target)
+}
+
 /**
  * Single source of truth for the Data node's "system fields" — resolved from
  * whatever Token node is reachable upstream. Shared by the config dialog

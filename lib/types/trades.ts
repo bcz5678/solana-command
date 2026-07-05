@@ -8,7 +8,10 @@ export interface BuyTokenBody {
 export interface SellTokenBody {
     walletId:    string
     mintAddress: string
-    tokenAmount: string   // raw token units — BN can't cross JSON
+    /** Raw token units — BN can't cross JSON. Omit when sellPct is provided. */
+    tokenAmount?: string
+    /** 1-100 — resolved against the wallet's live on-chain balance at execution time instead of a fixed tokenAmount. */
+    sellPct?:    number
     slippage:    number
 }
 
@@ -30,4 +33,6 @@ export interface BundleSellBody {
   useJito?:          boolean
   /** Set true to use the QuickNode Lil Jito addon executor with sequential curve simulation */
   useQuicknodeJito?: boolean
+  /** Simulate the bundle and stop — never calls sendBundle. QuickNode path only. */
+  dryRun?:           boolean
 }

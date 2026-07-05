@@ -13,8 +13,10 @@ export default function TradeNode({ data, selected }: NodeProps) {
     const sellPct     = d.config?.sellPct as number | undefined
 
     const subLabelParts: string[] = []
-    if (d.subtype === 'staggeredSell') {
+    if (d.subtype === 'staggeredSell' || d.subtype === 'sellPercent') {
         subLabelParts.push(sellPct != null ? `${sellPct}% sell` : 'Sell %?')
+    } else if (d.subtype === 'sellAll') {
+        subLabelParts.push('100% sell · Jito bundle')
     } else if (tokenSymbol) {
         subLabelParts.push(tokenSymbol)
     }

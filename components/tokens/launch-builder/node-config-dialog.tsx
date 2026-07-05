@@ -301,6 +301,7 @@ function TradeFields({
     const tokenName   = (tokenNodeData?.config.tokenName   as string | undefined) ?? null
     const tokenSymbol = (tokenNodeData?.config.tokenSymbol as string | undefined) ?? null
     const tokenMint   = (tokenNodeData?.config.tokenMint   as string | undefined) ?? null
+    const isSellSubtype = subtype === 'staggeredSell' || subtype === 'sellPercent' || subtype === 'sellAll'
 
     function updateWallets(ids: Set<string>) {
         setSelectedWalletIds(ids)
@@ -308,11 +309,9 @@ function TradeFields({
     }
 
     function updateAmount(id: string, amount: string) {
-        setTradeAmounts((prev) => {
-            const next = { ...prev, [id]: amount }
-            patch({ tradeAmounts: next })
-            return next
-        })
+        const next = { ...tradeAmounts, [id]: amount }
+        setTradeAmounts(next)
+        patch({ tradeAmounts: next })
     }
 
     function resetAmounts() {
@@ -351,8 +350,18 @@ function TradeFields({
                 <StaggerDelayInputs config={config} patch={patch} />
             )}
 
-            {subtype === 'staggeredSell' && (
+            {(subtype === 'staggeredSell' || subtype === 'sellPercent') && (
                 <StaggeredSellFields config={config} patch={patch} />
+            )}
+
+            {subtype === 'sellAll' && (
+                <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
+                    <span className="mt-0.5 shrink-0 text-amber-400">⚠</span>
+                    <p className="text-xs text-amber-300/80">
+                        Sells each selected wallet&apos;s entire live token balance atomically in a single Jito bundle —
+                        no percentage to set, no stagger delay, and up to 10 wallets per run.
+                    </p>
+                </div>
             )}
 
             {subtype === 'humanVolume' && (
@@ -397,6 +406,9 @@ function TradeFields({
                 onTradeAmountReset={resetAmounts}
                 tradeAmounts={tradeAmounts}
                 defaultTypeName="Trader"
+                tradeType={isSellSubtype ? 'sell' : 'buy'}
+                tokenMint={isSellSubtype ? (tokenMint ?? undefined) : undefined}
+                hideTradeAmountColumn={subtype === 'sellPercent' || subtype === 'sellAll'}
             />
         </div>
     )
@@ -637,6 +649,24 @@ function TriggerFields({
                     </div>
                     <p className="text-xs text-muted-foreground">
                         Delays: {(config.initialDelaySeconds as number) ?? 5}s → {((config.initialDelaySeconds as number) ?? 5) * ((config.multiplier as number) ?? 2)}s → {Math.min(((config.initialDelaySeconds as number) ?? 5) * Math.pow((config.multiplier as number) ?? 2, 2), (config.maxDelaySeconds as number) ?? 60)}s …
+                    </p>
+                </div>
+            )
+        case 'branchReset':
+            return (
+                <div className="flex flex-col gap-4">
+                    <div className="flex w-40 flex-col gap-1.5">
+                        <Label className="text-xs">Max Resets (safety limit)</Label>
+                        <Input
+                            type="number" min={1} max={1000}
+                            value={(config.maxResets as number) ?? 10}
+                            onChange={(e) => patch({ maxResets: Number(e.target.value) })}
+                        />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                        Wire this node&apos;s output back to an earlier node in the branch (e.g. a Human In The Loop
+                        trigger) to form a cycle. Each time flow reaches this node it re-arms and re-runs everything
+                        downstream until the reset count above is hit, then the branch stops.
                     </p>
                 </div>
             )

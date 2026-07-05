@@ -16,7 +16,7 @@ export type BuilderNodeType =
 export type ExecutionSubtype = 'manualRun'
 export type TokenSubtype = 'tokenToLaunch'
 export type LaunchTypeSubtype = 'dev0DevOnly' | 'dev0DevBundle' | 'bundled' | 'swarm'
-export type TradeSubtype = 'bundledJito' | 'staggeredBuy' | 'staggeredSell' | 'humanVolume' | 'trendingVolume' | 'holdersMaker'
+export type TradeSubtype = 'bundledJito' | 'staggeredBuy' | 'staggeredSell' | 'sellPercent' | 'sellAll' | 'humanVolume' | 'trendingVolume' | 'holdersMaker'
 export type TriggerSubtype =
     | 'launchConfirmation'
     | 'txConfirmation'
@@ -28,6 +28,7 @@ export type TriggerSubtype =
     | 'volumeThreshold'
     | 'priceTarget'
     | 'retryBackoff'
+    | 'branchReset'
 export type ConditionalSubtype = 'loop' | 'ifThen' | 'switch'
 export type UtilitySubtype = 'dataMapper' | 'webhook' | 'noOp'
 

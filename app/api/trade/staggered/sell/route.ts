@@ -20,8 +20,8 @@ export async function POST(request: Request) {
     }
 
     const { walletId, mintAddress, tokenAmount, slippage, sellPct, dryRun } = body
-    if (!walletId || !mintAddress || !tokenAmount) {
-        return new Response(JSON.stringify({ error: 'walletId, mintAddress, and tokenAmount are required.' }), {
+    if (!walletId || !mintAddress || (tokenAmount == null && sellPct == null)) {
+        return new Response(JSON.stringify({ error: 'walletId, mintAddress, and either tokenAmount or sellPct are required.' }), {
             status: 400,
             headers: { 'Content-Type': 'application/json' },
         })
@@ -53,8 +53,27 @@ export async function POST(request: Request) {
             }), { status: 200, headers: { 'Content-Type': 'application/json' } })
         }
 
+        // A partial percentage (1-99) is resolved against the wallet's live
+        // on-chain balance here — the client never knows the exact token
+        // amount up front, since it depends on buys/transfers that happened
+        // since the flow was built. 100% and an explicit tokenAmount are
+        // handled by the branches above/below.
+        let startAmount: BN
+        if (typeof sellPct === 'number' && sellPct > 0 && sellPct < 100) {
+            const liveBalance = await executor.getTokenBalance(mint)
+            startAmount = liveBalance.muln(sellPct).divn(100)
+            if (startAmount.isZero()) {
+                return new Response(JSON.stringify({
+                    success: false,
+                    error:   'Wallet has no token balance to sell.',
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+            }
+        } else {
+            startAmount = new BN(tokenAmount)
+        }
+
         // Loop to handle chunked sells (executor caps large amounts per call)
-        let remaining  = new BN(tokenAmount)
+        let remaining  = startAmount
         let totalSold  = new BN(0)
         let lastSig: string | undefined
 

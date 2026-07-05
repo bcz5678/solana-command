@@ -24,6 +24,8 @@ function subLabelFor(data: BuilderNodeData): string | undefined {
             return `${dir} $${data.config?.targetPriceUSD ?? 0.001}`
         case 'retryBackoff':
             return `${data.config?.maxRetries ?? 3} retries · ${data.config?.initialDelaySeconds ?? 5}s base`
+        case 'branchReset':
+            return `max ${data.config?.maxResets ?? 10} resets`
         default:
             return undefined
     }

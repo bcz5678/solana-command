@@ -1,6 +1,6 @@
 'use client'
 
-import { BaseEdge, EdgeLabelRenderer, getBezierPath, useReactFlow, type EdgeProps } from '@xyflow/react'
+import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, useReactFlow, type EdgeProps } from '@xyflow/react'
 import { X } from 'lucide-react'
 
 export default function DeletableEdge({
@@ -17,13 +17,14 @@ export default function DeletableEdge({
 }: EdgeProps) {
     const { setEdges } = useReactFlow()
 
-    const [edgePath, labelX, labelY] = getBezierPath({
+    const [edgePath, labelX, labelY] = getSmoothStepPath({
         sourceX,
         sourceY,
         sourcePosition,
         targetX,
         targetY,
         targetPosition,
+        borderRadius: 6,
     })
 
     function onDelete(event: React.MouseEvent) {

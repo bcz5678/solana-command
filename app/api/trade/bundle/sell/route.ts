@@ -11,6 +11,7 @@ import {
 import { JitoExecutor } from '@/lib/jito/clients/jitoExecutor'
 import { QuicknodeJitoExecutor } from '@/lib/jito/clients/quicknode-jito-executor'
 import { getWalletKeypairById } from '@/lib/vault/get-wallet-by-id'
+import { getTokenBalance } from '@/lib/trade/wallet-balance'
 import { initializeQuickNodeSolana } from '@/app/api/utils/helpers'
 import { createClient } from '@/lib/supabase/server'
 import type { BundleSellBody } from '@/lib/types/trades'
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { jitoTipInLamports, tradesList, useJito = true, useQuicknodeJito = true } = body
+  const { jitoTipInLamports, tradesList, useJito = true, useQuicknodeJito = true, dryRun } = body
 
   if (!jitoTipInLamports || !tradesList?.length) {
     return NextResponse.json(
@@ -69,6 +70,26 @@ export async function POST(req: NextRequest) {
       tradesList.map((t) => getWalletKeypairById(t.walletId)),
     )
     tradeKeypairs.push(...walletKps)
+
+    // Resolve each trade's sell amount once, up front, shared by both the
+    // QuickNode and legacy paths below. A sellPct (e.g. Sell All at 100)
+    // is resolved against the wallet's live on-chain balance here, since
+    // the caller can't know each wallet's exact balance ahead of time —
+    // same approach as the sequential staggered/sell route.
+    const resolvedAmounts = await Promise.all(
+      tradesList.map(async (t, i) => {
+        if (typeof t.sellPct === 'number' && t.sellPct > 0 && t.sellPct <= 100) {
+          const live = await getTokenBalance(connection, new PublicKey(t.mintAddress), tradeKeypairs[i].publicKey)
+          const amt = live.muln(t.sellPct).divn(100)
+          if (amt.isZero()) throw new Error(`Wallet ${t.walletId} has no token balance to sell`)
+          return amt
+        }
+        if (t.tokenAmount == null) throw new Error(`Missing tokenAmount or sellPct for wallet ${t.walletId}`)
+        const amt = new BN(t.tokenAmount)
+        if (amt.isZero()) throw new Error(`Zero token amount for wallet ${t.walletId}`)
+        return amt
+      }),
+    )
 
     // ── QuickNode Lil Jito path (1–20 wallet bundle, packed via ALTs) ──────────
     //
@@ -113,11 +134,7 @@ export async function POST(req: NextRequest) {
       for (let i = 0; i < tradesList.length; i++) {
         const trade       = tradesList[i]
         const tradeWallet = tradeKeypairs[i]
-        const tokenAmount = new BN(trade.tokenAmount)
-
-        if (tokenAmount.isZero()) {
-          throw new Error(`Zero token amount for wallet ${trade.walletId}`)
-        }
+        const tokenAmount = resolvedAmounts[i]
 
         const solAmount = getSellSolAmountFromTokenAmount({
           global,
@@ -179,8 +196,9 @@ export async function POST(req: NextRequest) {
       }
 
       const executor = await QuicknodeJitoExecutor.create({
-        endpoint:    process.env.SOLANA_RPC_URL!,
-        tipLamports: Number(jitoTipInLamports),
+        endpoint:     process.env.SOLANA_RPC_URL!,
+        tipLamports:  Number(jitoTipInLamports),
+        simulateOnly: dryRun,
       })
 
       const [{ blockhash }, tipAccount] = await Promise.all([
@@ -249,11 +267,7 @@ export async function POST(req: NextRequest) {
       tradesList.map(async (trade, i) => {
         const tradeWallet  = tradeKeypairs[i]
         const mint         = new PublicKey(trade.mintAddress)
-        const tokenAmount  = new BN(trade.tokenAmount)
-
-        if (tokenAmount.isZero()) {
-          throw new Error(`Zero token amount for wallet ${trade.walletId}`)
-        }
+        const tokenAmount  = resolvedAmounts[i]
 
         const [sellState, global, feeConfig, mintInfo] = await Promise.all([
           onlineSdk.fetchSellState(mint, tradeWallet.publicKey),
