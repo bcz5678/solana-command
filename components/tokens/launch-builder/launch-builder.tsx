@@ -101,6 +101,25 @@ function LaunchBuilderInner() {
             // a single Branch Reset node can be re-entered many times via its own
             // cycle-back edge (that's the whole point of the node).
             const resetCounts = new Map<string, number>()
+            // Named variables, resolved via {{name}} in a Data node's custom
+            // fields. ANY renamed node auto-sets a variable under its own
+            // displayName — a baseline of its own config, walk() dispatches
+            // below merge in richer result fields (signature, bundle id,
+            // wallets, ...) for the subset that calls a real API. A Set
+            // Variable node additionally sets an explicitly-named variable.
+            const variables = new Map<string, unknown>()
+            const setVariable = (name: string | undefined, value: unknown) => {
+                const trimmed = name?.trim()
+                if (trimmed) variables.set(trimmed, value)
+            }
+            // Auto-set variables are named after a node's own displayName (the
+            // existing rename-on-click label) — rename a node to make its
+            // result referenceable as {{thatName}}. Unnamed nodes still get a
+            // stable fallback so nothing collides, though it isn't human-typeable.
+            const varNameFor = (nodeId: string) => {
+                const data = nodesRef.current.find((n) => n.id === nodeId)?.data as unknown as BuilderNodeData | undefined
+                return data?.displayName?.trim() || `${data?.label ?? 'node'}-${nodeId.slice(0, 4)}`
+            }
 
             const sync = () => setNodes((nds) => nds.map((n) => ({ ...n, selected: activeIds.has(n.id) })))
             const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -145,8 +164,26 @@ function LaunchBuilderInner() {
                 }
                 const dataNodeData = dataNode?.data as unknown as BuilderNodeData | undefined
                 const payload = dataNode
-                    ? buildDataNodePayload(dataNode.id, nodesRef.current, edgesRef.current, dataNodeData?.config ?? {})
+                    ? buildDataNodePayload(dataNodeData?.config ?? {})
                     : {}
+
+                // A bare "{{name}}" or "{{name.path}}" field value is resolved
+                // against the named variable store — substituting the raw
+                // value (so a wallet-group variable comes through as a real
+                // array/object, not a stringified blob). Anything else is
+                // left as a literal string; no partial in-string interpolation.
+                for (const key of Object.keys(payload)) {
+                    const raw = payload[key]
+                    if (typeof raw !== 'string') continue
+                    const match = /^\{\{\s*([\w.-]+)\s*\}\}$/.exec(raw.trim())
+                    if (!match) continue
+                    const [varKey, ...path] = match[1].split('.')
+                    let resolved: unknown = variables.get(varKey)
+                    for (const segment of path) {
+                        resolved = (resolved as Record<string, unknown> | undefined)?.[segment]
+                    }
+                    if (resolved !== undefined) payload[key] = resolved
+                }
 
                 try {
                     const res = await fetch('/api/launch-builder/webhook/execute', {
@@ -244,6 +281,7 @@ function LaunchBuilderInner() {
                             signature: result.signature,
                         }
                         : { ok: false, message: explainTradeError(result.error) })
+                    if (res.ok) setVariable(varNameFor(nodeId), { ...config, signature: result.signature, tokenMint: tokenData?.config?.tokenMint })
                 } catch (err) {
                     console.error(`[launch-builder] Launch call failed`, err)
                     setResult(nodeId, { ok: false, message: String(err) })
@@ -330,6 +368,7 @@ function LaunchBuilderInner() {
                 setResult(nodeId, failCount === 0
                     ? { ok: true, message: `${order.length}/${order.length} ${testModeRef.current ? 'simulated' : 'landed'}`, signature: lastSignature }
                     : { ok: false, message: `${failCount}/${order.length} failed — ${explainTradeError(lastError)}` })
+                if (failCount === 0) setVariable(varNameFor(nodeId), { ...config, signature: lastSignature, walletIds: order })
             }
 
             // Bundled Jito — QuickNode/Lil Jito path only, per scope.
@@ -375,6 +414,7 @@ function LaunchBuilderInner() {
                     setResult(nodeId, res.ok
                         ? { ok: true, message: result.simulated ? 'Simulated OK' : 'Bundle landed', signature: result.bundleId }
                         : { ok: false, message: explainTradeError(result.error) })
+                    if (res.ok) setVariable(varNameFor(nodeId), { ...config, bundleId: result.bundleId, walletIds: selectedWalletIds })
                 } catch (err) {
                     console.error(`[launch-builder] Bundled Jito call failed`, err)
                     setResult(nodeId, { ok: false, message: explainTradeError(String(err)) })
@@ -427,6 +467,7 @@ function LaunchBuilderInner() {
                     setResult(nodeId, res.ok
                         ? { ok: true, message: result.simulated ? 'Simulated OK' : 'Bundle landed', signature: result.bundleId }
                         : { ok: false, message: explainTradeError(result.error) })
+                    if (res.ok) setVariable(varNameFor(nodeId), { ...config, bundleId: result.bundleId, walletIds: selectedWalletIds })
                 } catch (err) {
                     console.error(`[launch-builder] Sell All call failed`, err)
                     setResult(nodeId, { ok: false, message: explainTradeError(String(err)) })
@@ -498,9 +539,79 @@ function LaunchBuilderInner() {
                     setResult(nodeId, stopRes.ok
                         ? { ok: true, message: testModeRef.current ? 'Simulated run complete' : 'Run complete' }
                         : { ok: false, message: explainTradeError(stopResult.error) })
+                    if (stopRes.ok) {
+                        setVariable(varNameFor(nodeId), {
+                            ...config,
+                            walletIds: pool.map((w) => w.id),
+                            wallets: pool.map((w) => ({ id: w.id, publicKey: w.public_key })),
+                        })
+                    }
                 } catch (err) {
                     console.error(`[launch-builder] Human Volume flow failed`, err)
                     setResult(nodeId, { ok: false, message: explainTradeError(String(err)) })
+                }
+            }
+
+            // Set Variable — resolves the configured wallet selection into live
+            // wallet info (and token balances, if a Token node is reachable
+            // upstream) and stores it under the configured name, so a Data
+            // node's custom field can reference it later as {{name}}.
+            const callSetVariable = async (nodeId: string, config: Record<string, unknown>) => {
+                const name = (config.variableName as string | undefined)?.trim()
+                const selectedWalletIds = (config.selectedWalletIds as string[] | undefined) ?? []
+
+                if (!name) {
+                    setResult(nodeId, { ok: false, message: 'No variable name set' })
+                    return
+                }
+                if (selectedWalletIds.length === 0) {
+                    setResult(nodeId, { ok: false, message: 'No wallets selected' })
+                    return
+                }
+
+                try {
+                    const walletsRes = await fetch('/api/wallets/explorer')
+                    const walletsData = await walletsRes.json()
+                    const allWallets = (walletsData?.wallets as { id: string; public_key: string; label: string | null; solana_balance_in_lamports?: string | null }[] | undefined) ?? []
+                    const pool = allWallets.filter((w) => selectedWalletIds.includes(w.id))
+                    if (pool.length === 0) throw new Error('Selected wallets not found')
+
+                    const tokenData = findTokenNodeData(nodeId, nodesRef.current, edgesRef.current)
+                    const mintAddress = tokenData?.config?.tokenMint as string | undefined
+
+                    let tokenBalances: Record<string, string> = {}
+                    let decimals = 0
+                    if (mintAddress) {
+                        const balRes = await fetch('/api/wallet/token-balances', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ mintAddress, walletAddresses: pool.map((w) => w.public_key) }),
+                        })
+                        if (balRes.ok) {
+                            const balData = await balRes.json()
+                            tokenBalances = (balData?.balances as Record<string, string> | undefined) ?? {}
+                            decimals = (balData?.decimals as number | undefined) ?? 0
+                        }
+                    }
+
+                    const wallets = pool.map((w) => ({
+                        id: w.id,
+                        publicKey: w.public_key,
+                        label: w.label,
+                        solBalanceLamports: w.solana_balance_in_lamports ?? null,
+                        ...(mintAddress
+                            ? {
+                                tokenBalanceRaw: tokenBalances[w.public_key] ?? '0',
+                                tokenBalanceUi: Number(tokenBalances[w.public_key] ?? '0') / Math.pow(10, decimals),
+                            }
+                            : {}),
+                    }))
+
+                    setVariable(name, wallets)
+                    setResult(nodeId, { ok: true, message: `Set {{${name}}} — ${wallets.length} wallet${wallets.length !== 1 ? 's' : ''}` })
+                } catch (err) {
+                    console.error(`[launch-builder] Set Variable failed`, err)
+                    setResult(nodeId, { ok: false, message: String(err) })
                 }
             }
 
@@ -619,6 +730,13 @@ function LaunchBuilderInner() {
                 let stopBranch = false
                 let handledOwnChildren = false
 
+                // Baseline: ANY named node exposes its own config as {{name}} —
+                // not just the subset below that goes on to call a real API.
+                // Those call* functions merge in richer result fields
+                // (signature, bundle id, wallets, ...) after this, spreading
+                // `config` alongside so nothing set here is lost in the merge.
+                setVariable(varNameFor(nodeId), { ...data?.config })
+
                 if (data?.subtype === 'launchConfirmation' || data?.subtype === 'txConfirmation') {
                     stopBranch = !checkConfirmation(nodeId)
                 } else if (data?.subtype === 'loop') {
@@ -639,6 +757,14 @@ function LaunchBuilderInner() {
                     await countdown(nodeId, lo + Math.random() * (hi - lo))
                 } else if (data?.subtype === 'webhook') {
                     await callWebhook(nodeId, data.config ?? {})
+                } else if (data?.subtype === 'setVariable') {
+                    await callSetVariable(nodeId, data.config ?? {})
+                } else if (data?.category === 'token') {
+                    // Baseline setVariable() above already covers the raw config
+                    // (tokenMint/tokenName/tokenSymbol/devWalletId); this just adds
+                    // a friendlier alias for the dev wallet field.
+                    setVariable(varNameFor(nodeId), { ...data.config, devWalletPublicKey: data.config?.devWalletId })
+                    await wait(RUN_STEP_MS)
                 } else if (data?.category === 'launchType' && data.subtype === 'dev0DevOnly') {
                     await callLaunch(nodeId, data.config ?? {})
                 } else if (data?.category === 'launchType') {

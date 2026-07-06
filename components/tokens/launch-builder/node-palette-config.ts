@@ -30,6 +30,7 @@ import {
     ArrowRight,
     Percent,
     LogOut,
+    Braces,
 } from 'lucide-react'
 import { BuilderNodeCategory, PaletteNodeDef } from './types'
 
@@ -416,6 +417,19 @@ export const PALETTE_ITEMS: PaletteNodeDef[] = [
         outputs: 1,
         inputTypes: ['config'],
         outputTypes: ['config'],
+    },
+    {
+        category: 'utility',
+        nodeType: 'setVariableNode',
+        subtype: 'setVariable',
+        label: 'Set Variable',
+        description: 'Names a wallet group (with live balances) as a variable other nodes can reference by name, e.g. {{traders}} in a Data node\'s custom fields.',
+        icon: Braces,
+        inputs: 1,
+        outputs: 1,
+        inputTypes: ['config'],
+        outputTypes: ['config'],
+        defaultData: { variableName: '' },
     },
 
     // ── Conditionals ───────────────────────────────────────────────────────

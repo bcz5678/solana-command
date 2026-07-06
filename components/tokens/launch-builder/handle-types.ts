@@ -1,5 +1,5 @@
 import type { Node, Edge } from '@xyflow/react'
-import type { HandleDataType, BuilderNodeData } from './types'
+import type { HandleDataType, BuilderNodeData, BuilderSubtype } from './types'
 
 // ── Visual metadata per handle type ─────────────────────────────────────────
 
@@ -99,30 +99,15 @@ export function getDownstreamNodeIdsByHandle(nodeId: string, edges: Edge[], sour
 }
 
 /**
- * Single source of truth for the Data node's "system fields" — resolved from
- * whatever Token node is reachable upstream. Shared by the config dialog
- * (display) and the dry-run engine (actual webhook payload) so they can't drift.
+ * Builds the flat JSON payload a Data node resolves to — purely from its own
+ * custom fields, nothing implicit. A field value of `{{name}}`/`{{name.path}}`
+ * is left as-is here; the dry-run engine resolves those against the named
+ * variable store right before sending (see `callWebhook` in launch-builder.tsx).
+ * Reference a Token node's fields the same way any other node's output is
+ * referenced now: name it and use `{{thatName.tokenMint}}` etc.
  */
-export const DATA_NODE_SYSTEM_FIELDS: { key: string; label: string; source: (d: BuilderNodeData | null) => string }[] = [
-    { key: 'tokenMint',          label: 'Token Mint',            source: (d) => (d?.config.tokenMint   as string) ?? '' },
-    { key: 'tokenName',          label: 'Token Name',            source: (d) => (d?.config.tokenName   as string) ?? '' },
-    { key: 'tokenSymbol',        label: 'Token Symbol',          source: (d) => (d?.config.tokenSymbol as string) ?? '' },
-    { key: 'devWalletPublicKey', label: 'Dev Wallet Public Key', source: (d) => (d?.config.devWalletId as string) ?? '' },
-]
-
-/** Builds the flat JSON payload a Data node resolves to: system fields + custom fields. */
-export function buildDataNodePayload(
-    dataNodeId: string,
-    nodes: Node[],
-    edges: Edge[],
-    dataNodeConfig: Record<string, unknown>,
-): Record<string, unknown> {
-    const tokenData = findTokenNodeData(dataNodeId, nodes, edges)
+export function buildDataNodePayload(dataNodeConfig: Record<string, unknown>): Record<string, unknown> {
     const payload: Record<string, unknown> = {}
-
-    DATA_NODE_SYSTEM_FIELDS.forEach(({ key, source }) => {
-        payload[key] = source(tokenData)
-    })
 
     const customFields = (dataNodeConfig.customFields as { key: string; value: string }[] | undefined) ?? []
     customFields.forEach(({ key, value }) => {
@@ -131,6 +116,93 @@ export function buildDataNodePayload(
     })
 
     return payload
+}
+
+/** Every node id reachable by walking backward (target → source) from `startNodeId`, any number of hops. */
+function collectUpstreamNodeIds(startNodeId: string, edges: Edge[]): Set<string> {
+    const visited = new Set<string>()
+    const queue = [startNodeId]
+    while (queue.length > 0) {
+        const current = queue.shift() as string
+        for (const e of edges) {
+            if (e.target !== current || visited.has(e.source)) continue
+            visited.add(e.source)
+            queue.push(e.source)
+        }
+    }
+    return visited
+}
+
+export type OutputFieldDef = { key: string; label: string }
+
+/**
+ * Declares exactly which fields a node type exposes as its variable on
+ * completion — the single contract both the dry-run engine (the object
+ * passed to setVariable in launch-builder.tsx's call* functions) and the
+ * variable picker (the {{name.field}} options it lists) read from, so they
+ * can't drift from each other the way an ad hoc per-call-site field list
+ * could. Subtypes not listed here have no curated output — their variable
+ * falls back to the raw baseline (that node's own config), which is
+ * genuinely all there is for un-implemented launch/trade types and pure
+ * control-flow nodes (timers, HITL, webhook, thresholds not yet backed, etc).
+ */
+export const NODE_OUTPUT_FIELDS: Partial<Record<BuilderSubtype, OutputFieldDef[]>> = {
+    tokenToLaunch: [
+        { key: 'tokenMint',          label: 'Token Mint' },
+        { key: 'tokenName',          label: 'Token Name' },
+        { key: 'tokenSymbol',        label: 'Token Symbol' },
+        { key: 'devWalletPublicKey', label: 'Dev Wallet Id' },
+    ],
+    dev0DevOnly: [
+        { key: 'signature',          label: 'Launch Signature' },
+        { key: 'tokenMint',          label: 'Token Mint' },
+        { key: 'devWalletPublicKey', label: 'Dev Wallet Id' },
+    ],
+    launchConfirmation: [
+        { key: 'signature', label: 'Confirmed Signature' },
+        { key: 'tokenMint', label: 'Token Mint' },
+    ],
+    txConfirmation: [
+        { key: 'signature', label: 'Confirmed Signature' },
+    ],
+    staggeredBuy:  [{ key: 'signature', label: 'Last Signature' }, { key: 'walletIds', label: 'Wallet IDs' }],
+    staggeredSell: [{ key: 'signature', label: 'Last Signature' }, { key: 'walletIds', label: 'Wallet IDs' }],
+    sellPercent:   [{ key: 'signature', label: 'Last Signature' }, { key: 'walletIds', label: 'Wallet IDs' }],
+    sellAll:       [{ key: 'bundleId', label: 'Jito Bundle ID' }, { key: 'walletIds', label: 'Wallet IDs' }],
+    bundledJito:   [{ key: 'bundleId', label: 'Jito Bundle ID' }, { key: 'walletIds', label: 'Wallet IDs' }],
+    humanVolume:   [{ key: 'walletIds', label: 'Wallet IDs' }, { key: 'wallets', label: 'Wallets' }],
+}
+
+/**
+ * Every named node referenceable as `{{name}}` from a given node — scoped
+ * to nodes actually upstream of it in the graph (walking backward through
+ * edges, same reachability `findTokenNodeData` relies on), not every named
+ * node anywhere on the canvas. A node in an unrelated branch may run before
+ * or after this one depending on timing, so its variable isn't reliably
+ * available here even though it's global in the `variables` store at Run
+ * time — upstream is the deterministic subset. Names only, never values:
+ * actual values only exist inside a live Run, not while editing the graph.
+ *
+ * `fields` is looked up from NODE_OUTPUT_FIELDS above — empty for any
+ * subtype without a declared output, meaning only the bare {{name}} (the
+ * raw config baseline) is meaningfully referenceable.
+ */
+export function collectAvailableVariables(nodeId: string, nodes: Node[], edges: Edge[]): { name: string; fields: OutputFieldDef[] }[] {
+    const upstreamIds = collectUpstreamNodeIds(nodeId, edges)
+    const byName = new Map<string, OutputFieldDef[]>()
+    for (const n of nodes) {
+        if (!upstreamIds.has(n.id)) continue
+        const data = n.data as unknown as BuilderNodeData
+        if (data.subtype === 'setVariable') {
+            const name = (data.config?.variableName as string | undefined)?.trim()
+            if (name) byName.set(name, [])
+        }
+        const name = data.displayName?.trim()
+        if (name) byName.set(name, NODE_OUTPUT_FIELDS[data.subtype] ?? [])
+    }
+    return Array.from(byName.entries())
+        .map(([name, fields]) => ({ name, fields }))
+        .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export function findTokenNodeData(

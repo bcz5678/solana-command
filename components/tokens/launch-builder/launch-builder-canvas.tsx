@@ -32,6 +32,7 @@ import ConditionalNode from './nodes/conditional-node'
 import DataNode from './nodes/data-node'
 import WebhookNode from './nodes/webhook-node'
 import NoOpNode from './nodes/no-op-node'
+import SetVariableNode from './nodes/set-variable-node'
 import DeletableEdge from './edges/deletable-edge'
 import { CATEGORY_LABELS, SINGLE_INSTANCE_CATEGORIES } from './node-palette-config'
 import { PaletteNodeDef, BuilderNodeData } from './types'
@@ -47,6 +48,7 @@ const nodeTypes = {
     dataNode: DataNode,
     webhookNode: WebhookNode,
     noOpNode: NoOpNode,
+    setVariableNode: SetVariableNode,
 }
 
 const edgeTypes = {
