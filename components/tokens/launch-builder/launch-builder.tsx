@@ -175,7 +175,7 @@ function LaunchBuilderInner() {
                 for (const key of Object.keys(payload)) {
                     const raw = payload[key]
                     if (typeof raw !== 'string') continue
-                    const match = /^\{\{\s*([\w.-]+)\s*\}\}$/.exec(raw.trim())
+                    const match = /^\{\{\s*([^{}]+?)\s*\}\}$/.exec(raw.trim())
                     if (!match) continue
                     const [varKey, ...path] = match[1].split('.')
                     let resolved: unknown = variables.get(varKey)

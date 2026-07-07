@@ -22,6 +22,7 @@ import {
     DropdownMenuItem,
     DropdownMenuLabel,
     DropdownMenuSeparator,
+    DropdownMenuGroup,
 } from '@/components/ui/dropdown-menu'
 import { ChevronDown } from 'lucide-react'
 import LaunchTokenSelect from '@/components/tokens/launch/launch-token-select'
@@ -912,14 +913,24 @@ function DataFields({
                                         Variable node, and wire it in ahead of this one.
                                     </p>
                                 )}
-                                {availableVariables.map((name) => (
-                                    <DropdownMenuItem
-                                        key={name}
-                                        className="font-mono text-xs"
-                                        onSelect={() => updateField(i, { value: `{{${name}}}` })}
-                                    >
-                                        {'{{' + name + '}}'}
-                                    </DropdownMenuItem>
+                                {availableVariables.map(({ name, fields }) => (
+                                    <DropdownMenuGroup key={name}>
+                                        <DropdownMenuItem
+                                            className="font-mono text-xs"
+                                            onSelect={() => updateField(i, { value: `{{${name}}}` })}
+                                        >
+                                            {'{{' + name + '}}'}
+                                        </DropdownMenuItem>
+                                        {fields.map((f) => (
+                                            <DropdownMenuItem
+                                                key={`${name}.${f.key}`}
+                                                className="pl-5 font-mono text-xs text-muted-foreground"
+                                                onSelect={() => updateField(i, { value: `{{${name}.${f.key}}}` })}
+                                            >
+                                                {'{{' + name + '.' + f.key + '}}'}
+                                            </DropdownMenuItem>
+                                        ))}
+                                    </DropdownMenuGroup>
                                 ))}
                             </DropdownMenuContent>
                         </DropdownMenu>
