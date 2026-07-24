@@ -17,6 +17,9 @@ import { createClient } from '@/lib/supabase/server'
 import type { BundleSellBody } from '@/lib/types/trades'
 import type { Keypair } from '@solana/web3.js'
 import type { LookupTable } from '@/lib/types/lookup-table'
+import { logTrade } from '@/lib/trades/log'
+import { fetchPumpCoinApi } from '@/lib/pumpfun/pump-api'
+import { lamportsBNToSolNumber } from '@/lib/lamports'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 120
@@ -28,6 +31,27 @@ const BLOCK_ENGINE_URL = process.env.JITO_BLOCK_ENGINE_URL ?? 'ny.mainnet.block-
 const MAX_BUNDLE_TRADES = 10
 const MAX_LEGACY_TRADES = 4
 const WALLETS_PER_BATCH = 2  // wallets packed into each Jito transaction
+
+// Bundle routes only ever handle a live (non-graduated) bonding curve — a
+// graduated mint throws before reaching any trade logic below — so every
+// trade logged from this route is unconditionally 'pump.fun'.
+const bundleSymbolCache = new Map<string, string>()
+async function resolveBundleSymbol(mint: PublicKey): Promise<string> {
+  const key = mint.toBase58()
+  const cached = bundleSymbolCache.get(key)
+  if (cached) return cached
+  const symbol = (await fetchPumpCoinApi(mint))?.symbol ?? key.slice(0, 4).toUpperCase()
+  bundleSymbolCache.set(key, symbol)
+  return symbol
+}
+
+interface WalletTradeMeta {
+  walletId:    string
+  mintAddress: string
+  solAmount:   BN
+  tokenAmount: BN
+  slippage:    number
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -60,6 +84,34 @@ export async function POST(req: NextRequest) {
   }
 
   const tradeKeypairs: Keypair[] = []
+  // Indexed (not pushed) so entries always line up with `tradesList`/signatures
+  // order even when populated from a concurrent Promise.all (legacy path below).
+  const walletTradeMeta: WalletTradeMeta[] = new Array(tradesList.length)
+
+  async function logWalletTrades(
+    status: 'confirmed' | 'pending' | 'failed',
+    getSignature: (i: number) => string | null,
+    errorMessage?: string,
+  ) {
+    await Promise.all(walletTradeMeta.map(async (m, i) => {
+      if (!m) return
+      const symbol = await resolveBundleSymbol(new PublicKey(m.mintAddress))
+      await logTrade({
+        walletId:    m.walletId,
+        side:        'SELL',
+        exchange:    'pump.fun',
+        symbol,
+        toAddress:   m.mintAddress,
+        amountSol:   lamportsBNToSolNumber(m.solAmount),
+        quantity:    m.tokenAmount.toNumber(),
+        price:       m.tokenAmount.isZero() ? 0 : m.solAmount.toNumber() / m.tokenAmount.toNumber(),
+        txSignature: getSignature(i),
+        status,
+        slippageBps: Math.round(m.slippage * 10_000),
+        errorMessage,
+      })
+    }))
+  }
 
   try {
     const connection = initializeQuickNodeSolana().connection
@@ -155,6 +207,14 @@ export async function POST(req: NextRequest) {
           slippage:  trade.slippage,
           tokenProgram,
         })
+
+        walletTradeMeta[i] = {
+          walletId:    trade.walletId,
+          mintAddress: trade.mintAddress,
+          solAmount,
+          tokenAmount,
+          slippage:    trade.slippage,
+        }
 
         // Advance curve: constant product k = virtualSol × virtualToken (sell direction)
         // Tokens enter the curve, SOL exits.
@@ -252,6 +312,12 @@ export async function POST(req: NextRequest) {
         encodedTxs as import('@solana/kit').Base64EncodedWireTransaction[],
         signerAddresses,
       )
+
+      // Skip logging simulated/dry-run bundles — nothing landed on-chain.
+      if (!result.simulated) {
+        await logWalletTrades('confirmed', () => result.bundleId)
+      }
+
       return NextResponse.json({ success: true, ...result }, { status: 200 })
     }
 
@@ -305,6 +371,14 @@ export async function POST(req: NextRequest) {
           slippage: trade.slippage,
           tokenProgram,
         })
+
+        walletTradeMeta[i] = {
+          walletId:    trade.walletId,
+          mintAddress: trade.mintAddress,
+          solAmount,
+          tokenAmount,
+          slippage:    trade.slippage,
+        }
 
         return { instructions, wallet: tradeWallet }
       }),
@@ -366,6 +440,8 @@ export async function POST(req: NextRequest) {
       const { bundleId, signatures } = await executor.sendPrebuiltTransactionsWithInlineTip(tradeTxs)
       const status = await executor.waitForBundleLanding(bundleId, signatures)
 
+      await logWalletTrades('confirmed', (i) => signatures[i] ?? bundleId)
+
       return NextResponse.json({ success: true, bundleId, status }, { status: 200 })
     }
 
@@ -406,16 +482,21 @@ export async function POST(req: NextRequest) {
       if (confirmed) {
         const level = confirmed.confirmationStatus!
         console.log(`[bundle/sell] direct tx confirmed: ${level}`)
+        await logWalletTrades('confirmed', (i) => directSignatures[i] ?? null)
         return NextResponse.json({ success: true, signatures: directSignatures, status: level }, { status: 200 })
       }
     }
 
+    await logWalletTrades('pending', (i) => directSignatures[i] ?? null, 'Direct tx not confirmed within 60s')
     return NextResponse.json(
       { success: false, signatures: directSignatures, error: 'Direct tx not confirmed within 60s' },
       { status: 200 },
     )
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Bundle sell failed'
+    if (walletTradeMeta.some(Boolean)) {
+      await logWalletTrades('failed', () => null, message)
+    }
     return NextResponse.json({ error: message }, { status: 500 })
   } finally {
     for (const kp of tradeKeypairs) kp.secretKey.fill(0)

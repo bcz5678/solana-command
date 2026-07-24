@@ -36,3 +36,41 @@ export interface BundleSellBody {
   /** Simulate the bundle and stop — never calls sendBundle. QuickNode path only. */
   dryRun?:           boolean
 }
+
+
+export interface TradeLog {
+  id:            string
+  wallet_id:     string | null
+  wallet_label:  string | null    // joined
+  wallet_pubkey: string | null    // joined
+  mint_id:       string | null
+  token_name:    string | null    // joined
+  token_symbol:  string | null    // joined
+  exchange:      string
+  symbol:        string
+  side:          'BUY' | 'SELL'
+  order_type:    string
+  quantity:      number | null
+  price:         number | null
+  amount_sol:    number | null
+  to_address:    string
+  tx_signature:  string | null
+  status:        'pending' | 'confirmed' | 'failed' | 'cancelled'
+  slippage_bps:  number | null
+  price_impact:  number | null
+  error_message: string | null
+  executed_at:   string
+}
+
+export interface TradeStats {
+  total_trades:     number
+  confirmed_trades: number
+  failed_trades:    number
+  buy_count:        number
+  sell_count:       number
+  sol_spent:        number
+  sol_received:     number
+  net_sol:          number      // received − spent
+  first_trade_at:   string | null
+  last_trade_at:    string | null
+}

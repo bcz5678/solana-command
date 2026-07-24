@@ -7,6 +7,9 @@ import { Keypair, PublicKey } from '@solana/web3.js';
 import { getWalletKeypairById } from "@/lib/vault/get-wallet-by-id";
 import { Executor } from "@/lib/pumpfun/executor";
 import { SellTokenBody } from "@/lib/types/trades";
+import { logTrade } from "@/lib/trades/log";
+import { getTradeLogContext, TradeLogContext } from "@/lib/trades/context";
+import { lamportsBNToSolNumber } from "@/lib/lamports";
 
 
 const quicknodeSolana = initializeQuickNodeSolana();
@@ -62,8 +65,13 @@ export async function POST(request: NextRequest) {
 
     console.log('[sell] validation passed — loading wallet keypair')
     let buyer: Keypair | null = null
+    let logContext: TradeLogContext
+    const mintAddressPublicKey = new PublicKey(mintAddress)
     try {
-        buyer = await getWalletKeypairById(walletId)
+        [buyer, logContext] = await Promise.all([
+            getWalletKeypairById(walletId),
+            getTradeLogContext(mintAddressPublicKey, quicknodeSolana.connection),
+        ])
         console.log('[sell] keypair loaded OK')
     } catch (err) {
         console.error('[sell] keypair load failed:', (err as Error).message)
@@ -83,11 +91,29 @@ export async function POST(request: NextRequest) {
     try {
         console.log('[sell] calling executor.sell — mint:', mintAddress, 'tokens:', tokenAmount.toString())
         const result = await executor.sell(
-            new PublicKey(mintAddress),
+            mintAddressPublicKey,
             tokenAmount,
             slippage,
         );
         console.log('[sell] executor.sell result:', JSON.stringify({ success: result.success, error: result.error, signature: result.signature, tokensRemaining: result.tokensRemaining.toString() }))
+
+        // ── Log trade ───────────────────────────────────────────
+        await logTrade({
+            walletId,
+            side:         'SELL',
+            exchange:     logContext.exchange,
+            symbol:       logContext.symbol,
+            toAddress:    mintAddress,
+            amountSol:    lamportsBNToSolNumber(result.solAmount),
+            quantity:     result.tokenAmount.toNumber(),
+            price:        result.price,
+            txSignature:  result.signature ?? null,
+            status:       result.success ? 'confirmed' : 'failed',
+            slippageBps:  Math.round(slippage * 10_000),
+            priceImpact:  logContext.priceImpactPct,
+            errorMessage: result.success ? null : result.error,
+        })
+
         return NextResponse.json(
             {
                 success:         result.success,
@@ -99,6 +125,17 @@ export async function POST(request: NextRequest) {
         )
     } catch (err) {
         console.error('[sell] executor threw:', (err as Error).message)
+        await logTrade({
+            walletId,
+            side:         'SELL',
+            exchange:     logContext.exchange,
+            symbol:       logContext.symbol,
+            toAddress:    mintAddress,
+            quantity:     tokenAmount.toNumber(),
+            status:       'failed',
+            slippageBps:  Math.round(slippage * 10_000),
+            errorMessage: (err as Error).message,
+        })
         return NextResponse.json(
             { error: `Transaction failed: ${(err as Error).message}` },
             { status: 500 }

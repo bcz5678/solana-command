@@ -5,8 +5,11 @@ import { OnlinePumpSdk } from "@nirholas/pump-sdk";
 import BN from 'bn.js';
 
 import { Keypair, PublicKey } from '@solana/web3.js';
-import { getWalletKeypairById } from "@/lib/vault/get-wallet-by-id"; 
+import { getWalletKeypairById } from "@/lib/vault/get-wallet-by-id";
 import { ExecuteResult, Executor } from "@/lib/pumpfun/executor";
+import { logTrade } from "@/lib/trades/log";
+import { getTradeLogContext, TradeLogContext } from "@/lib/trades/context";
+import { lamportsBNToSolNumber } from "@/lib/lamports";
 
 
 interface SellAllTokenBody {
@@ -61,9 +64,13 @@ export async function POST(request: NextRequest) {
     // Get Wallet Keypair by the ID
 
     let buyer: Keypair | null = null
+    let logContext: TradeLogContext
 
     try {
-        buyer = await getWalletKeypairById(walletId)
+        [buyer, logContext] = await Promise.all([
+            getWalletKeypairById(walletId),
+            getTradeLogContext(mintAddressPublicKey, quicknodeSolana.connection),
+        ])
     } catch (err) {
         return NextResponse.json(
         { error: `Failed to load wallet keypair: ${(err as Error).message}` },
@@ -80,11 +87,48 @@ export async function POST(request: NextRequest) {
     });
 
     try {
-        const buySignature = await executor.sellAll(
+        const result: ExecuteResult = await executor.sellAll(
             mintAddressPublicKey,
             slippage,
         );
+
+        // ── Log trade ───────────────────────────────────────────
+        await logTrade({
+            walletId,
+            side:         'SELL',
+            exchange:     logContext.exchange,
+            symbol:       logContext.symbol,
+            toAddress:    mintAddress,
+            amountSol:    lamportsBNToSolNumber(result.solAmount),
+            quantity:     result.tokenAmount.toNumber(),
+            price:        result.price,
+            txSignature:  result.signature ?? null,
+            status:       result.success ? 'confirmed' : 'failed',
+            slippageBps:  Math.round(slippage * 10_000),
+            priceImpact:  logContext.priceImpactPct,
+            errorMessage: result.success ? null : result.error,
+        })
+
+        return NextResponse.json(
+            {
+                success:         result.success,
+                signature:       result.signature,
+                error:           result.error,
+                tokenAmount:     result.tokenAmount.toString(),
+            },
+            { status: result.success ? 200 : 500 }
+        )
     } catch (err) {
+        await logTrade({
+            walletId,
+            side:         'SELL',
+            exchange:     logContext.exchange,
+            symbol:       logContext.symbol,
+            toAddress:    mintAddress,
+            status:       'failed',
+            slippageBps:  Math.round(slippage * 10_000),
+            errorMessage: (err as Error).message,
+        })
         buyer?.secretKey.fill(0)
         return NextResponse.json(
             { error: `Transaction failed: ${(err as Error).message}` },
