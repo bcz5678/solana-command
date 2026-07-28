@@ -1,9 +1,4 @@
-export enum SiteTemplate {
-    unselected = "Unselected",
-    minimal = "Minimal",
-    memeLanding = "MemeLanding",
-    proTrader = "ProTrader",
-}
+import { SiteTemplate } from '@/lib/types/site-template'
 
 export interface SiteTemplateParams {
     title: string
@@ -17,7 +12,7 @@ export enum DomainMode {
 
 export interface SiteBuilderConfigParams {
     token: TokenMintRef | null
-    template: SiteTemplate
+    template: SiteTemplate | null
     domainMode: DomainMode
     subdomain: string
     customDomain: string
@@ -35,7 +30,7 @@ export type TokenMintRef = {
 
 export class SiteBuilderConfig implements SiteBuilderConfigParams {
     token: TokenMintRef | null
-    template: SiteTemplate
+    template: SiteTemplate | null
     domainMode: DomainMode
     subdomain: string
     customDomain: string
@@ -79,7 +74,7 @@ export class SiteBuilderConfig implements SiteBuilderConfigParams {
 export function defaultSiteBuilderConfig(): SiteBuilderConfig {
     return new SiteBuilderConfig({
         token: null,
-        template: SiteTemplate.unselected,
+        template: null,
         domainMode: DomainMode.subdomain,
         subdomain: '',
         customDomain: '',

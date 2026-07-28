@@ -7,7 +7,7 @@ import SiteTemplateSelect from './site-template-select'
 import SiteDomainSetup from './site-domain-setup'
 import SiteConfig from './site-config'
 import SiteExecute from './site-execute'
-import { SiteTemplate, defaultSiteBuilderConfig } from './types'
+import { defaultSiteBuilderConfig } from './types'
 
 const nextButtonLabels: Record<number, string> = {
     0: 'Choose Template',
@@ -91,7 +91,7 @@ export default function SiteBuilderWizard() {
 
     const canAdvance = [
         selectedTokenId !== null,
-        config.template !== SiteTemplate.unselected,
+        config.template !== null,
         config.resolvedDomain !== '',
         true,
         false,

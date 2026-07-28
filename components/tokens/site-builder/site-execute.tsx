@@ -29,7 +29,7 @@ export default function SiteExecute({ config }: Props) {
                         </div>
                         <div>
                             <p className="text-xs text-muted-foreground mb-0.5">Template</p>
-                            <p>{config.template}</p>
+                            <p>{config.template?.name ?? '—'}</p>
                         </div>
                         <div>
                             <p className="text-xs text-muted-foreground mb-0.5">Domain</p>
