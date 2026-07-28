@@ -38,6 +38,7 @@ import {
     KeyRound,
     Repeat,
     GitBranch,
+    FileBracesCornerIcon
 } from "lucide-react"
 import { RelayStatusIndicator } from "@/components/wss/relay-status-indicator"
 
@@ -168,6 +169,17 @@ export function AppSidebar() {
                   <Link href="/protected/tokens/create">
                     <Plus />
                     <span>Create</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+               <SidebarMenuItem>
+                <SidebarMenuButton
+                  className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
+                  asChild
+                >
+                  <Link href="/protected/tokens/site-builder">
+                    <FileBracesCornerIcon />
+                    <span>Site Builder</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

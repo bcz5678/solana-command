@@ -54,11 +54,16 @@ export default function LaunchTokenSelect({ selectedId, onSelect, onClear, allow
 
     const filtered = useMemo(() => {
         const q = search.trim().toLowerCase()
-        if (!q) return tokens
-        return tokens.filter(
-            (t) =>
-                t.token_name.toLowerCase().includes(q) ||
-                t.token_symbol.toLowerCase().includes(q),
+        const matched = q
+            ? tokens.filter(
+                (t) =>
+                    t.token_name.toLowerCase().includes(q) ||
+                    t.token_symbol.toLowerCase().includes(q),
+            )
+            : tokens
+        // Launched tokens aren't selectable in this pass — push them to the end.
+        return [...matched].sort((a, b) =>
+            Number(a.launch_status === 'launched') - Number(b.launch_status === 'launched'),
         )
     }, [tokens, search])
 
