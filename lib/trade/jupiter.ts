@@ -74,3 +74,27 @@ export async function searchJupiterToken(mint: string): Promise<JupiterTokenInfo
     return null
   }
 }
+
+interface JupiterPriceResponse {
+  data: Record<string, { id: string; price: string } | undefined>
+  timeTaken: number
+}
+
+let cachedSolUsdPrice: { price: number; fetchedAt: number } | null = null
+const SOL_USD_CACHE_TTL_MS = 30_000
+
+/** Current SOL/USD price. Cached for 30s to avoid hammering Jupiter on every page load. */
+export async function getSolUsdPrice(): Promise<number> {
+  if (cachedSolUsdPrice && Date.now() - cachedSolUsdPrice.fetchedAt < SOL_USD_CACHE_TTL_MS) {
+    return cachedSolUsdPrice.price
+  }
+
+  const res = await jupiterFetch<JupiterPriceResponse>(`/price/v2?ids=${WRAPPED_SOL_MINT}`)
+  const price = Number(res.data[WRAPPED_SOL_MINT]?.price)
+  if (!Number.isFinite(price) || price <= 0) {
+    throw new Error('Jupiter price/v2 returned no usable SOL price')
+  }
+
+  cachedSolUsdPrice = { price, fetchedAt: Date.now() }
+  return price
+}

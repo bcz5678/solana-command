@@ -14,9 +14,11 @@ import { SiteTemplate } from '@/lib/types/site-template'
 type Props = {
     selectedTemplate: SiteTemplate | null
     onSelect: (template: SiteTemplate) => void
+    /** Best-effort template name to auto-select once templates load — used when carrying over an existing site's config. */
+    initialTemplateName?: string
 }
 
-export default function SiteTemplateSelect({ selectedTemplate, onSelect }: Props) {
+export default function SiteTemplateSelect({ selectedTemplate, onSelect, initialTemplateName }: Props) {
     const [templates, setTemplates] = useState<SiteTemplate[]>([])
     const [loading, setLoading] = useState(true)
     const [copied, setCopied] = useState(false)
@@ -32,13 +34,22 @@ export default function SiteTemplateSelect({ selectedTemplate, onSelect }: Props
             })
             .then((data) => {
                 if (!data) return
-                setTemplates(data.templates ?? [])
+                const fetched: SiteTemplate[] = data.templates ?? []
+                setTemplates(fetched)
                 setLoading(false)
+
+                if (!selectedTemplate && initialTemplateName) {
+                    const match = fetched.find(
+                        (t) => t.name.toLowerCase() === initialTemplateName.toLowerCase(),
+                    )
+                    if (match) onSelect(match)
+                }
             })
             .catch((err) => {
                 console.error('SiteTemplateSelect fetch error:', err)
                 setLoading(false)
             })
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     function copyMediaSpecs() {

@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { lamportsBNToSolDisplay } from '@/lib/lamports';
+import BN from 'bn.js'
+import { lamportsBNToSolDisplay, lamportsBNToSolNumber } from '@/lib/lamports';
 
 import {
   Accordion,
@@ -35,11 +36,24 @@ type Props = {
   walletTypes: LookupEntry[]
   owners: LookupEntry[]
   groups: LookupEntry[]
+  solUsdPrice?: number | null
 }
 
 const ALL = 'all'
 
-export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
+const usdFormatter = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+
+function formatUsd(lamports: BN, solUsdPrice: number | null | undefined): string | null {
+  if (solUsdPrice == null) return null
+  return usdFormatter.format(lamportsBNToSolNumber(lamports) * solUsdPrice)
+}
+
+export function WalletTable({ wallets, walletTypes, owners, groups, solUsdPrice }: Props) {
   const ownerMap = Object.fromEntries(owners.map((o) => [String(o.id), o.name]))
 
   const [isActive, setIsActive] = useState<string>(ALL)
@@ -57,6 +71,27 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
     if (groupId !== ALL && w.wallet_group_id !== groupId) return false
     return true
   }), [wallets, isActive, walletTypeId, ownerId, groupId])
+
+  const totalLamports = useMemo(
+    () => wallets.reduce(
+      (acc, w) => w.solana_balance_in_lamports ? acc.add(w.solana_balance_in_lamports) : acc,
+      new BN(0),
+    ),
+    [wallets],
+  )
+
+  const balancesByType = useMemo(() => {
+    const map = new Map<string, { name: string; total: BN; count: number }>()
+    for (const w of wallets) {
+      const key = w.wallet_type_id ?? 'unassigned'
+      const name = w.wallet_type ?? 'Unassigned'
+      const entry = map.get(key) ?? { name, total: new BN(0), count: 0 }
+      if (w.solana_balance_in_lamports) entry.total = entry.total.add(w.solana_balance_in_lamports)
+      entry.count += 1
+      map.set(key, entry)
+    }
+    return Array.from(map.values()).sort((a, b) => b.total.cmp(a.total))
+  }, [wallets])
 
   const allFilteredSelected = filtered.length > 0 && filtered.every((w) => selected.has(w.id))
 
@@ -89,6 +124,36 @@ export function WalletTable({ wallets, walletTypes, owners, groups }: Props) {
 
   return (
     <div className="flex flex-col gap-4">
+      <div className="rounded-lg border bg-muted/40 p-4">
+        <p className="text-xs text-muted-foreground mb-0.5">Total SOL Balance</p>
+        <p className="text-2xl font-semibold">
+          {lamportsBNToSolDisplay(totalLamports)} SOL
+          {formatUsd(totalLamports, solUsdPrice) && (
+            <span className="ml-2 text-base font-normal text-muted-foreground">
+              ({formatUsd(totalLamports, solUsdPrice)})
+            </span>
+          )}
+        </p>
+
+        <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 border-t pt-3">
+          {balancesByType.map((entry) => (
+            <div key={entry.name}>
+              <p className="text-xs text-muted-foreground mb-0.5">
+                {entry.name} <span className="opacity-70">({entry.count})</span>
+              </p>
+              <p className="text-sm font-medium">
+                {lamportsBNToSolDisplay(entry.total)} SOL
+                {formatUsd(entry.total, solUsdPrice) && (
+                  <span className="ml-1 font-normal text-muted-foreground">
+                    ({formatUsd(entry.total, solUsdPrice)})
+                  </span>
+                )}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="flex flex-wrap gap-3">
         <Select value={isActive} onValueChange={setIsActive}>
           <SelectTrigger className="w-36">

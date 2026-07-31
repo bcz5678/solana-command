@@ -3,21 +3,36 @@
 import { useState } from 'react'
 import LaunchTokenSelect from '@/components/tokens/launch/launch-token-select'
 import { TokenMint } from '@/lib/types/token-mint'
+import SiteStart from './site-start'
+import SiteExistingSelect, { MockExistingSite } from './site-existing-select'
 import SiteTemplateSelect from './site-template-select'
 import SiteDomainSetup from './site-domain-setup'
 import SiteConfig from './site-config'
 import SiteExecute from './site-execute'
-import { defaultSiteBuilderConfig } from './types'
+import { defaultSiteBuilderConfig, SiteBuilderMode } from './types'
 
-const nextButtonLabels: Record<number, string> = {
-    0: 'Choose Template',
-    1: 'Set Up Domain',
-    2: 'Configure Site',
-    3: 'Review & Deploy',
-    4: 'Done',
+function nextButtonLabel(step: number, mode: SiteBuilderMode | null): string {
+    const labels: Record<number, string> = {
+        0: mode === 'edit' ? 'Select Existing Site' : 'Select Token',
+        1: 'Choose Template',
+        2: 'Set Up Domain',
+        3: 'Configure Site',
+        4: 'Review & Deploy',
+        5: 'Done',
+    }
+    return labels[step] ?? 'Next'
 }
 
 const steps = [
+    {
+        label: 'Get Started',
+        icon: (
+            <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 3v18" />
+                <path d="M3 12h18" />
+            </svg>
+        ),
+    },
     {
         label: 'Select Token',
         icon: (
@@ -69,14 +84,31 @@ const steps = [
 
 export default function SiteBuilderWizard() {
     const [currentStep, setCurrentStep] = useState(0)
+    const [mode, setMode] = useState<SiteBuilderMode | null>(null)
     const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null)
+    const [selectedExistingSiteId, setSelectedExistingSiteId] = useState<string | null>(null)
+    const [presetTemplateName, setPresetTemplateName] = useState<string | undefined>(undefined)
+    const [domainReady, setDomainReady] = useState(false)
     const [config, setConfig] = useState(defaultSiteBuilderConfig())
+
+    function onModeSelect(nextMode: SiteBuilderMode) {
+        if (nextMode !== mode) {
+            // Switching modes invalidates whatever was picked under the old one — start clean.
+            setSelectedTokenId(null)
+            setSelectedExistingSiteId(null)
+            setPresetTemplateName(undefined)
+            setDomainReady(false)
+            setConfig(defaultSiteBuilderConfig())
+        }
+        setMode(nextMode)
+    }
 
     function onTokenSelect(token: TokenMint) {
         setSelectedTokenId(token.id ?? null)
         setConfig((prev) => prev.copyWith({
             token: {
                 id: token.id,
+                mint_public_key: token.mint_public_key,
                 token_name: token.token_name,
                 token_symbol: token.token_symbol,
                 logo_url: token.logo_url,
@@ -89,10 +121,34 @@ export default function SiteBuilderWizard() {
         setConfig((prev) => prev.copyWith({ token: null }))
     }
 
+    function onExistingSiteSelect(site: MockExistingSite) {
+        setSelectedExistingSiteId(site.id)
+        setSelectedTokenId(site.tokenId)
+        setPresetTemplateName(site.templateName)
+        setDomainReady(false)
+        setConfig((prev) => prev.copyWith({
+            token: {
+                id: site.tokenId,
+                mint_public_key: site.tokenMintPublicKey,
+                token_name: site.tokenName,
+                token_symbol: site.tokenSymbol,
+                logo_url: site.logoUrl,
+            },
+            template: null,
+            domainMode: site.domainMode,
+            subdomain: site.subdomain,
+            customDomain: site.customDomain,
+            siteTitle: site.siteTitle,
+            tagline: site.tagline,
+            accentColor: site.accentColor,
+        }))
+    }
+
     const canAdvance = [
-        selectedTokenId !== null,
+        mode !== null,
+        mode === 'edit' ? selectedExistingSiteId !== null : selectedTokenId !== null,
         config.template !== null,
-        config.resolvedDomain !== '',
+        domainReady,
         true,
         false,
     ]
@@ -135,7 +191,7 @@ export default function SiteBuilderWizard() {
                                     'text-xs font-medium whitespace-nowrap',
                                     isActive ? 'text-blue-500' : isDone ? 'text-blue-400' : 'text-muted-foreground/40',
                                 ].join(' ')}>
-                                    {step.label}
+                                    {i === 1 && mode === 'edit' ? 'Existing Site' : step.label}
                                 </span>
                             </div>
 
@@ -153,23 +209,32 @@ export default function SiteBuilderWizard() {
             {/* Step content */}
             <div className="w-full">
                 {currentStep === 0 && (
-                    <LaunchTokenSelect selectedId={selectedTokenId} onSelect={onTokenSelect} onClear={onTokenClear} />
+                    <SiteStart mode={mode} onSelect={onModeSelect} />
                 )}
                 {currentStep === 1 && (
+                    mode === 'edit' ? (
+                        <SiteExistingSelect selectedSiteId={selectedExistingSiteId} onSelect={onExistingSiteSelect} />
+                    ) : (
+                        <LaunchTokenSelect selectedId={selectedTokenId} onSelect={onTokenSelect} onClear={onTokenClear} />
+                    )
+                )}
+                {currentStep === 2 && (
                     <SiteTemplateSelect
                         selectedTemplate={config.template}
                         onSelect={(template) => setConfig((prev) => prev.copyWith({ template }))}
+                        initialTemplateName={presetTemplateName}
                     />
                 )}
-                {currentStep === 2 && (
+                {currentStep === 3 && (
                     <SiteDomainSetup
                         config={config}
                         onDomainModeChange={(domainMode) => setConfig((prev) => prev.copyWith({ domainMode }))}
                         onSubdomainChange={(subdomain) => setConfig((prev) => prev.copyWith({ subdomain }))}
                         onCustomDomainChange={(customDomain) => setConfig((prev) => prev.copyWith({ customDomain }))}
+                        onReadyChange={setDomainReady}
                     />
                 )}
-                {currentStep === 3 && (
+                {currentStep === 4 && (
                     <SiteConfig
                         config={config}
                         onSiteTitleChange={(siteTitle) => setConfig((prev) => prev.copyWith({ siteTitle }))}
@@ -177,7 +242,7 @@ export default function SiteBuilderWizard() {
                         onAccentColorChange={(accentColor) => setConfig((prev) => prev.copyWith({ accentColor }))}
                     />
                 )}
-                {currentStep === 4 && (
+                {currentStep === 5 && (
                     <SiteExecute config={config} />
                 )}
             </div>
@@ -196,7 +261,7 @@ export default function SiteBuilderWizard() {
                     disabled={currentStep === steps.length - 1 || !canAdvance[currentStep]}
                     className="px-3 py-1.5 text-sm rounded border border-blue-500 bg-blue-500 text-white hover:bg-blue-600 hover:border-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
-                    {nextButtonLabels[currentStep] ?? 'Next'}
+                    {nextButtonLabel(currentStep, mode)}
                 </button>
             </div>
         </div>

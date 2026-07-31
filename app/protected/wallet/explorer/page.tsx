@@ -12,6 +12,7 @@ export default function Page() {
   const [walletTypes, setWalletTypes] = useState<LookupEntry[]>([])
   const [owners, setOwners]           = useState<LookupEntry[]>([])
   const [groups, setGroups]           = useState<LookupEntry[]>([])
+  const [solUsdPrice, setSolUsdPrice] = useState<number | null>(null)
   const [error, setError]             = useState<string | null>(null)
 
   useEffect(() => {
@@ -30,6 +31,11 @@ export default function Page() {
         setGroups(groups ?? [])
       })
       .catch(() => setError('Failed to load wallets'))
+
+    fetch('/api/price/sol-usd')
+      .then((r) => r.json())
+      .then(({ solUsd }) => setSolUsdPrice(typeof solUsd === 'number' ? solUsd : null))
+      .catch(() => setSolUsdPrice(null))
   }, [])
 
   return (
@@ -45,6 +51,7 @@ export default function Page() {
         walletTypes={walletTypes}
         owners={owners}
         groups={groups}
+        solUsdPrice={solUsdPrice}
       />
     </div>
   )

@@ -10,6 +10,8 @@ export enum DomainMode {
     custom = "Custom",
 }
 
+export type SiteBuilderMode = 'create' | 'edit'
+
 export interface SiteBuilderConfigParams {
     token: TokenMintRef | null
     template: SiteTemplate | null
@@ -23,6 +25,7 @@ export interface SiteBuilderConfigParams {
 
 export type TokenMintRef = {
     id: string
+    mint_public_key: string
     token_name: string
     token_symbol: string
     logo_url: string | null
@@ -51,8 +54,10 @@ export class SiteBuilderConfig implements SiteBuilderConfigParams {
 
     copyWith(patch: Partial<SiteBuilderConfigParams>): SiteBuilderConfig {
         return new SiteBuilderConfig({
-            token: patch.token ?? this.token,
-            template: patch.template ?? this.template,
+            // token/template are nullable, so an explicit `null` in the patch must clear them —
+            // `??` alone can't tell "explicitly cleared" apart from "not provided".
+            token: 'token' in patch ? patch.token ?? null : this.token,
+            template: 'template' in patch ? patch.template ?? null : this.template,
             domainMode: patch.domainMode ?? this.domainMode,
             subdomain: patch.subdomain ?? this.subdomain,
             customDomain: patch.customDomain ?? this.customDomain,
