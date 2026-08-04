@@ -10,7 +10,7 @@ import type {
   TemplateManifest,
   ImageAsset,
 } from "@site/schema";
-import type { ResolvedDependency } from "./vendor.js";
+import type { ResolvedDependency } from "./vendor";
 
 // ============================================================================
 // RESOLVED THEME

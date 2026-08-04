@@ -17,12 +17,12 @@
 // ============================================================================
 
 import { describe, it, expect } from "vitest";
-import { renderTemplate } from "../render.js";
-import { resolveTheme } from "../theme.js";
+import { renderTemplate } from "../render";
+import { resolveTheme } from "../theme";
 import { assignSlugs, validateAgainstManifest } from "@site/schema";
-import { heroOnepagerManifest } from "../templates/hero-onepager/manifest.js";
-import { golden, stress, hostileTheme } from "../__fixtures__/index.js";
-import "../templates/index.js";   // side-effect: registers templates
+import { heroOnepagerManifest } from "../templates/hero-onepager/manifest";
+import { golden, stress, hostileTheme } from "../__fixtures__/index";
+import "../templates/index";   // side-effect: registers templates
 
 const manifest = heroOnepagerManifest;
 

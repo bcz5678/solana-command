@@ -5,9 +5,9 @@
 // ============================================================================
 
 // ---- SECTION 1 — field-meta.ts ----
-export { SCHEMA_VERSION } from "./field-meta.js";
-export { fieldRegistry, field, getFieldMeta } from "./field-meta.js";
-export type { FieldWidget, FieldMeta } from "./field-meta.js";
+export { SCHEMA_VERSION } from "./field-meta";
+export { fieldRegistry, field, getFieldMeta } from "./field-meta";
+export type { FieldWidget, FieldMeta } from "./field-meta";
 
 // ---- SECTION 2 — primitives.ts ----
 export {
@@ -17,8 +17,8 @@ export {
   ImageAssetSchema,
   SiteCtaSchema,
   SocialLinkSchema,
-} from "./primitives.js";
-export type { CrossAlign, ImageAsset, SiteCta, SocialLink } from "./primitives.js";
+} from "./primitives";
+export type { CrossAlign, ImageAsset, SiteCta, SocialLink } from "./primitives";
 
 // ---- SECTION 3 — sections.ts ----
 export {
@@ -32,8 +32,8 @@ export {
   CardsSectionSchema,
   SiteSectionSchema,
   SiteSectionListSchema,
-} from "./sections.js";
-export type { SectionType, SiteSection } from "./sections.js";
+} from "./sections";
+export type { SectionType, SiteSection } from "./sections";
 
 // ---- SECTION 4 — theme.ts (three-tier token layering) ----
 export {
@@ -41,8 +41,8 @@ export {
   SemanticTokensSchema,
   TemplateScopedTokensSchema,
   LayeredThemeSchema,
-} from "./theme.js";
-export type { CoreTokens, SemanticTokens, LayeredTheme } from "./theme.js";
+} from "./theme";
+export type { CoreTokens, SemanticTokens, LayeredTheme } from "./theme";
 
 // ---- SECTION 5 — manifest.ts ----
 export {
@@ -54,13 +54,13 @@ export {
   TemplateFlowSchema,
   TemplateManifestSchema,
   TemplateOutputSchema,
-} from "./manifest.js";
+} from "./manifest";
 export type {
   CssLayer,
   TemplateDependency,
   TemplateManifest,
   TemplateOutput,
-} from "./manifest.js";
+} from "./manifest";
 
 // ---- SECTION 6 — content.ts ----
 export {
@@ -70,8 +70,8 @@ export {
   SiteModulesSchema,
   SiteFooterSchema,
   SiteContentSchema,
-} from "./content.js";
-export type { SiteContent } from "./content.js";
+} from "./content";
+export type { SiteContent } from "./content";
 
 // ---- SECTION 7 & 8 — definition.ts (stored payload + helpers) ----
 export {
@@ -79,8 +79,8 @@ export {
   slugify,
   assignSlugs,
   validateAgainstManifest,
-} from "./definition.js";
-export type { SiteDefinition, ValidationIssue } from "./definition.js";
+} from "./definition";
+export type { SiteDefinition, ValidationIssue } from "./definition";
 
 // ---- SECTION 9 — slotted.ts (slotted-template schema) ----
 export {
@@ -91,7 +91,7 @@ export {
   BundleAssetSchema,
   SanitizePolicySchema,
   SlottedSpecSchema,
-} from "./slotted.js";
+} from "./slotted";
 export type {
   TemplateKind,
   SlotMode,
@@ -100,4 +100,4 @@ export type {
   BundleAsset,
   SanitizePolicy,
   SlottedSpec,
-} from "./slotted.js";
+} from "./slotted";

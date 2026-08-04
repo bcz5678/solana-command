@@ -12,8 +12,8 @@
 // ============================================================================
 
 import type { LayeredTheme, TemplateManifest } from "@site/schema";
-import type { ResolvedTheme } from "./types.js";
-import { cssValue, cssIdent } from "./escape.js";
+import type { ResolvedTheme } from "./types";
+import { cssValue, cssIdent } from "./escape";
 
 // ============================================================================
 // COLOUR HELPERS

@@ -17,15 +17,15 @@
 // rather than aspirational.
 // ============================================================================
 
-import { registerTemplate } from "../render.js";
-import { renderHeroOnepager } from "./hero-onepager/index.js";
+import { registerTemplate } from "../render";
+import { renderHeroOnepager } from "./hero-onepager/index";
 
 registerTemplate("hero-onepager@1", renderHeroOnepager);
 
 // Next up — the side scroller. Registers the same way; the horizontal flow is
 // declared in its manifest, not detected here:
 //
-//   import { renderSideScroller } from "./side-scroller/index.js";
+//   import { renderSideScroller } from "./side-scroller/index";
 //   registerTemplate("side-scroller@1", renderSideScroller);
 
 export { renderHeroOnepager };

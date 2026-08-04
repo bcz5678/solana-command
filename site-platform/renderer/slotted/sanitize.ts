@@ -15,7 +15,7 @@
 // ============================================================================
 
 import type { SanitizePolicy } from "@site/schema";
-import { SlottedDocument, SlottedElement } from './dom.js';
+import { SlottedDocument, SlottedElement } from './dom';
 
 
 export interface StripReport {

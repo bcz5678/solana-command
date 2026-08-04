@@ -17,8 +17,8 @@
 // stylesheets can never outrank it regardless of selector specificity.
 // ============================================================================
 
-import type { ResolvedTheme } from "../../types.js";
-import { cssValue } from "../../escape.js";
+import type { ResolvedTheme } from "../../types";
+import { cssValue } from "../../escape";
 
 export function heroOnepagerStyles(theme: ResolvedTheme): string {
   const md = cssValue(theme.raw.breakpointMd, "768px");

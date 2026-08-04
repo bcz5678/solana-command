@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2017",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -19,9 +23,15 @@
       }
     ],
     "paths": {
-      "@/*": ["./*"],
-      "@site/schema":   ["./site-platform/schema/index.ts"],
-      "@site/renderer": ["./site-platform/renderer/index.ts"]
+      "@/*": [
+        "./*"
+      ],
+      "@site/schema": [
+        "./site-platform/schema/index.ts"
+      ],
+      "@site/renderer": [
+        "./site-platform/renderer/index.ts"
+      ]
     }
   },
   "include": [
@@ -30,7 +40,10 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    "**/*.mts"
-, "app/api/lookup-table/delete/route"  ],
-  "exclude": ["node_modules"]
+    "**/*.mts",
+    "app/api/lookup-table/delete/route"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

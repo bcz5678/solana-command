@@ -13,11 +13,11 @@
 // ============================================================================
 
 import type { SiteDefinition } from "@site/schema";
-import type { ResolvedTheme, TemplateOutput } from "./types.js";
-import type { ResolvedDependency } from "./vendor.js";
-import { flattenTheme } from "./theme.js";
-import { esc, escAttr, safeUrl } from "./escape.js";
-import { scriptHash } from "./assets.js";
+import type { ResolvedTheme, TemplateOutput } from "./types";
+import type { ResolvedDependency } from "./vendor";
+import { flattenTheme } from "./theme";
+import { esc, escAttr, safeUrl } from "./escape";
+import { scriptHash } from "./assets";
 import { CSS_LAYER_ORDER } from "@site/schema";
 
 // ============================================================================

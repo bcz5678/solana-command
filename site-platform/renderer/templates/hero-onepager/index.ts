@@ -24,16 +24,16 @@
 //   • sections loop instead of div1/div2/div3
 // ============================================================================
 
-import type { TemplateContext, TemplateOutput } from "../../types.js";
-import { esc, escAttr, safeUrl, attrs } from "../../escape.js";
-import { heroOnepagerStyles } from "./styles.js";
+import type { TemplateContext, TemplateOutput } from "../../types";
+import { esc, escAttr, safeUrl, attrs } from "../../escape";
+import { heroOnepagerStyles } from "./styles";
 import {
   renderPanel,
   renderKicker,
   renderBody,
   renderCtaRow,
   renderSection,
-} from "./sections.js";
+} from "./sections";
 
 // ============================================================================
 // ICONS

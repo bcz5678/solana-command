@@ -13,17 +13,17 @@
 import { parseHTML } from "linkedom";
 import type { SlottedSpec, TemplateManifest, SiteDefinition, ImageAsset } from "@site/schema";
 import type { RenderInput, RenderOutput, TemplateContext, AssetManifest }
-  from "../types.js";
-import { sanitizeDocument, type StripReport } from "./sanitize.js";
+  from "../types";
+import { sanitizeDocument, type StripReport } from "./sanitize";
 import { applySlot, applyRepeater, rewriteBundleAssets, type ApplyResult }
-  from "./apply.js";
-import { resolveTheme } from "../theme.js";
-import { buildMetaTags } from "../document.js";
+  from "./apply";
+import { resolveTheme } from "../theme";
+import { buildMetaTags } from "../document";
 import { scriptHash, sha256Hex, invalidationPaths, planMedia, makeImageUrlResolver }
-  from "../assets.js";
-import { esc } from "../escape.js";
+  from "../assets";
+import { esc } from "../escape";
 
-import { SlottedDocument, SlottedElement } from './dom.js';
+import { SlottedDocument, SlottedElement } from './dom';
 
 
 // ============================================================================
@@ -317,5 +317,5 @@ export function registerSlottedTemplate(sourceKey: string, html: string): void {
   registerSource(sourceKey, html);
 }
 
-export { formatReport } from "./sanitize.js";
-export type { StripReport } from "./sanitize.js";
+export { formatReport } from "./sanitize";
+export type { StripReport } from "./sanitize";

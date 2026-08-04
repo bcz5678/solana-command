@@ -14,8 +14,8 @@
 // ============================================================================
 
 import type { SiteSection, SiteCta, ImageAsset } from "@site/schema";
-import type { TemplateContext } from "../../types.js";
-import { esc, escAttr, safeUrl, attrs } from "../../escape.js";
+import type { TemplateContext } from "../../types";
+import { esc, escAttr, safeUrl, attrs } from "../../escape";
 
 // ============================================================================
 // SHARED PIECES

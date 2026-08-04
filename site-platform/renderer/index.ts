@@ -12,9 +12,9 @@
 export { renderTemplate, 
   registerTemplate, 
   TEMPLATES 
-} from "./render.js";
+} from "./render";
 
-export { assembleDocument } from "./document.js";
+export { assembleDocument } from "./document";
 
 // ---- Theme ----
 export { 
@@ -22,7 +22,7 @@ export {
   flattenTheme, 
   deepMerge, 
   contrastRatio 
-} from "./theme.js";
+} from "./theme";
 
 // ---- Assets ----
 export {
@@ -36,7 +36,7 @@ export {
   scriptHash,
   IMMUTABLE,
   DOCUMENT_CACHE,
-} from "./assets.js";
+} from "./assets";
 
 // ---- Vendor resolution ----
 // Moved here from the standalone vendor-registry.ts written earlier; it is
@@ -46,14 +46,14 @@ export {
   buildCsp,
   emitLayerDeclaration,
   CSS_LAYER_ORDER,
-} from "./vendor.js";
+} from "./vendor";
 
 export type {
   VendorPackage,
   VendorPackageVersion,
   ResolvedDependency,
   ResolveContext,
-} from "./vendor.js";
+} from "./vendor";
 
 // ---- Escaping ----
 // Templates must route all interpolation through these.
@@ -65,7 +65,7 @@ export {
   cssIdent, 
   attrs, 
   cx, 
-} from "./escape.js";
+} from "./escape";
 
 // ---- Types ----
 export type {
@@ -79,9 +79,9 @@ export type {
   AssetManifest,
   AssetCopy,
   AssetMediaEntry,
-} from "./types.js";
+} from "./types";
 
 // ---- Template registration ----
 // Importing for side effects: each template calls registerTemplate() at module
 // load. Must come last so the registry exists before templates populate it.
-import "./templates/index.js";
+import "./templates/index";

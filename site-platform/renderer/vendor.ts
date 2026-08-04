@@ -16,8 +16,8 @@
 
 import type { TemplateDependency, CssLayer } from "@site/schema";
 import { CSS_LAYER_ORDER, emitLayerDeclaration } from "@site/schema";
-import type { AssetCopy } from "./types.js";
-import { hashedName, IMMUTABLE } from "./assets.js";
+import type { AssetCopy } from "./types";
+import { hashedName, IMMUTABLE } from "./assets";
 
 // Re-exported so consumers have one import site for layer handling.
 export { CSS_LAYER_ORDER, emitLayerDeclaration };

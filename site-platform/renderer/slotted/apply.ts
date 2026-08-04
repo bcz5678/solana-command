@@ -8,10 +8,10 @@
 
 import type { Slot, Repeater, BundleAsset, SiteContent, ImageAsset, SiteCta }
   from "@site/schema";
-import type { TemplateContext, AssetCopy } from "../types.js";
-import { safeUrl } from "../escape.js";
-import { hashedName, IMMUTABLE } from "../assets.js";
-import { SlottedDocument, SlottedElement } from './dom.js';
+import type { TemplateContext, AssetCopy } from "../types";
+import { safeUrl } from "../escape";
+import { hashedName, IMMUTABLE } from "../assets";
+import { SlottedDocument, SlottedElement } from './dom';
 
 
 

@@ -19,8 +19,8 @@ import type {
   AssetCopy,
   AssetMediaEntry,
   RenderMode,
-} from "./types.js";
-import type { ResolvedDependency } from "./vendor.js";
+} from "./types";
+import type { ResolvedDependency } from "./vendor";
 
 // ============================================================================
 // HASHING

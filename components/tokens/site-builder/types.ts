@@ -1,4 +1,4 @@
-import { SiteTemplate } from '@/lib/types/site-template'
+import { TemplateListEntry } from '@/lib/templates/types'
 
 export interface SiteTemplateParams {
     title: string
@@ -14,7 +14,7 @@ export type SiteBuilderMode = 'create' | 'edit'
 
 export interface SiteBuilderConfigParams {
     token: TokenMintRef | null
-    template: SiteTemplate | null
+    template: TemplateListEntry | null
     domainMode: DomainMode
     subdomain: string
     customDomain: string
@@ -33,7 +33,7 @@ export type TokenMintRef = {
 
 export class SiteBuilderConfig implements SiteBuilderConfigParams {
     token: TokenMintRef | null
-    template: SiteTemplate | null
+    template: TemplateListEntry | null
     domainMode: DomainMode
     subdomain: string
     customDomain: string

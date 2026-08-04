@@ -17,9 +17,9 @@ import type {
   TemplateContext,
   TemplateRenderer,
   AssetManifest,
-} from "./types.js";
-import { resolveTheme } from "./theme.js";
-import { assembleDocument } from "./document.js";
+} from "./types";
+import { resolveTheme } from "./theme";
+import { assembleDocument } from "./document";
 import {
   planMedia,
   planVendorCopies,
@@ -27,8 +27,8 @@ import {
   invalidationPaths,
   sha256Hex,
   type MediaPlan,
-} from "./assets.js";
-import { renderSlotted } from "./slotted/index.js"
+} from "./assets";
+import { renderSlotted } from "./slotted/index"
 
 // ============================================================================
 // REGISTRY
