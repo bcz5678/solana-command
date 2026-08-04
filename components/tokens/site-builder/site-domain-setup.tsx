@@ -105,7 +105,6 @@ export default function SiteDomainSetup({ config, onDomainModeChange, onCustomDo
     const [distributionsError, setDistributionsError] = useState<string | null>(null)
     const [selectedDistributionId, setSelectedDistributionId] = useState<string | null>(null)
     const [newOriginPath, setNewOriginPath] = useState('')
-    const [siteDescription, setSiteDescription] = useState('')
 
     const [submitting, setSubmitting] = useState(false)
     const [submitError, setSubmitError] = useState<string | null>(null)
@@ -117,7 +116,6 @@ export default function SiteDomainSetup({ config, onDomainModeChange, onCustomDo
     function resetDownstream() {
         setSelectedDistributionId(null)
         setNewOriginPath('')
-        setSiteDescription('')
         setSubmitError(null)
         setJob(null)
         if (pollRef.current) {
@@ -251,9 +249,9 @@ export default function SiteDomainSetup({ config, onDomainModeChange, onCustomDo
                 body: JSON.stringify({
                     domain: existingInput.trim(),
                     distributionId: selectedDistributionId,
+                    distributionUrl: selectedDistribution.url,
                     originPath: newOriginPath.trim(),
                     etag: selectedDistribution.etag,
-                    siteDescription: siteDescription.trim(),
                 }),
             })
             const data = await res.json()
@@ -524,21 +522,6 @@ export default function SiteDomainSetup({ config, onDomainModeChange, onCustomDo
                                 )}
                             </div>
                         )}
-
-                        {selectedDistribution && (
-                            <div className="flex flex-col gap-1.5">
-                                <label className="text-xs font-medium text-muted-foreground">Site Description</label>
-                                <Input
-                                    value={siteDescription}
-                                    onChange={(e) => setSiteDescription(e.target.value)}
-                                    placeholder="Short description of this site"
-                                    className="max-w-96"
-                                />
-                                <p className="text-xs text-muted-foreground">
-                                    Set as this distribution&apos;s comment/description during setup.
-                                </p>
-                            </div>
-                        )}
                     </CardContent>
                 </Card>
             )}
@@ -562,10 +545,6 @@ export default function SiteDomainSetup({ config, onDomainModeChange, onCustomDo
                             <div>
                                 <p className="text-xs text-muted-foreground mb-0.5">New Origin Path</p>
                                 <p className="font-mono">{newOriginPath}</p>
-                            </div>
-                            <div>
-                                <p className="text-xs text-muted-foreground mb-0.5">Site Description</p>
-                                <p>{siteDescription || '—'}</p>
                             </div>
                         </div>
 

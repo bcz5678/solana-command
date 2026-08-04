@@ -19,7 +19,9 @@
       }
     ],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@site/schema":   ["./site-platform/schema/index.ts"],
+      "@site/renderer": ["./site-platform/renderer/index.ts"]
     }
   },
   "include": [

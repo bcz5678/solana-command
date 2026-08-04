@@ -24,9 +24,9 @@ export async function POST(req: NextRequest) {
   let body: {
     domain?:          string
     distributionId?:  string
+    distributionUrl?: string
     originPath?:      string
     etag?:            string
-    siteDescription?: string
   }
 
   try {
@@ -35,12 +35,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { domain, distributionId, originPath, etag, siteDescription } = body
+  const { domain, distributionId, distributionUrl, originPath, etag } = body
 
-  if (!domain?.trim())         return NextResponse.json({ error: 'domain is required' }, { status: 400 })
-  if (!distributionId?.trim()) return NextResponse.json({ error: 'distributionId is required' }, { status: 400 })
-  if (!originPath?.trim())     return NextResponse.json({ error: 'originPath is required' }, { status: 400 })
-  if (!etag?.trim())           return NextResponse.json({ error: 'etag is required' }, { status: 400 })
+  if (!domain?.trim())          return NextResponse.json({ error: 'domain is required' }, { status: 400 })
+  if (!distributionId?.trim())  return NextResponse.json({ error: 'distributionId is required' }, { status: 400 })
+  if (!distributionUrl?.trim()) return NextResponse.json({ error: 'distributionUrl is required' }, { status: 400 })
+  if (!originPath?.trim())      return NextResponse.json({ error: 'originPath is required' }, { status: 400 })
+  if (!etag?.trim())            return NextResponse.json({ error: 'etag is required' }, { status: 400 })
 
   const webhookUrl = process.env.N8N_DOMAIN_SETUP_WEBHOOK_URL
   if (!webhookUrl) {
@@ -50,25 +51,28 @@ export async function POST(req: NextRequest) {
   const job = createJob({
     domain:          domain.trim(),
     distributionId:  distributionId.trim(),
+    distributionUrl: distributionUrl.trim(),
     originPath:      originPath.trim(),
     etag:            etag.trim(),
-    siteDescription: siteDescription?.trim() ?? '',
   })
 
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
 
+    // Keys here match the n8n workflow's required webhook fields exactly —
+    // do not rename without updating the n8n flow too.
     const res = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        origin_path:      job.originPath,
+        domain_name:      job.domain,
+        distribution_url: job.distributionUrl,
+        distribution_id:  job.distributionId,
+
         jobId:           job.id,
-        domain:          job.domain,
-        distributionId:  job.distributionId,
-        originPath:      job.originPath,
         etag:            job.etag,
-        siteDescription: job.siteDescription,
         callbackUrl:     `${req.nextUrl.origin}/api/domains/setup/callback`,
         callbackSecret:  process.env.N8N_CALLBACK_SECRET ?? null,
       }),

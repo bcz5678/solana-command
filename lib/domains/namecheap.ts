@@ -16,35 +16,6 @@ export interface DomainSearchResult {
   currency: string | null
 }
 
-export interface NamecheapContact {
-  firstName:     string
-  lastName:      string
-  address1:      string
-  city:          string
-  stateProvince: string
-  postalCode:    string
-  country:       string
-  phone:         string
-  email:         string
-}
-
-export interface DomainPurchaseResult {
-  domain:         string
-  registered:     boolean
-  orderId:        string | null
-  transactionId:  string | null
-  chargedAmount:  number | null
-}
-
-const REQUIRED_CONTACT_FIELDS: (keyof NamecheapContact)[] = [
-  'firstName', 'lastName', 'address1', 'city', 'stateProvince', 'postalCode', 'country', 'phone', 'email',
-]
-
-export function missingContactFields(contact: Partial<NamecheapContact>): string[] {
-  return REQUIRED_CONTACT_FIELDS.filter((field) => !contact[field]?.trim())
-}
-
-
 // ── Low-level request/parse helpers ────────────────────────────
 
 async function resolveClientIp(): Promise<string> {
@@ -216,50 +187,4 @@ export async function verifyDomainOwnership(domain: string): Promise<boolean> {
   const normalized = domain.trim().toLowerCase()
   const domains = await listAccountDomains()
   return domains.some((d) => d.toLowerCase() === normalized)
-}
-
-
-function contactParams(contact: NamecheapContact): Record<string, string> {
-  const phone = contact.phone.startsWith('+') ? contact.phone : `+1.${contact.phone.replace(/\D/g, '')}`
-  const params: Record<string, string> = {}
-
-  for (const role of ['Registrant', 'Tech', 'Admin', 'AuxBilling']) {
-    params[`${role}FirstName`]    = contact.firstName
-    params[`${role}LastName`]     = contact.lastName
-    params[`${role}Address1`]     = contact.address1
-    params[`${role}City`]         = contact.city
-    params[`${role}StateProvince`] = contact.stateProvince
-    params[`${role}PostalCode`]   = contact.postalCode
-    params[`${role}Country`]      = contact.country
-    params[`${role}Phone`]        = phone
-    params[`${role}EmailAddress`] = contact.email
-  }
-  return params
-}
-
-export async function purchaseDomain(
-  domain: string,
-  years: number,
-  contact: NamecheapContact,
-): Promise<DomainPurchaseResult> {
-  const missing = missingContactFields(contact)
-  if (missing.length > 0) {
-    throw new Error(`Missing contact fields: ${missing.join(', ')}`)
-  }
-
-  const xml = await callNamecheap('namecheap.domains.create', {
-    DomainName: domain,
-    Years:      String(years),
-    ...contactParams(contact),
-  })
-  assertOk(xml, 'Namecheap domain registration failed')
-
-  const [result] = xmlAttrTags('DomainCreateResult', xml)
-  return {
-    domain:        result?.Domain ?? domain,
-    registered:    result?.Registered === 'true',
-    orderId:       result?.OrderID ?? null,
-    transactionId: result?.TransactionID ?? null,
-    chargedAmount: result?.ChargedAmount ? Number(result.ChargedAmount) : null,
-  }
 }

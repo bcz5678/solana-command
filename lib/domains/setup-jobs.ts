@@ -20,9 +20,9 @@ export interface DomainSetupJob {
   id:              string
   domain:          string
   distributionId:  string
+  distributionUrl: string
   originPath:      string
   etag:            string
-  siteDescription: string
   status:          DomainSetupJobStatus
   steps:           DomainSetupStep[]
   error:           string | null
@@ -33,9 +33,9 @@ export interface DomainSetupJob {
 export interface CreateJobParams {
   domain:          string
   distributionId:  string
+  distributionUrl: string
   originPath:      string
   etag:            string
-  siteDescription: string
 }
 
 // The pipeline steps n8n is expected to report progress against via the

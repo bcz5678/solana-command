@@ -2,17 +2,13 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient }              from '@/lib/supabase/server'
-import {
-  purchaseDomain,
-  missingContactFields,
-  NamecheapContact,
-}                                     from '@/lib/domains/namecheap'
+
+const TIMEOUT_MS = 15_000
 
 // ── POST /api/domains/purchase ───────────────────────────────────
-// Registers `domain` through Namecheap for the given `contact` (required —
-// Namecheap needs full WHOIS registrant info for every registration).
-// Shell for now: no billing/checkout wired up yet, so this just performs
-// the registration call once a caller supplies contact details.
+// Hands the domain registration off to the offsite n8n webhook (which
+// drives the actual Namecheap purchase + WHOIS/contact details) rather
+// than calling Namecheap directly from here.
 export async function POST(req: NextRequest) {
 
   const supabase = await createClient()
@@ -22,11 +18,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  let body: {
-    domain?:  string
-    years?:   number
-    contact?: Partial<NamecheapContact>
-  }
+  let body: { domain?: string }
 
   try {
     body = await req.json()
@@ -34,29 +26,39 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { domain, years = 1, contact } = body
-
-  if (!domain || !domain.trim()) {
+  const domain = body.domain?.trim()
+  if (!domain) {
     return NextResponse.json({ error: 'domain is required' }, { status: 400 })
   }
 
-  if (!contact) {
-    return NextResponse.json({ error: 'contact is required to register a domain' }, { status: 400 })
-  }
-
-  const missing = missingContactFields(contact)
-  if (missing.length > 0) {
-    return NextResponse.json({ error: `Missing contact fields: ${missing.join(', ')}` }, { status: 400 })
+  const webhookUrl = process.env.N8N_DOMAIN_PURCHASE_WEBHOOK_URL
+  if (!webhookUrl) {
+    return NextResponse.json({ error: 'N8N_DOMAIN_PURCHASE_WEBHOOK_URL is not configured' }, { status: 500 })
   }
 
   try {
-    const result = await purchaseDomain(domain.trim(), years, contact as NamecheapContact)
-    return NextResponse.json({ result }, { status: 200 })
-  } catch (error) {
-    console.error('[domains/purchase] error:', error)
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Domain purchase failed' },
-      { status: 502 },
-    )
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain_name: domain }),
+      signal: controller.signal,
+    })
+
+    clearTimeout(timer)
+
+    if (!res.ok) {
+      return NextResponse.json({ error: `n8n webhook returned ${res.status}` }, { status: 502 })
+    }
+
+    const data = await res.json().catch(() => ({}))
+    return NextResponse.json({ result: data }, { status: 200 })
+  } catch (err) {
+    const message = err instanceof Error && err.name === 'AbortError'
+      ? 'n8n webhook timed out'
+      : 'Failed to reach n8n webhook'
+    return NextResponse.json({ error: message }, { status: 502 })
   }
 }
