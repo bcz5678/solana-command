@@ -243,6 +243,12 @@ export async function renderDefinition(
     s3Prefix: opts.s3Prefix,
   });
 
+
+  // Slotted renders carry the sanitizer's strip report. Worth attaching to the
+  // build record: when an imported template misbehaves, "which scripts were
+  // removed" is the first question.
+  const stripReport = "stripReport" in final ? final.stripReport : undefined;
+
   const csp = buildCsp(resolved, final.inlineScriptHashes);
 
   // ---- 7. Attributions ----

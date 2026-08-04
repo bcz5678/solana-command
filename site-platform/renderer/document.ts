@@ -55,7 +55,15 @@ const RESET = `@layer reset {
 // HEAD
 // ============================================================================
 
-function buildMeta(definition: SiteDefinition, ogImageUrl: string): string {
+  /*
+  * Standard head tags: title, description, canonical, robots, OG, Twitter.
+  *
+  * Exported because the slotted path needs it too — it strips the imported
+  * source's own SEO tags and inserts these instead. One implementation for
+  * both paths, so a site's metadata does not depend on which kind of template
+  * rendered it.
+  */
+ export function buildMetaTags(definition: SiteDefinition, ogImageUrl: string): string {
   const { meta, brand } = definition.content;
   const origin = `https://${meta.fqdn}`;
   const canonical = meta.canonicalUrl ?? origin;
@@ -183,7 +191,7 @@ export function assembleDocument(input: AssembleInput): AssembleResult {
   const html = `<!DOCTYPE html>
 <html lang="${escAttr(meta.locale ?? "en")}" prefix="og: https://ogp.me/ns#">
   <head>
-    ${buildMeta(definition, ogImageUrl)}
+    ${buildMetaTags(definition, ogImageUrl)}
     ${vendorHead}
     <style>
 ${stylesheet}

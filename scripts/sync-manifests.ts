@@ -25,8 +25,11 @@
  * as "you forgot to bump the version", not as a failure to retry.
  */
 
-    import { heroOnepagerManifest } from "@site/renderer/templates/...";
- 
+    import { heroOnepagerManifest } from "@site/renderer/templates/heroOnepagerManifest";
+    import { createAdminClient} from '@/lib/supabase/admin';
+
+    const supabase = createAdminClient();
+
     await supabase.rpc("admin_upsert_template_version", {
         p_template_id: heroOnepagerManifest.id,
         p_version:     heroOnepagerManifest.version,

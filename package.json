@@ -35,6 +35,7 @@
     "dotenv": "^17.4.2",
     "ed25519-hd-key": "^2.0.0",
     "jito-ts": "^4.2.1",
+    "linkedom": "^0.18.0",
     "lucide-react": "^1.11.0",
     "next": "16.2.4",
     "next-themes": "^0.4.6",

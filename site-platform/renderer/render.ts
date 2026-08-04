@@ -28,6 +28,7 @@ import {
   sha256Hex,
   type MediaPlan,
 } from "./assets.js";
+import { renderSlotted } from "./slotted/index.js"
 
 // ============================================================================
 // REGISTRY
@@ -84,6 +85,19 @@ export async function renderTemplate(input: RenderInput): Promise<RenderOutput> 
     mode = "build",
     s3Prefix,
   } = input;
+
+   // ---- 0. Slotted templates take a different path entirely ----
+  //
+  // An imported source IS the document: it has its own <head>, its own
+  // stylesheets, its own structure. So there is no assembleDocument() call, no
+  // registered render function, and no template CSS to wrap in @layer.
+  //
+  // Everything downstream still applies — media planning, content hashing,
+  // asset manifests, CSP hashes — which is why renderSlotted returns the same
+  // RenderOutput shape and callers need no branch of their own.
+  if (manifest.kind === "slotted") {
+    return renderSlotted(input);
+  }
 
   // ---- 1. Locate the renderer ----
   const renderer = TEMPLATES[rendererKey];

@@ -81,3 +81,23 @@ export {
   validateAgainstManifest,
 } from "./definition.js";
 export type { SiteDefinition, ValidationIssue } from "./definition.js";
+
+// ---- SECTION 9 — slotted.ts (slotted-template schema) ----
+export {
+  TemplateKindSchema,
+  SlotModeSchema,
+  SlotSchema,
+  RepeaterSchema,
+  BundleAssetSchema,
+  SanitizePolicySchema,
+  SlottedSpecSchema,
+} from "./slotted.js";
+export type {
+  TemplateKind,
+  SlotMode,
+  Slot,
+  Repeater,
+  BundleAsset,
+  SanitizePolicy,
+  SlottedSpec,
+} from "./slotted.js";

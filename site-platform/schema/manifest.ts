@@ -2,6 +2,7 @@
 import { z } from "zod";
 import { responsive } from './primitives';
 import { SectionTypeSchema } from "./sections";
+import { SlottedSpecSchema, TemplateKindSchema } from "./slotted";
 
 /** Bump on any breaking shape change. Persisted with every stored payload. */
 export const SCHEMA_VERSION = 1 as const;
@@ -30,6 +31,9 @@ export function emitLayerDeclaration(): string {
 export const DependencyStrategySchema = z.enum([
   "inline", "copy", "shared", "external",
 ]);
+
+
+
 
 /**
  * What a template author declares. Note the absence of a URL field — authors
@@ -60,13 +64,9 @@ export type TemplateDependency = z.infer<typeof TemplateDependencySchema>;
 
 export const TemplateFlowSchema = z.enum(["vertical", "horizontal", "grid"]);
 
-/**
- * The capability contract. This is what lets ONE creation form serve N
- * templates: the form reads the manifest to decide which section types to
- * offer, which fields are required, what crops to request, and which theme
- * controls to disclose.
- */
-export const TemplateManifestSchema = z.object({
+
+
+const TemplateManifestObject = z.object({
   id: z.string(),
   name: z.string(),
   description: z.string(),
@@ -121,7 +121,101 @@ export const TemplateManifestSchema = z.object({
     supportsPerSectionBackground: z.boolean().default(true),
     supportsDarkModeToggle: z.boolean().default(false),
   }).optional(),
+
+/**
+   * tokenized — rendered from a render function; full theme control.
+   * slotted   — an imported document with content swapped in by selector.
+   *             Look is fixed; content, images and links are editable.
+   */
+  kind: TemplateKindSchema.default("tokenized"),
+
+  slotted: SlottedSpecSchema.optional(),
 });
+
+
+/**
+ * The capability contract. This is what lets ONE creation form serve N
+ * templates: the form reads the manifest to decide which section types to
+ * offer, which fields are required, what crops to request, and which theme
+ * controls to disclose.
+ */
+export const TemplateManifestSchema = TemplateManifestObject.superRefine((manifest, ctx) => {
+  // ---- A slotted manifest without a spec cannot render at all ----
+  if (manifest.kind === "slotted" && !manifest.slotted) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["slotted"],
+      message: 'kind:"slotted" requires a `slotted` spec.',
+    });
+  }
+
+  // ---- ...and a tokenized one with a spec is a copy-paste mistake ----
+  if (manifest.kind === "tokenized" && manifest.slotted) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["slotted"],
+      message: 'A `slotted` spec is only used when kind is "slotted".',
+    });
+  }
+
+  // ---- Theme controls that change nothing are worse than none ----
+  // A slotted template's look comes from the imported stylesheet. Listing theme
+  // keys would make the form render colour pickers the renderer ignores, which
+  // reads as a bug to the author.
+  if (manifest.kind === "slotted") {
+    if (manifest.usesThemeKeys.length > 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["usesThemeKeys"],
+        message: "Slotted templates have a fixed look; usesThemeKeys must be empty.",
+      });
+    }
+
+    if (manifest.customThemeSchema && Object.keys(manifest.customThemeSchema).length > 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["customThemeSchema"],
+        message: "Slotted templates cannot expose theme controls.",
+      });
+    }
+  }
+
+  // ---- Repeater coverage ----
+  // A slotted template that declares support for a section type with no
+  // repeater to render it will silently drop that content.
+  if (manifest.kind === "slotted" && manifest.slotted) {
+    const hasSectionRepeater = manifest.slotted.repeaters.some((r) =>
+      r.path === "sections" || r.path.startsWith("sections["),
+    );
+
+    if (manifest.supportedSectionTypes.length > 0 && !hasSectionRepeater) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["supportedSectionTypes"],
+        message:
+          "Sections are declared as supported but no repeater targets `sections`. " +
+          "Either add one or set supportedSectionTypes to [].",
+      });
+    }
+  }
+
+  // ---- Slot mode / field consistency ----
+  if (manifest.slotted) {
+    manifest.slotted.slots.forEach((slot, i) => {
+      if (slot.mode === "attr" && !slot.attr) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["slotted", "slots", i, "attr"],
+          message: 'mode:"attr" requires an `attr` name.',
+        });
+      }
+    });
+  }
+});
+
+// For anything needing .shape, .extend() or .pick()
+export const TemplateManifestShape = TemplateManifestObject;
+
 export type TemplateManifest = z.infer<typeof TemplateManifestSchema>;
 
 /**
