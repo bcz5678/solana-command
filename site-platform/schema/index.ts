@@ -79,6 +79,7 @@ export {
   slugify,
   assignSlugs,
   validateAgainstManifest,
+  DraftGuard
 } from "./definition";
 export type { SiteDefinition, ValidationIssue } from "./definition";
 

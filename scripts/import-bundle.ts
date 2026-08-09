@@ -277,6 +277,9 @@ export { ${camel(templateId)}Manifest };
 }
 
 function generateManifestScaffold(): string {
+
+  const previewImage = `/template-previews/${templateId}.png`; 
+  
   return `// ============================================================================
 // src/site-platform/renderer/templates/${templateId}/manifest.ts
 //
@@ -297,7 +300,7 @@ export const ${camel(templateId)}Manifest: TemplateManifest = TemplateManifestSc
   name: ${JSON.stringify(titleCase(templateId))},
   description: "Imported bundle. TODO: describe the look.",
   version: ${JSON.stringify(version)},
-  previewImage: ${JSON.stringify(\`/template-previews/\${templateId}.png\`)},
+  previewImage: ${JSON.stringify(previewImage)},
 
   kind: "slotted",
 

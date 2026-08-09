@@ -41,7 +41,8 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
     "**/*.mts",
-    "app/api/lookup-table/delete/route"
+    "app/api/lookup-table/delete/route",
+    "scripts/**/*.ts"
   ],
   "exclude": [
     "node_modules"

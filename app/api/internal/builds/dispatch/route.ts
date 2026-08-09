@@ -106,6 +106,7 @@ async function processBuild(build: ClaimedBuild): Promise<void> {
       assetManifest:           rendered.assetManifest,
       cspChanged,
       callbackUrl:             `${process.env.APP_URL}/api/internal/builds/${buildId}/status`,
+      deriveUrl:              `${process.env.APP_URL}/api/internal/media/derive`,
     });
 
     // n8n now owns the build and reports 'uploading' onward. We deliberately

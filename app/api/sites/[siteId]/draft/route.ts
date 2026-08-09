@@ -15,10 +15,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { SiteDefinitionSchema } from "@site/schema";
+import { DraftGuard } from "@site/schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+// jsonb has no practical size limit and autosave fires constantly.
+const MAX_DRAFT_BYTES = 2 * 1024 * 1024;
 
 type Params = { params: Promise<{ siteId: string }> };
 
@@ -68,6 +71,18 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Cheap pre-parse rejection when the client reports its size honestly. Not a
+  // substitute for the byte-accurate check below — content-length can be
+  // absent (chunked transfer) or simply wrong — just avoids buffering and
+  // JSON-parsing a payload we're going to reject anyway.
+  const contentLength = Number(req.headers.get("content-length") ?? 0);
+  if (contentLength > MAX_DRAFT_BYTES) {
+    return NextResponse.json(
+      { error: "Draft exceeds 2MB — images should be references, not inlined data" },
+      { status: 413 },
+    );
+  }
+
   let body: { definition?: unknown; templateId?: string };
   try {
     body = await req.json();
@@ -79,17 +94,27 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "definition is required" }, { status: 400 });
   }
 
-  // Parse leniently on autosave.
-  //
-  // A strict parse would reject a half-filled form and lose the author's work
-  // on every keystroke before the required fields exist. Structural validity
-  // (is this even a definition?) is checked; content completeness is not —
-  // that's publish's job, via validateAgainstManifest.
-  const shapeCheck = SiteDefinitionSchema.partial().safeParse(body.definition);
+  // Shape guard, not a schema parse: DraftGuard checks only the top-level key
+  // types (is this plausibly a definition, not a bug or abuse vector) and
+  // passes everything else through untouched. SiteDefinitionSchema.partial()
+  // is shallow — content would still need every nested required field the
+  // moment it's present — and a deeply-partial mirror of SiteContentSchema
+  // would be a second schema that drifts from the first. Content completeness
+  // is publish's job, via validateAgainstManifest.
+  const shapeCheck = DraftGuard.safeParse(body.definition);
   if (!shapeCheck.success) {
     return NextResponse.json(
       { error: "Malformed definition", issues: shapeCheck.error.issues },
       { status: 400 },
+    );
+  }
+
+  // Byte-accurate and authoritative — content-length above is a best-effort
+  // fast path, not a guarantee (a client can omit or misreport it).
+  if (Buffer.byteLength(JSON.stringify(body.definition), "utf8") > MAX_DRAFT_BYTES) {
+    return NextResponse.json(
+      { error: "Draft exceeds 2MB — images should be references, not inlined data" },
+      { status: 413 },
     );
   }
 

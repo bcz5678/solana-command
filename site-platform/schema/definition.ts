@@ -28,6 +28,29 @@ export const SiteDefinitionSchema = z.object({
 });
 export type SiteDefinition = z.infer<typeof SiteDefinitionSchema>;
 
+
+// ---- Draft shape guard ----
+//
+// NOT SiteDefinitionSchema.partial(). That is shallow — `content` becomes
+// optional but its own required keys do not, so a form with only meta.title
+// filled in fails and every keystroke errors.
+//
+// A deeply-partial mirror would be a second schema that drifts from the first.
+// The draft column is jsonb, the draft is re-parsed before any render, and
+// publish parses strictly — so the only thing worth checking here is that this
+// is plausibly a definition and not a bug or an abuse vector.
+export const DraftGuard = z.object({
+  templateId: z.string().optional(),
+  templateVersion: z.string().optional(),
+  theme: z.unknown().optional(),
+  content: z.unknown().optional(),
+  themeOverride: z.unknown().optional(),
+  schemaVersion: z.number().int().optional(),
+}).passthrough();
+
+
+
+
 // ============================================================================
 // SECTION 8 — src/helpers.ts
 // ============================================================================

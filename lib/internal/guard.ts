@@ -122,6 +122,8 @@ export interface N8nBuildPayload {
   cspChanged: string | null;
   /** Where n8n posts progress back to. Avoids hardcoding the host in n8n. */
   callbackUrl: string;
+  /** Media sub-workflow endpoint. One image per call. */
+  deriveUrl: string;
 }
 
 export async function dispatchToN8n(payload: N8nBuildPayload): Promise<void> {

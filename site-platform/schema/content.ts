@@ -19,10 +19,15 @@ export const SiteMetaSchema = z.object({
   description: field(z.string(), { label: "Meta description", widget: "textarea", group: "SEO", order: 3 }),
   keywords: z.string().optional(),
   cardImage: ImageAssetSchema.optional(),
-  locale: z.string().default("en"),
+  locale: field(z.string().default("en"), {
+    label: "Locale", widget: "text", group: "Settings", order: 1,
+    help: "BCP 47 language tag, e.g. en, en-US, fr.",
+  }),
   themeColor: z.string().optional(),
   /** Generated sites should not be indexed before launch. */
-  noindex: z.boolean().default(false),
+  noindex: field(z.boolean().default(false), {
+    label: "Hide from search engines", widget: "toggle", group: "Settings", order: 2,
+  }),
   canonicalUrl: z.string().url().optional(),
 });
 
@@ -70,13 +75,21 @@ export const SiteModulesSchema = z.object({
   }).optional(),
 
   countdown: z.object({
-    targetIso: z.string(),
+    // Required, and — unlike the optional fields around it — has no default
+    // that lets the module render meaningfully without one, so it gets
+    // field() metadata; the module is otherwise unconfigurable from the form.
+    targetIso: field(z.string(), {
+      label: "Target date/time", widget: "text",
+      help: "ISO 8601, e.g. 2026-12-31T00:00:00Z.",
+    }),
     label: z.string().optional(),
     expiredMessage: z.string().optional(),
   }).optional(),
 
   mailingList: z.object({
-    actionUrl: z.string().url(),
+    // Same reasoning as countdown.targetIso: required, no default, otherwise
+    // unreachable from the form.
+    actionUrl: field(z.string().url(), { label: "Signup form action URL", widget: "url" }),
     placeholder: z.string().default("Email address"),
     submitLabel: z.string().default("Subscribe"),
     successMessage: z.string().optional(),

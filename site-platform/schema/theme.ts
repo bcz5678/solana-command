@@ -107,16 +107,34 @@ export type CoreTokens = z.infer<typeof CoreTokensSchema>;
  * core only. All optional: resolveTheme() derives any that are absent.
  */
 export const SemanticTokensSchema = z.object({
-  /** Legible over a scrimmed background image. */
-  textOnImage:      z.string().optional(),
-  surfaceElevated:  z.string().optional(),
-  navBackground:    z.string().optional(),
-  navForeground:    z.string().optional(),
-  footerBackground: z.string().optional(),
-  footerForeground: z.string().optional(),
-  footerBorder:     z.string().optional(),
-  overlayScrim:     z.string().optional(),
-  mobileMenuBackground: z.string().optional(),
+  textOnImage: field(z.string().optional(), {
+    label: "Text over images", widget: "color", group: "Semantic", order: 1,
+    help: "Used for headings and body text sitting on a background photo.",
+  }),
+  navBackground: field(z.string().optional(), {
+    label: "Header background", widget: "color", group: "Header", order: 1,
+  }),
+  navForeground: field(z.string().optional(), {
+    label: "Header text", widget: "color", group: "Header", order: 2,
+  }),
+  mobileMenuBackground: field(z.string().optional(), {
+    label: "Mobile menu background", widget: "color", group: "Header", order: 3,
+  }),
+  footerBackground: field(z.string().optional(), {
+    label: "Footer background", widget: "color", group: "Footer", order: 1,
+  }),
+  footerForeground: field(z.string().optional(), {
+    label: "Footer text", widget: "color", group: "Footer", order: 2,
+  }),
+  footerBorder: field(z.string().optional(), {
+    label: "Footer divider", widget: "color", group: "Footer", order: 3,
+  }),
+  surfaceElevated: field(z.string().optional(), {
+    label: "Raised surface", widget: "color", group: "Semantic", order: 2,
+  }),
+  overlayScrim: field(z.string().optional(), {
+    label: "Image scrim", widget: "color", group: "Semantic", order: 3,
+  }),
 });
 export type SemanticTokens = z.infer<typeof SemanticTokensSchema>;
 

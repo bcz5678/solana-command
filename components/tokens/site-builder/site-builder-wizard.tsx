@@ -5,20 +5,21 @@ import LaunchTokenSelect from '@/components/tokens/launch/launch-token-select'
 import { TokenMint } from '@/lib/types/token-mint'
 import SiteStart from './site-start'
 import SiteExistingSelect, { MockExistingSite } from './site-existing-select'
-import SiteTemplateSelect from './site-template-select'
 import SiteDomainSetup from './site-domain-setup'
 import SiteConfig from './site-config'
 import SiteExecute from './site-execute'
 import { defaultSiteBuilderConfig, SiteBuilderMode } from './types'
+import { z } from 'zod';
+
+
 
 function nextButtonLabel(step: number, mode: SiteBuilderMode | null): string {
     const labels: Record<number, string> = {
         0: mode === 'edit' ? 'Select Existing Site' : 'Select Token',
-        1: 'Choose Template',
-        2: 'Set Up Domain',
-        3: 'Configure Site',
-        4: 'Review & Deploy',
-        5: 'Done',
+        1: 'Set Up Domain',
+        2: 'Configure Site',
+        3: 'Review & Deploy',
+        4: 'Done',
     }
     return labels[step] ?? 'Next'
 }
@@ -39,16 +40,6 @@ const steps = [
             <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 6v6l4 2" />
-            </svg>
-        ),
-    },
-    {
-        label: 'Site Template',
-        icon: (
-            <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" />
-                <path d="M3 9h18" />
-                <path d="M9 21V9" />
             </svg>
         ),
     },
@@ -87,7 +78,6 @@ export default function SiteBuilderWizard() {
     const [mode, setMode] = useState<SiteBuilderMode | null>(null)
     const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null)
     const [selectedExistingSiteId, setSelectedExistingSiteId] = useState<string | null>(null)
-    const [presetTemplateName, setPresetTemplateName] = useState<string | undefined>(undefined)
     const [domainReady, setDomainReady] = useState(false)
     const [config, setConfig] = useState(defaultSiteBuilderConfig())
 
@@ -96,7 +86,6 @@ export default function SiteBuilderWizard() {
             // Switching modes invalidates whatever was picked under the old one — start clean.
             setSelectedTokenId(null)
             setSelectedExistingSiteId(null)
-            setPresetTemplateName(undefined)
             setDomainReady(false)
             setConfig(defaultSiteBuilderConfig())
         }
@@ -124,7 +113,6 @@ export default function SiteBuilderWizard() {
     function onExistingSiteSelect(site: MockExistingSite) {
         setSelectedExistingSiteId(site.id)
         setSelectedTokenId(site.tokenId)
-        setPresetTemplateName(site.templateName)
         setDomainReady(false)
         setConfig((prev) => prev.copyWith({
             token: {
@@ -147,7 +135,6 @@ export default function SiteBuilderWizard() {
     const canAdvance = [
         mode !== null,
         mode === 'edit' ? selectedExistingSiteId !== null : selectedTokenId !== null,
-        config.template !== null,
         domainReady,
         true,
         false,
@@ -219,13 +206,6 @@ export default function SiteBuilderWizard() {
                     )
                 )}
                 {currentStep === 2 && (
-                    <SiteTemplateSelect
-                        selectedTemplate={config.template}
-                        onSelect={(template) => setConfig((prev) => prev.copyWith({ template }))}
-                        initialTemplateName={presetTemplateName}
-                    />
-                )}
-                {currentStep === 3 && (
                     <SiteDomainSetup
                         config={config}
                         onDomainModeChange={(domainMode) => setConfig((prev) => prev.copyWith({ domainMode }))}
@@ -234,15 +214,10 @@ export default function SiteBuilderWizard() {
                         onReadyChange={setDomainReady}
                     />
                 )}
-                {currentStep === 4 && (
-                    <SiteConfig
-                        config={config}
-                        onSiteTitleChange={(siteTitle) => setConfig((prev) => prev.copyWith({ siteTitle }))}
-                        onTaglineChange={(tagline) => setConfig((prev) => prev.copyWith({ tagline }))}
-                        onAccentColorChange={(accentColor) => setConfig((prev) => prev.copyWith({ accentColor }))}
-                    />
+                {currentStep === 3 && (
+                    <SiteConfig />
                 )}
-                {currentStep === 5 && (
+                {currentStep === 4 && (
                     <SiteExecute config={config} />
                 )}
             </div>

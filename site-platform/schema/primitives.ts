@@ -63,7 +63,9 @@ export const ImageAssetSchema = z.object({
   }),
 
   /** True → emits alt="" and aria-hidden. Suppresses the missing-alt warning. */
-  decorative: z.boolean().default(false),
+  decorative: field(z.boolean().default(false), {
+    label: "Decorative (carries no meaning)", widget: "toggle",
+  }),
 
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),

@@ -252,7 +252,13 @@ export const SlottedSpecSchema = z.object({
   slots: z.array(SlotSchema).default([]),
   repeaters: z.array(RepeaterSchema).default([]),
   bundleAssets: z.array(BundleAssetSchema).default([]),
-  sanitize: SanitizePolicySchema.default({}),
+  // .prefault(), not .default(): every field below is itself
+  // .optional().default(...), but .default()'s TS overloads want the fully
+  // populated shape regardless — .prefault() is typed against core.input<this>,
+  // which correctly treats those fields as omittable. Same runtime result for
+  // an all-defaults object like this one; they'd only diverge with a refinement
+  // or transform in the mix.
+  sanitize: SanitizePolicySchema.prefault({}),
 
   /**
    * Selector for the <head>-adjacent insertion point for generated meta tags.
