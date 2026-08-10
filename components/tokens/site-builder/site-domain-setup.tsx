@@ -1,11 +1,13 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
-import { DomainMode, SiteBuilderConfig, TokenMintRef } from './types'
+import { startSetup, useProvisioning } from '@/lib/provisioning/client'
+import { DomainMode, SiteBuilderConfig } from './types'
+import ProvisioningTimeline from './provisioning-timeline'
+import BlockResolutionDialog from './block-resolution-dialog'
 
 type DomainPath = 'existing' | 'purchase'
 type VerifyStatus = 'idle' | 'checking' | 'owned' | 'not-owned' | 'error'
@@ -29,58 +31,8 @@ type DistributionOption = {
     status: string
 }
 
-type StepStatus = 'pending' | 'in_progress' | 'completed' | 'failed'
-
-type SetupStep = {
-    key: string
-    label: string
-    status: StepStatus
-    message: string | null
-}
-
-type SetupJob = {
-    id: string
-    domain: string
-    distributionId: string
-    originPath: string
-    status: StepStatus
-    steps: SetupStep[]
-    error: string | null
-}
-
-const POLL_INTERVAL_MS = 3000
-
-function deriveOriginPath(token: TokenMintRef | null): string {
-    if (!token || !token.token_symbol || !token.mint_public_key) return ''
-    return `/${token.token_symbol.toUpperCase()}_${token.mint_public_key.slice(0, 7)}`
-}
-
-function StepRow({ label, status, message }: { label: string; status: StepStatus; message: string | null }) {
-    return (
-        <div className="flex items-start gap-3 py-2">
-            <span className="flex size-5 shrink-0 items-center justify-center mt-0.5">
-                {status === 'in_progress' && <Loader2 className="size-4 animate-spin text-primary" />}
-                {status === 'completed' && <CheckCircle2 className="size-4 text-green-500" />}
-                {status === 'failed' && <XCircle className="size-4 text-destructive" />}
-                {status === 'pending' && <span className="size-2 rounded-full bg-muted-foreground/30" />}
-            </span>
-            <span className="flex flex-col">
-                <span className={[
-                    'text-sm',
-                    status === 'pending' ? 'text-muted-foreground' : 'text-foreground',
-                    status === 'failed' ? 'text-destructive' : '',
-                ].join(' ')}>
-                    {label}
-                </span>
-                {message && (
-                    <span className="text-xs text-muted-foreground">{message}</span>
-                )}
-            </span>
-        </div>
-    )
-}
-
 type Props = {
+    siteId: string
     config: SiteBuilderConfig
     onDomainModeChange: (mode: DomainMode) => void
     onSubdomainChange: (value: string) => void
@@ -88,7 +40,7 @@ type Props = {
     onReadyChange: (ready: boolean) => void
 }
 
-export default function SiteDomainSetup({ config, onDomainModeChange, onCustomDomainChange, onReadyChange }: Props) {
+export default function SiteDomainSetup({ siteId, config, onDomainModeChange, onCustomDomainChange, onReadyChange }: Props) {
     const [path, setPath] = useState<DomainPath | null>(null)
     const [existingInput, setExistingInput] = useState(config.customDomain)
     const [verifyStatus, setVerifyStatus] = useState<VerifyStatus>('idle')
@@ -104,24 +56,17 @@ export default function SiteDomainSetup({ config, onDomainModeChange, onCustomDo
     const [loadingDistributions, setLoadingDistributions] = useState(false)
     const [distributionsError, setDistributionsError] = useState<string | null>(null)
     const [selectedDistributionId, setSelectedDistributionId] = useState<string | null>(null)
-    const [newOriginPath, setNewOriginPath] = useState('')
 
     const [submitting, setSubmitting] = useState(false)
     const [submitError, setSubmitError] = useState<string | null>(null)
-    const [job, setJob] = useState<SetupJob | null>(null)
-    const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+    const { current: currentRun, isBlocked, isComplete, isFailed, refresh } = useProvisioning(siteId)
 
     const selectedDistribution = distributions.find((d) => d.id === selectedDistributionId) ?? null
 
     function resetDownstream() {
         setSelectedDistributionId(null)
-        setNewOriginPath('')
         setSubmitError(null)
-        setJob(null)
-        if (pollRef.current) {
-            clearInterval(pollRef.current)
-            pollRef.current = null
-        }
         onReadyChange(false)
     }
 
@@ -166,7 +111,6 @@ export default function SiteDomainSetup({ config, onDomainModeChange, onCustomDo
                 return
             }
             setVerifyStatus(data.owned ? 'owned' : 'not-owned')
-            if (data.owned) setNewOriginPath((prev) => prev || deriveOriginPath(config.token))
         } catch (err) {
             console.error('[SiteDomainSetup] verify error:', err)
             setVerifyStatus('error')
@@ -233,63 +177,41 @@ export default function SiteDomainSetup({ config, onDomainModeChange, onCustomDo
     function selectDistribution(id: string) {
         setSelectedDistributionId(id)
         setSubmitError(null)
-        setJob(null)
     }
 
     async function confirmAndStartSetup() {
-        if (!selectedDistributionId || !newOriginPath.trim() || !existingInput.trim() || !selectedDistribution) return
+
+        console.log("[start]", `/api/sites/${siteId}/provisioning`, { siteId });
+
+        if (!selectedDistributionId || !existingInput.trim() || !selectedDistribution) return
 
         setSubmitting(true)
         setSubmitError(null)
 
         try {
-            const res = await fetch('/api/domains/setup', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    domain: existingInput.trim(),
-                    distributionId: selectedDistributionId,
-                    distributionUrl: selectedDistribution.url,
-                    originPath: newOriginPath.trim(),
-                    etag: selectedDistribution.etag,
-                }),
-            })
-            const data = await res.json()
-            if (!res.ok) {
-                setSubmitError(data.error ?? 'Failed to start domain setup')
-                return
-            }
-            setJob(data.job)
+            // domain + domainSource select and start in one request — this path
+            // has no preceding purchase run, so nothing else has recorded them.
+            await startSetup(
+                siteId,
+                selectedDistributionId,
+                selectedDistribution.url,
+                'in_account',
+                existingInput.trim(),
+            )
+            // Realtime will pick up the new run, but an eager refetch avoids a
+            // beat of stale UI while that subscription round-trips.
+            await refresh()
         } catch (err) {
             console.error('[SiteDomainSetup] setup start error:', err)
-            setSubmitError('Failed to start domain setup')
+            setSubmitError(err instanceof Error ? err.message : 'Failed to start domain setup')
         } finally {
             setSubmitting(false)
         }
     }
 
-    // Poll job status until it reaches a terminal state.
     useEffect(() => {
-        if (!job || job.status === 'completed' || job.status === 'failed') {
-            if (job?.status === 'completed') onReadyChange(true)
-            return
-        }
-
-        pollRef.current = setInterval(async () => {
-            try {
-                const res = await fetch(`/api/domains/setup/status?jobId=${job.id}`)
-                const data = await res.json()
-                if (res.ok) setJob(data.job)
-            } catch (err) {
-                console.error('[SiteDomainSetup] poll error:', err)
-            }
-        }, POLL_INTERVAL_MS)
-
-        return () => {
-            if (pollRef.current) clearInterval(pollRef.current)
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [job?.id, job?.status])
+        if (isComplete) onReadyChange(true)
+    }, [isComplete, onReadyChange])
 
     return (
         <div className="w-full flex flex-col gap-4">
@@ -452,7 +374,7 @@ export default function SiteDomainSetup({ config, onDomainModeChange, onCustomDo
             )}
 
             {/* Step 3 — choose an AWS CloudFront distribution */}
-            {path === 'existing' && verifyStatus === 'owned' && !job && (
+            {path === 'existing' && verifyStatus === 'owned' && !currentRun && (
                 <Card>
                     <CardHeader>
                         <CardTitle className="text-base">Choose a CloudFront Distribution</CardTitle>
@@ -505,35 +427,20 @@ export default function SiteDomainSetup({ config, onDomainModeChange, onCustomDo
                             </div>
                         )}
 
-                        {selectedDistribution && (
-                            <div className="flex flex-col gap-1.5 pt-1">
-                                <label className="text-xs font-medium text-muted-foreground">New origin path</label>
-                                <Input
-                                    value={newOriginPath}
-                                    onChange={(e) => setNewOriginPath(e.target.value)}
-                                    placeholder="/your-site-slug"
-                                    className="max-w-72"
-                                />
-                                {selectedDistribution.originPath && (
-                                    <p className="text-xs text-amber-600 dark:text-amber-400">
-                                        This will overwrite the distribution&apos;s current origin path
-                                        (<span className="font-mono">{selectedDistribution.originPath}</span>).
-                                    </p>
-                                )}
-                            </div>
-                        )}
                     </CardContent>
                 </Card>
             )}
 
-            {/* Step 4 — review & confirm */}
-            {path === 'existing' && verifyStatus === 'owned' && selectedDistribution && newOriginPath.trim() && !job && (
+            {/* Step 4 — review & confirm. Origin path isn't shown or entered here —
+                start_domain_setup derives it server-side from s3_prefix, so nothing
+                client-side should invent or overwrite it. */}
+            {path === 'existing' && verifyStatus === 'owned' && selectedDistribution && !currentRun && (
                 <Card>
                     <CardHeader>
                         <CardTitle className="text-base">Review Domain Setup</CardTitle>
                     </CardHeader>
                     <CardContent className="flex flex-col gap-3 pt-0">
-                        <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:grid-cols-3">
+                        <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
                             <div>
                                 <p className="text-xs text-muted-foreground mb-0.5">Domain</p>
                                 <p className="font-mono">{existingInput}</p>
@@ -541,10 +448,6 @@ export default function SiteDomainSetup({ config, onDomainModeChange, onCustomDo
                             <div>
                                 <p className="text-xs text-muted-foreground mb-0.5">Distribution</p>
                                 <p className="font-mono">{selectedDistribution.id}</p>
-                            </div>
-                            <div>
-                                <p className="text-xs text-muted-foreground mb-0.5">New Origin Path</p>
-                                <p className="font-mono">{newOriginPath}</p>
                             </div>
                         </div>
 
@@ -565,24 +468,24 @@ export default function SiteDomainSetup({ config, onDomainModeChange, onCustomDo
                 </Card>
             )}
 
-            {/* Step 5 — setup progress */}
-            {job && (
+            {/* Step 5 — setup progress, per-step via buildTimeline(). */}
+            {currentRun && (
                 <Card>
                     <CardHeader>
                         <CardTitle className="text-base">
-                            {job.status === 'completed' ? 'Domain Ready' : job.status === 'failed' ? 'Domain Setup Failed' : 'Setting Up Domain…'}
+                            {isComplete ? 'Domain Ready' : isFailed ? 'Domain Setup Failed' : isBlocked ? 'Action Needed' : 'Setting Up Domain…'}
                         </CardTitle>
                     </CardHeader>
-                    <CardContent className="pt-0">
-                        <div className="-mx-1 divide-y divide-border/50 rounded-lg border px-3">
-                            {job.steps.map((step) => (
-                                <StepRow key={step.key} label={step.label} status={step.status} message={step.message} />
-                            ))}
-                        </div>
+                    <CardContent className="flex flex-col gap-3 pt-0">
+                        <ProvisioningTimeline run={currentRun} />
 
-                        {job.status === 'failed' && (
-                            <div className="flex flex-col gap-2 pt-3">
-                                {job.error && <p className="text-sm text-destructive">{job.error}</p>}
+                        {isFailed && (
+                            <div className="flex flex-col gap-2 pt-1">
+                                <p className="text-sm text-destructive">
+                                    {typeof currentRun.errorDetail?.message === 'string'
+                                        ? currentRun.errorDetail.message
+                                        : 'The run failed — no further detail was reported.'}
+                                </p>
                                 <div>
                                     <button
                                         onClick={confirmAndStartSetup}
@@ -596,6 +499,13 @@ export default function SiteDomainSetup({ config, onDomainModeChange, onCustomDo
                         )}
                     </CardContent>
                 </Card>
+            )}
+
+            {/* The one place provisioning genuinely needs a human. Rendered
+                outside the progress card, as an actual modal — this blocks
+                the rest of the wizard until resolved, which is the point. */}
+            {isBlocked && currentRun && (
+                <BlockResolutionDialog siteId={siteId} run={currentRun} onResolved={refresh} />
             )}
         </div>
     )

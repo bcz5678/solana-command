@@ -125,9 +125,41 @@ export async function startSetup(
   siteId: string,
   distributionId: string,
   distributionUrl: string,
-  domainSource: ProvisioningRun["domainSource"] = "purchase",
+  /**
+   * Only supply alongside `domain`, when selecting for the first time.
+   * `sites.domain_source` is authoritative once recorded — sending it
+   * unconditionally can contradict what `select_domain` already wrote.
+   */
+  domainSource?: ProvisioningRun["domainSource"],
+  domain?: string,
 ) {
-  return post(siteId, { kind: "setup", distributionId, distributionUrl, domainSource });
+  return post(siteId, {
+    kind: "setup", distributionId, distributionUrl,
+    ...(domain ? { domain } : {}),
+    ...(domainSource ? { domainSource } : {}),
+  });
+}
+
+/**
+ * Records a domain the team already owns (or selected externally). Separate
+ * from starting a run because selecting a domain is reversible while a run
+ * is not — see `POST /api/sites/:siteId/domain`.
+ */
+export async function selectDomain(
+  siteId: string,
+  domain: string,
+  domainSource: "in_account" | "external" = "in_account",
+  detail?: Record<string, unknown>,
+) {
+  const res = await fetch(`/api/sites/${siteId}/domain`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ domain, domainSource, detail }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error ?? `Failed to select domain (${res.status})`);
+  return json as { site_id: string; domain: string; domainSource: string; reclaimed: boolean };
 }
 
 async function post(siteId: string, body: Record<string, unknown>) {
@@ -239,7 +271,15 @@ export function useProvisioning(siteId: string | undefined) {
           refetchTimer.current = setTimeout(() => void load(), 250);
         },
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        // Temporary — logging both outcomes to tell a transient dev-mode
+        // reconnect apart from a persistently broken subscription.
+        if (status === "SUBSCRIBED") {
+          console.info(`[provisioning] realtime subscribed for site ${siteId}`);
+        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          console.error(`[provisioning] realtime subscription ${status} for site ${siteId}:`, err);
+        }
+      });
 
     return () => {
       if (refetchTimer.current) clearTimeout(refetchTimer.current);

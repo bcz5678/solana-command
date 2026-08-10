@@ -17,7 +17,7 @@
 // ============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireInternalAuth, adminClient, signPayload } from "@/lib/internal/guard";
+import { requireInternalAuth, adminClient, signPayload, N8N_WEBHOOK_SECRET } from "@/lib/internal/guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -172,7 +172,12 @@ export async function POST(req: NextRequest) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          // Verified inside the workflow, per PROVISIONING_ARCHITECTURE.md's
+          // "verify HMAC" step.
           "X-Signature": signPayload(serialised),
+          // The webhook trigger node's own Header Auth credential — separate
+          // check, same secret, raw rather than HMAC'd.
+          "X-N8N_WEBHOOK_SECRET": N8N_WEBHOOK_SECRET(),
         },
         body: serialised,
         // The workflow responds at the END (Respond to Webhook), not on
@@ -187,10 +192,14 @@ export async function POST(req: NextRequest) {
 
       dispatched.push(run.run_id);
     } catch (err) {
+      console.error(`[provisioning/dispatch] handoff failed for ${run.run_id} (${run.run_kind}):`, err);
+
       // Fail the run rather than leaving it 'claimed' — the reaper would sit on
       // it for an hour, which is a long time to stare at a stalled wizard.
-      await supabase
-        .rpc("orchestrator_record_provisioning_step", {
+      // Best-effort — a query builder is a thenable, not a real Promise, so
+      // .catch() isn't a method on it directly; wrap it in one that is.
+      await Promise.resolve(
+        supabase.rpc("orchestrator_record_provisioning_step", {
           p_run_id: run.run_id,
           p_run_token: run.run_token,
           p_step: FIRST_STEP[run.run_kind],
@@ -200,8 +209,8 @@ export async function POST(req: NextRequest) {
             kind: run.run_kind,
             message: err instanceof Error ? err.message : String(err),
           },
-        })
-        .catch(() => {});
+        }),
+      ).catch(() => {});
 
       return NextResponse.json(
         {

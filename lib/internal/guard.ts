@@ -47,8 +47,11 @@ export function adminClient(): SupabaseClient {
   if (cached) return cached;
 
   cached = createClient(
-    requireEnv("SUPABASE_URL"),
-    requireEnv("SUPABASE_SERVICE_ROLE_KEY"),
+    // Same pair every other admin client in the app reads (lib/supabase/admin.ts,
+    // et al.) — there is no separate Supabase project for internal routes, so a
+    // second name for the same secret is just drift risk, not isolation.
+    requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
+    requireEnv("SUPABASE_SECRET_KEY"),
     {
       auth: { persistSession: false, autoRefreshToken: false },
       // Internal routes are stateless; no cookie handling needed.

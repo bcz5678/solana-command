@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ImageAsset, SiteDefinition, ValidationIssue } from "@/site-platform/schema";
 import { createClient as createBrowserClient } from "@/lib/supabase/client";
-import { BuildRow, SiteDraftRow } from "./types";
+import { BuildRow, CreateSiteResult, SiteDraftRow, SiteRow } from "./types";
 
 const AUTOSAVE_DEBOUNCE_MS = 800;
 const RETRY_BASE_MS = 1000;
@@ -24,6 +24,46 @@ const PREVIEW_DEBOUNCE_MS = 300;
 // ============================================================================
 // FETCHERS
 // ============================================================================
+
+/** The "Edit Existing Site" picker's list — `GET /api/sites`. */
+export async function fetchSites(includeArchived = false): Promise<SiteRow[]> {
+  const res = await fetch(`/api/sites?includeArchived=${includeArchived}`, {
+    credentials: "same-origin",
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to load sites (${res.status})`);
+  }
+
+  return (await res.json()).sites as SiteRow[];
+}
+
+/**
+ * Creates the site row everything downstream needs a `siteId` for —
+ * `select_domain`, `start_domain_purchase` and `start_domain_setup` all
+ * require one. `s3_prefix` comes back derived from `contractAddress`; the
+ * S3 folder itself is created later, by the setup workflow's `s3_folder`
+ * step, not here.
+ */
+export async function createSite(body: {
+  name: string;
+  tokenSymbol: string;
+  contractAddress: string;
+  templateId?: string;
+}): Promise<CreateSiteResult> {
+  const res = await fetch(`/api/sites`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error ?? `Failed to create site (${res.status})`);
+
+  return json as CreateSiteResult;
+}
 
 export async function fetchSiteDraft(siteId: string): Promise<SiteDraftRow> {
   const res = await fetch(`/api/sites/${siteId}/draft`, { credentials: "same-origin" });

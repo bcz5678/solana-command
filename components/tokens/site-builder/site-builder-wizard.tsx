@@ -3,13 +3,14 @@
 import { useState } from 'react'
 import LaunchTokenSelect from '@/components/tokens/launch/launch-token-select'
 import { TokenMint } from '@/lib/types/token-mint'
+import { createSite } from '@/lib/sites/client'
+import { SiteRow } from '@/lib/sites/types'
 import SiteStart from './site-start'
-import SiteExistingSelect, { MockExistingSite } from './site-existing-select'
+import SiteExistingSelect from './site-existing-select'
 import SiteDomainSetup from './site-domain-setup'
 import SiteConfig from './site-config'
 import SiteExecute from './site-execute'
 import { defaultSiteBuilderConfig, SiteBuilderMode } from './types'
-import { z } from 'zod';
 
 
 
@@ -81,6 +82,13 @@ export default function SiteBuilderWizard() {
     const [domainReady, setDomainReady] = useState(false)
     const [config, setConfig] = useState(defaultSiteBuilderConfig())
 
+    // The real siteId everything past "Select Token" needs — select_domain,
+    // start_domain_purchase and start_domain_setup all require one. Set by
+    // create_site() on the create path, by the picker on the edit path.
+    const [siteId, setSiteId] = useState<string | null>(null)
+    const [creatingSite, setCreatingSite] = useState(false)
+    const [createSiteError, setCreateSiteError] = useState<string | null>(null)
+
     function onModeSelect(nextMode: SiteBuilderMode) {
         if (nextMode !== mode) {
             // Switching modes invalidates whatever was picked under the old one — start clean.
@@ -88,6 +96,8 @@ export default function SiteBuilderWizard() {
             setSelectedExistingSiteId(null)
             setDomainReady(false)
             setConfig(defaultSiteBuilderConfig())
+            setSiteId(null)
+            setCreateSiteError(null)
         }
         setMode(nextMode)
     }
@@ -103,33 +113,65 @@ export default function SiteBuilderWizard() {
                 logo_url: token.logo_url,
             },
         }))
+        // A different token invalidates any site already created for the
+        // previous one — the next "Next" click creates a fresh row for it.
+        setSiteId(null)
+        setCreateSiteError(null)
     }
 
     function onTokenClear() {
         setSelectedTokenId(null)
         setConfig((prev) => prev.copyWith({ token: null }))
+        setSiteId(null)
+        setCreateSiteError(null)
     }
 
-    function onExistingSiteSelect(site: MockExistingSite) {
+    function onExistingSiteSelect(site: SiteRow) {
         setSelectedExistingSiteId(site.id)
-        setSelectedTokenId(site.tokenId)
+        setSiteId(site.id)
         setDomainReady(false)
         setConfig((prev) => prev.copyWith({
             token: {
-                id: site.tokenId,
-                mint_public_key: site.tokenMintPublicKey,
-                token_name: site.tokenName,
-                token_symbol: site.tokenSymbol,
-                logo_url: site.logoUrl,
+                // list_sites() doesn't carry the underlying token row's id or
+                // logo — only what's denormalised onto the site. SiteConfig
+                // (Configure Site step) loads the rest of this site's state
+                // itself, via useSiteDraft(siteId), once wired up.
+                id: '',
+                mint_public_key: site.contract_address,
+                token_name: site.name,
+                token_symbol: site.token_symbol,
+                logo_url: null,
             },
-            template: null,
-            domainMode: site.domainMode,
-            subdomain: site.subdomain,
-            customDomain: site.customDomain,
-            siteTitle: site.siteTitle,
-            tagline: site.tagline,
-            accentColor: site.accentColor,
         }))
+    }
+
+    // Site creation is an async network call, so advancing off the token-select
+    // step (create mode only — edit mode already has a siteId from the picker)
+    // has to gate the step change on it rather than fire-and-forget.
+    async function goNext() {
+        if (currentStep === 1 && mode === 'create' && !siteId) {
+            const token = config.token
+            if (!token) return
+
+            setCreatingSite(true)
+            setCreateSiteError(null)
+            try {
+                const result = await createSite({
+                    name: token.token_name,
+                    tokenSymbol: token.token_symbol,
+                    contractAddress: token.mint_public_key,
+                })
+                setSiteId(result.site_id)
+                setCurrentStep((s) => Math.min(steps.length - 1, s + 1))
+            } catch (err) {
+                setCreateSiteError(err instanceof Error ? err.message : 'Failed to create site')
+            } finally {
+                setCreatingSite(false)
+            }
+            return
+        }
+
+        setCurrentStep((s) => Math.min(steps.length - 1, s + 1))
     }
 
     const canAdvance = [
@@ -205,8 +247,9 @@ export default function SiteBuilderWizard() {
                         <LaunchTokenSelect selectedId={selectedTokenId} onSelect={onTokenSelect} onClear={onTokenClear} />
                     )
                 )}
-                {currentStep === 2 && (
+                {currentStep === 2 && siteId && (
                     <SiteDomainSetup
+                        siteId={siteId}
                         config={config}
                         onDomainModeChange={(domainMode) => setConfig((prev) => prev.copyWith({ domainMode }))}
                         onSubdomainChange={(subdomain) => setConfig((prev) => prev.copyWith({ subdomain }))}
@@ -223,21 +266,24 @@ export default function SiteBuilderWizard() {
             </div>
 
             {/* Navigation */}
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
                 <button
                     onClick={() => setCurrentStep((s) => Math.max(0, s - 1))}
-                    disabled={currentStep === 0}
+                    disabled={currentStep === 0 || creatingSite}
                     className="px-3 py-1.5 text-sm rounded border border-border disabled:opacity-40"
                 >
                     Back
                 </button>
                 <button
-                    onClick={() => setCurrentStep((s) => Math.min(steps.length - 1, s + 1))}
-                    disabled={currentStep === steps.length - 1 || !canAdvance[currentStep]}
+                    onClick={goNext}
+                    disabled={currentStep === steps.length - 1 || !canAdvance[currentStep] || creatingSite}
                     className="px-3 py-1.5 text-sm rounded border border-blue-500 bg-blue-500 text-white hover:bg-blue-600 hover:border-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
-                    {nextButtonLabel(currentStep, mode)}
+                    {creatingSite ? 'Creating Site…' : nextButtonLabel(currentStep, mode)}
                 </button>
+                {createSiteError && (
+                    <span className="text-sm text-destructive">{createSiteError}</span>
+                )}
             </div>
         </div>
     )

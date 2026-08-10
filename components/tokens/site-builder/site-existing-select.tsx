@@ -1,98 +1,67 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
-import { DomainMode } from './types'
-
-export type MockExistingSite = {
-    id: string
-    tokenId: string
-    tokenMintPublicKey: string
-    tokenName: string
-    tokenSymbol: string
-    logoUrl: string | null
-    templateName: string
-    domainMode: DomainMode
-    subdomain: string
-    customDomain: string
-    siteTitle: string
-    tagline: string
-    accentColor: string
-    status: 'live' | 'draft'
-}
-
-// Placeholder data — there is no `sites` backend yet, so this stands in
-// for a real "list my deployed sites" API until one exists.
-const mockExistingSites: MockExistingSite[] = [
-    {
-        id: 'mock-1',
-        tokenId: 'mock-token-1',
-        tokenMintPublicKey: 'DogeMK7xQZ9vB3nR8pW2sT6uY1cA4fH5jL0eN9mXpQz',
-        tokenName: 'Solana Doge',
-        tokenSymbol: 'SDOGE',
-        logoUrl: null,
-        templateName: 'Meme Landing',
-        domainMode: DomainMode.subdomain,
-        subdomain: 'sdoge',
-        customDomain: '',
-        siteTitle: 'Solana Doge',
-        tagline: 'Much wow, very Solana.',
-        accentColor: '#f7931a',
-        status: 'live',
-    },
-    {
-        id: 'mock-2',
-        tokenId: 'mock-token-2',
-        tokenMintPublicKey: 'CmdFi3nQ8xR2vB7pW9sT4uY6cA1fH0jL5eN3mXpQzR8',
-        tokenName: 'Command Finance',
-        tokenSymbol: 'CMD',
-        logoUrl: null,
-        templateName: 'Pro Trader',
-        domainMode: DomainMode.custom,
-        subdomain: '',
-        customDomain: 'www.commandfi.xyz',
-        siteTitle: 'Command Finance',
-        tagline: 'Chart-forward trading, on-chain.',
-        accentColor: '#3b82f6',
-        status: 'live',
-    },
-    {
-        id: 'mock-3',
-        tokenId: 'mock-token-3',
-        tokenMintPublicKey: 'NblaX7pQ2vB9nR3wT8sY6uC1fA4jH0lE5eN9mXpQzM',
-        tokenName: 'Nebula',
-        tokenSymbol: 'NBLA',
-        logoUrl: null,
-        templateName: 'Minimal',
-        domainMode: DomainMode.subdomain,
-        subdomain: 'nebula',
-        customDomain: '',
-        siteTitle: 'Nebula',
-        tagline: '',
-        accentColor: '#8b5cf6',
-        status: 'draft',
-    },
-]
+import { fetchSites } from '@/lib/sites/client'
+import { SiteRow } from '@/lib/sites/types'
 
 type Props = {
     selectedSiteId: string | null
-    onSelect: (site: MockExistingSite) => void
+    onSelect: (site: SiteRow) => void
+}
+
+function statusBadge(site: SiteRow): { label: string; variant: 'default' | 'outline' | 'destructive' } {
+    if (site.is_publishable) return { label: 'Live', variant: 'default' }
+    if (site.provisioning_status) return { label: site.provisioning_status, variant: 'outline' }
+    return { label: 'Draft', variant: 'outline' }
 }
 
 export default function SiteExistingSelect({ selectedSiteId, onSelect }: Props) {
+    const [sites, setSites] = useState<SiteRow[]>([])
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState<string | null>(null)
+
+    useEffect(() => {
+        let cancelled = false
+        setLoading(true)
+        setError(null)
+
+        fetchSites()
+            .then((data) => {
+                if (cancelled) return
+                setSites(data)
+            })
+            .catch((err) => {
+                if (cancelled) return
+                setError(err instanceof Error ? err.message : 'Failed to load sites')
+            })
+            .finally(() => {
+                if (!cancelled) setLoading(false)
+            })
+
+        return () => {
+            cancelled = true
+        }
+    }, [])
+
+    if (loading) {
+        return <p className="text-sm text-muted-foreground">Loading sites…</p>
+    }
+
+    if (error) {
+        return <p className="text-sm text-destructive">{error}</p>
+    }
+
+    if (sites.length === 0) {
+        return <p className="text-sm text-muted-foreground">No sites yet — create one from the Get Started step.</p>
+    }
+
     return (
         <div className="w-full flex flex-col gap-3">
-            <p className="text-xs text-muted-foreground rounded-md border border-dashed px-3 py-2">
-                Showing placeholder data — the &quot;my sites&quot; listing isn&apos;t wired up to real data yet.
-            </p>
-
             <div className="flex flex-col divide-y divide-border rounded-lg border">
-                {mockExistingSites.map((site) => {
+                {sites.map((site) => {
                     const isSelected = selectedSiteId === site.id
-                    const domain = site.domainMode === DomainMode.custom
-                        ? site.customDomain
-                        : site.subdomain
-                            ? `${site.subdomain}.solanacommand.site`
-                            : '—'
+                    const badge = statusBadge(site)
 
                     return (
                         <button
@@ -111,20 +80,20 @@ export default function SiteExistingSelect({ selectedSiteId, onSelect }: Props) 
                             </span>
 
                             <span className="size-8 shrink-0 rounded-full bg-muted border border-border flex items-center justify-center text-xs font-bold text-muted-foreground">
-                                {site.tokenSymbol.slice(0, 1)}
+                                {site.token_symbol.slice(0, 1)}
                             </span>
 
                             <span className="w-40 shrink-0 flex flex-col">
-                                <span className="text-sm font-medium">{site.tokenName}</span>
-                                <span className="text-xs text-muted-foreground font-mono">{site.tokenSymbol}</span>
+                                <span className="text-sm font-medium truncate">{site.name}</span>
+                                <span className="text-xs text-muted-foreground font-mono">{site.token_symbol}</span>
                             </span>
 
-                            <span className="w-32 shrink-0 text-xs text-muted-foreground">{site.templateName}</span>
+                            <span className="flex-1 min-w-0 truncate text-xs font-mono text-muted-foreground">
+                                {site.domain ?? '—'}
+                            </span>
 
-                            <span className="flex-1 min-w-0 truncate text-xs font-mono text-muted-foreground">{domain}</span>
-
-                            <Badge variant={site.status === 'live' ? 'default' : 'outline'} className="shrink-0 capitalize">
-                                {site.status}
+                            <Badge variant={badge.variant} className="shrink-0 capitalize">
+                                {badge.label}
                             </Badge>
                         </button>
                     )

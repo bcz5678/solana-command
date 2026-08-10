@@ -19,6 +19,36 @@ export interface SiteDraftRow {
 }
 
 /**
+ * Row shape from `GET /api/sites` (the `list_sites()` RPC) — the "Edit
+ * Existing Site" picker. Distinct from `SiteDraftRow`: this is the summary
+ * row for picking a site, not the draft content loaded once one is chosen.
+ */
+export interface SiteRow {
+  id: string;
+  name: string;
+  token_symbol: string;
+  contract_address: string;
+  domain: string | null;
+  domain_source: "purchase" | "in_account" | "external" | null;
+  s3_prefix: string | null;
+  provisioning_status: string;
+  distribution_id: string | null;
+  published_at: string | null;
+  is_archived: boolean;
+  created_at: string;
+  updated_at: string;
+  is_publishable: boolean;
+}
+
+/** Return shape of `create_site()`, via `POST /api/sites`. */
+export interface CreateSiteResult {
+  site_id: string;
+  s3_prefix: string;
+  originPath: string;
+  extended: boolean;
+}
+
+/**
  * `private.builds` row, as seen over Realtime — see Form spec.md > API
  * contracts > Build status. Fields beyond `id`/`site_id`/`status` are read
  * defensively (the exact column set isn't visible from this codebase, only

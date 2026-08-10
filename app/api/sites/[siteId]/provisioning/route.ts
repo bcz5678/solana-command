@@ -6,6 +6,8 @@
 //
 // RLS-scoped user client. The wrappers call auth.uid() via private.owns_site,
 // so a service-role client here would fail closed.
+//
+// Complete file — replaces the previous version.
 // ============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
@@ -54,11 +56,26 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
 interface StartBody {
   kind: "purchase" | "setup";
-  /** purchase only */
+
+  /**
+   * purchase — the domain to buy. Required.
+   *
+   * setup — OPTIONAL. Supply when no purchase run preceded this, i.e. an
+   * in_account or external domain, which has nothing else to write
+   * sites.domain. Equivalent to POSTing to /domain first, folded in so the
+   * wizard can select and start in one request.
+   */
   domain?: string;
-  /** setup only — the team's selection, fetched live from AWS in the wizard */
+
+  /** setup only — the team's selection, fetched live from AWS in the wizard. */
   distributionId?: string;
   distributionUrl?: string;
+
+  /**
+   * Only consulted when `domain` is supplied AND the site has no recorded
+   * source. sites.domain_source is authoritative once set — it is site state,
+   * not run state, so the two start functions cannot disagree about it.
+   */
   domainSource?: "purchase" | "in_account" | "external";
 }
 
@@ -94,7 +111,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   let error: { message: string } | null = null;
 
   if (body.kind === "purchase") {
-    if (!body.domain) {
+    if (!body.domain?.trim()) {
       return NextResponse.json(
         { error: "domain is required for a purchase run" },
         { status: 400 },
@@ -119,7 +136,15 @@ export async function POST(req: NextRequest, { params }: Params) {
       p_distribution_id: body.distributionId,
       p_distribution_url: body.distributionUrl,
       p_idempotency_key: idempotencyKey,
-      p_domain_source: body.domainSource ?? "purchase",
+
+      // null leaves the site's existing domain in place — the normal path
+      // after a purchase run. A value selects or overwrites it, which is how
+      // an in_account domain gets recorded without a separate request.
+      p_domain: body.domain?.trim() || null,
+
+      // null leaves sites.domain_source in place. Only consulted when p_domain
+      // is supplied and the site has no recorded source.
+      p_domain_source: body.domainSource ?? null,
     }));
   }
 
@@ -130,9 +155,15 @@ export async function POST(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "Site not found" }, { status: 404 });
     }
 
-    // Preconditions the wizard should have prevented: no domain, no s3_prefix,
-    // already provisioned, already purchased. 422 rather than 500 — the request
-    // was well-formed but the site is not in a valid state.
+    // Another ACTIVE site holds this domain. A conflict with existing state
+    // rather than a malformed request — the fix is releasing the other site,
+    // so 409 rather than 422.
+    if (message.includes("is in use by site") || message.includes("already in use by site")) {
+      return NextResponse.json({ error: message }, { status: 409 });
+    }
+
+    // Preconditions the wizard should have prevented. Well-formed request,
+    // wrong site state.
     if (
       message.includes("already provisioned") ||
       message.includes("has no domain") ||
@@ -151,6 +182,9 @@ export async function POST(req: NextRequest, { params }: Params) {
     status: string;
     message?: string;
     duplicate?: boolean;
+    domain?: string;
+    domainSource?: string;
+    originPath?: string;
   };
 
   // Fire-and-forget. The wizard watches Realtime on provisioning_events, so

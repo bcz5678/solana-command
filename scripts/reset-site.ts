@@ -86,8 +86,11 @@ function requireEnv(name: string): string {
  */
 async function adminSession(): Promise<SupabaseClient> {
   const supabase = createClient(
-    requireEnv("SUPABASE_URL"),
-    requireEnv("SUPABASE_ANON_KEY"),
+    // Same pair the app's RLS-scoped clients read (lib/supabase/server.ts et
+    // al.) — this is a real user session via signInWithPassword below, not a
+    // service credential, so it belongs with the anon/publishable pair.
+    requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
+    requireEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"),
     { auth: { persistSession: false } },
   );
 
@@ -125,38 +128,46 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * at once.
  */
 async function resolveSite(supabase: SupabaseClient, input: string): Promise<SiteRow> {
-  const columns =
-    "id, name, domain, s3_prefix, provisioning_status, cert_arn, distribution_id, published_version_id";
+  // list_sites() rather than .from("sites"): private is not PostgREST-reachable
+  // by design, so every read goes through a public SECURITY DEFINER wrapper.
+  // The original .from("sites") call was inconsistent with the rest of this
+  // script and with the architecture.
+  const { data, error } = await supabase.rpc("list_sites", {
+    p_include_archived: true,
+  });
+
+  if (error) throw new Error(`Could not list sites: ${error.message}`);
+
+  const sites = (data ?? []) as unknown as SiteRow[];
 
   if (UUID_RE.test(input)) {
-    const { data, error } = await supabase
-      .from("sites").select(columns).eq("id", input).single();
-    if (error || !data) throw new Error(`No site with id ${input}`);
-    return data as SiteRow;
+    const hit = sites.find((s) => s.id === input);
+    if (!hit) {
+      throw new Error(
+        `No site with id ${input} visible to ${process.env.ADMIN_EMAIL}. ` +
+        `Check owner_id and private.super_admins.`,
+      );
+    }
+    return hit;
   }
 
-  // Domain, then prefix. Prefix lookup tolerates a missing trailing slash.
-  const normalisedPrefix = input.endsWith("/") ? input : `${input}/`;
+  const needle = input.toLowerCase();
+  const prefix = input.endsWith("/") ? input : `${input}/`;
 
-  const { data, error } = await supabase
-    .from("sites")
-    .select(columns)
-    .or(`domain.eq.${input.toLowerCase()},s3_prefix.eq.${normalisedPrefix}`);
+  const matches = sites.filter(
+    (s) => s.domain?.toLowerCase() === needle || s.s3_prefix === prefix,
+  );
 
-  if (error) throw new Error(error.message);
-
-  const rows = (data ?? []) as SiteRow[];
-
-  if (rows.length === 0) throw new Error(`No site matching "${input}"`);
-  if (rows.length > 1) {
+  if (matches.length === 0) throw new Error(`No site matching "${input}"`);
+  if (matches.length > 1) {
     throw new Error(
-      `"${input}" matches ${rows.length} sites:\n` +
-      rows.map((r) => `  ${r.id}  ${r.domain ?? "(no domain)"}  ${r.s3_prefix ?? ""}`).join("\n") +
+      `"${input}" matches ${matches.length} sites:\n` +
+      matches.map((s) => `  ${s.id}  ${s.domain ?? "(no domain)"}  ${s.s3_prefix ?? ""}`).join("\n") +
       `\nRe-run with the UUID.`,
     );
   }
 
-  return rows[0]!;
+  return matches[0]!;
 }
 
 // ============================================================================

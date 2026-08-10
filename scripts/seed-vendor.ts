@@ -280,8 +280,11 @@ function s3Client(): S3Client {
  */
 async function adminSession() {
   const supabase = createClient(
-    requireEnv("SUPABASE_URL"),
-    requireEnv("SUPABASE_ANON_KEY"),
+    // Same pair the app's RLS-scoped clients read (lib/supabase/server.ts et
+    // al.) — this is a real user session via signInWithPassword below, not a
+    // service credential, so it belongs with the anon/publishable pair.
+    requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
+    requireEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"),
     { auth: { persistSession: false } },
   );
 
