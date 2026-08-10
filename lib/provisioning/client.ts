@@ -12,7 +12,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 
 // ============================================================================
 // TYPES
@@ -99,6 +98,22 @@ export const SLOW_STEPS = new Set<ProvisioningStep>([
   "cert_validation_wait",
   "distribution_deploy",
 ]);
+
+
+/**
+ * Poll intervals by run state.
+ *
+ * A run legitimately goes quiet for minutes during cert validation, so a fast
+ * interval buys nothing there — but the first few seconds after a start are
+ * when the user is watching hardest.
+ */
+const POLL_ACTIVE_MS = 1_500;    // queued | claimed | running
+const POLL_BLOCKED_MS = 15_000;  // waiting on a human; nothing changes on its own
+const POLL_IDLE_MS = 0;          // terminal — stop entirely
+ 
+/** Give up after this long even if the run has not reached a terminal state. */
+const MAX_POLL_MS = 90 * 60 * 1000;   // 90 min, past the 60-min reaper
+
 
 // ============================================================================
 // FETCHERS
@@ -200,107 +215,128 @@ export async function resolveBlock(
 // REALTIME HOOK
 // ============================================================================
 
+function intervalFor(status: string | undefined): number {
+  if (!status) return POLL_ACTIVE_MS;
+ 
+  if (["completed", "failed", "cancelled"].includes(status)) return POLL_IDLE_MS;
+  if (status === "blocked") return POLL_BLOCKED_MS;
+ 
+  return POLL_ACTIVE_MS;
+}
+ 
 export function useProvisioning(siteId: string | undefined) {
   const [runs, setRuns] = useState<ProvisioningRun[]>([]);
   const [loading, setLoading] = useState(Boolean(siteId));
   const [error, setError] = useState<Error | null>(null);
-
-  // Debounce refetches: a burst of events (started + succeeded within a second)
-  // would otherwise fire several overlapping requests.
-  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const load = useCallback(async () => {
-    if (!siteId) return;
+ 
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startedAt = useRef<number>(Date.now());
+  // Guards against a slow response landing after unmount, and against two
+  // fetches overlapping if one hangs.
+  const inFlight = useRef(false);
+  const cancelled = useRef(false);
+ 
+  const load = useCallback(async (): Promise<ProvisioningRun[]> => {
+    if (!siteId || inFlight.current) return [];
+ 
+    inFlight.current = true;
     try {
-      setRuns(await fetchProvisioning(siteId));
-      setError(null);
+      const next = await fetchProvisioning(siteId);
+      if (!cancelled.current) {
+        setRuns(next);
+        setError(null);
+      }
+      return next;
     } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)));
+      if (!cancelled.current) {
+        // Keep the last good state visible. A transient network failure mid-run
+        // should not blank a timeline the user is reading.
+        setError(err instanceof Error ? err : new Error(String(err)));
+      }
+      return [];
     } finally {
-      setLoading(false);
+      inFlight.current = false;
+      if (!cancelled.current) setLoading(false);
     }
   }, [siteId]);
-
+ 
   useEffect(() => {
     if (!siteId) {
       setRuns([]);
       setLoading(false);
       return;
     }
-
-    void load();
-
-    const supabase = createClient();
-
-    /*
-     * Refetch on change rather than patching local state from the payload.
-     *
-     * The payload carries one row; the wizard needs the RESOLVED PLAN, which
-     * is computed server-side from all events for the site. Reconstructing it
-     * client-side would be a second implementation of provisioning_plan's
-     * rules — exactly the drift this architecture avoids elsewhere.
-     *
-     * Refetching is a few hundred bytes every few seconds during a run, and
-     * nothing at all once it completes.
-     */
-    const channel = supabase
-      .channel(`provisioning:${siteId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "private",
-          table: "provisioning_events",
-          filter: `site_id=eq.${siteId}`,
-        },
-        () => {
-          if (refetchTimer.current) clearTimeout(refetchTimer.current);
-          refetchTimer.current = setTimeout(() => void load(), 250);
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "private",
-          table: "provisioning_runs",
-          filter: `site_id=eq.${siteId}`,
-        },
-        () => {
-          if (refetchTimer.current) clearTimeout(refetchTimer.current);
-          refetchTimer.current = setTimeout(() => void load(), 250);
-        },
-      )
-      .subscribe((status, err) => {
-        // Temporary — logging both outcomes to tell a transient dev-mode
-        // reconnect apart from a persistently broken subscription.
-        if (status === "SUBSCRIBED") {
-          console.info(`[provisioning] realtime subscribed for site ${siteId}`);
-        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
-          console.error(`[provisioning] realtime subscription ${status} for site ${siteId}:`, err);
-        }
-      });
-
+ 
+    cancelled.current = false;
+    startedAt.current = Date.now();
+ 
+    const tick = async () => {
+      const next = await load();
+      if (cancelled.current) return;
+ 
+      const status = next[0]?.status;
+      const wait = intervalFor(status);
+ 
+      // Terminal: stop. Nothing further will change without a user action, and
+      // those actions call refresh() themselves.
+      if (wait === POLL_IDLE_MS) return;
+ 
+      // Safety valve. A run stuck past the reaper window means something is
+      // wrong upstream; polling forever would not help.
+      if (Date.now() - startedAt.current > MAX_POLL_MS) {
+        setError(new Error("Stopped polling — the run has not completed in 90 minutes."));
+        return;
+      }
+ 
+      timer.current = setTimeout(tick, wait);
+    };
+ 
+    void tick();
+ 
     return () => {
-      if (refetchTimer.current) clearTimeout(refetchTimer.current);
-      void supabase.removeChannel(channel);
+      cancelled.current = true;
+      if (timer.current) clearTimeout(timer.current);
     };
   }, [siteId, load]);
-
+ 
+  /**
+   * Manual refresh, and a restart of the poll loop.
+   *
+   * Call this after any action that changes run state — starting a run,
+   * resolving a block — so a terminal-then-restarted run resumes polling
+   * rather than staying stopped.
+   */
+  const refresh = useCallback(async () => {
+    if (timer.current) clearTimeout(timer.current);
+    startedAt.current = Date.now();
+ 
+    const next = await load();
+ 
+    if (!cancelled.current && intervalFor(next[0]?.status) !== POLL_IDLE_MS) {
+      timer.current = setTimeout(async function again() {
+        const latest = await load();
+        if (cancelled.current) return;
+        const wait = intervalFor(latest[0]?.status);
+        if (wait !== POLL_IDLE_MS) timer.current = setTimeout(again, wait);
+      }, intervalFor(next[0]?.status));
+    }
+  }, [load]);
+ 
   const current = runs[0] ?? null;
-
+ 
   return {
     runs,
-    /** Most recent run. What the wizard shows by default. */
     current,
     loading,
     error,
-    refresh: load,
-
+    refresh,
+ 
     isBlocked: current?.status === "blocked",
     isRunning: current ? ["queued", "claimed", "running"].includes(current.status) : false,
     isComplete: current?.status === "completed",
     isFailed: current?.status === "failed",
+    /** True while the poll loop is live. Useful for a subtle activity indicator. */
+    isPolling: current ? intervalFor(current.status) !== POLL_IDLE_MS : false,
   };
 }
 
