@@ -24,6 +24,11 @@ function formatElapsed(ms: number): string {
 
 function StateIcon({ state }: { state: TimelineEntry['state'] }) {
     switch (state) {
+        // Pending and running both spin — a step waiting its turn reads as
+        // "in progress" the same way the active one does, dimmed just enough
+        // to keep which step is actually running legible at a glance.
+        case 'pending':
+            return <Loader2 className="size-4 animate-spin text-muted-foreground/40" />
         case 'running':
             return <Loader2 className="size-4 animate-spin text-primary" />
         case 'succeeded':

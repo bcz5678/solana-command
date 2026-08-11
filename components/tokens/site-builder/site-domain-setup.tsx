@@ -4,7 +4,10 @@ import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { startSetup, useProvisioning } from '@/lib/provisioning/client'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Label } from '@/components/ui/label'
+import { DevSitePanel } from '@/components/dev/dev-site-panel'
+import { startSetup, useProvisioning, failureGuidance } from '@/lib/provisioning/client'
 import { DomainMode, SiteBuilderConfig } from './types'
 import ProvisioningTimeline from './provisioning-timeline'
 import BlockResolutionDialog from './block-resolution-dialog'
@@ -60,7 +63,15 @@ export default function SiteDomainSetup({ siteId, config, onDomainModeChange, on
     const [submitting, setSubmitting] = useState(false)
     const [submitError, setSubmitError] = useState<string | null>(null)
 
+    // Gates retry on a reaped (heartbeat_timeout) run — see failureGuidance().
+    // Reset per run so a fresh failure doesn't inherit a stale acknowledgement.
+    const [reapAcknowledged, setReapAcknowledged] = useState(false)
+
     const { current: currentRun, isBlocked, isComplete, isFailed, refresh } = useProvisioning(siteId)
+
+    useEffect(() => {
+        setReapAcknowledged(false)
+    }, [currentRun?.id])
 
     const selectedDistribution = distributions.find((d) => d.id === selectedDistributionId) ?? null
 
@@ -479,24 +490,50 @@ export default function SiteDomainSetup({ siteId, config, onDomainModeChange, on
                     <CardContent className="flex flex-col gap-3 pt-0">
                         <ProvisioningTimeline run={currentRun} />
 
-                        {isFailed && (
-                            <div className="flex flex-col gap-2 pt-1">
-                                <p className="text-sm text-destructive">
-                                    {typeof currentRun.errorDetail?.message === 'string'
-                                        ? currentRun.errorDetail.message
-                                        : 'The run failed — no further detail was reported.'}
-                                </p>
-                                <div>
-                                    <button
-                                        onClick={confirmAndStartSetup}
-                                        disabled={submitting}
-                                        className="px-3 py-1.5 text-sm rounded border border-border disabled:opacity-40 disabled:cursor-not-allowed"
-                                    >
-                                        Try Again
-                                    </button>
+                        {isFailed && (() => {
+                            const guidance = failureGuidance(currentRun)
+                            const retryBlocked = guidance.requiresAcknowledgement && !reapAcknowledged
+
+                            return (
+                                <div className="flex flex-col gap-2 pt-1">
+                                    <div className="flex flex-col gap-1.5 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                                        <p className="text-sm font-medium text-destructive">{guidance.title}</p>
+                                        <p className="text-sm text-muted-foreground">{guidance.body}</p>
+                                        {guidance.detail.length > 0 && (
+                                            <dl className="flex flex-col gap-0.5 pt-1">
+                                                {guidance.detail.map((d) => (
+                                                    <div key={d.label} className="flex gap-1.5 text-xs">
+                                                        <dt className="text-muted-foreground">{d.label}:</dt>
+                                                        <dd className="font-mono">{d.value}</dd>
+                                                    </div>
+                                                ))}
+                                            </dl>
+                                        )}
+                                    </div>
+
+                                    {guidance.requiresAcknowledgement && (
+                                        <label className="flex items-start gap-2 text-sm">
+                                            <Checkbox
+                                                checked={reapAcknowledged}
+                                                onCheckedChange={(checked) => setReapAcknowledged(checked === true)}
+                                                className="mt-0.5"
+                                            />
+                                            <Label className="font-normal">{guidance.acknowledgementLabel}</Label>
+                                        </label>
+                                    )}
+
+                                    <div>
+                                        <button
+                                            onClick={confirmAndStartSetup}
+                                            disabled={submitting || retryBlocked}
+                                            className="px-3 py-1.5 text-sm rounded border border-border disabled:opacity-40 disabled:cursor-not-allowed"
+                                        >
+                                            Try Again
+                                        </button>
+                                    </div>
                                 </div>
-                            </div>
-                        )}
+                            )
+                        })()}
                     </CardContent>
                 </Card>
             )}
@@ -506,6 +543,10 @@ export default function SiteDomainSetup({ siteId, config, onDomainModeChange, on
                 the rest of the wizard until resolved, which is the point. */}
             {isBlocked && currentRun && (
                 <BlockResolutionDialog siteId={siteId} run={currentRun} onResolved={refresh} />
+            )}
+
+            {process.env.NODE_ENV !== "production" && siteId && (
+                <DevSitePanel siteId={siteId} onChanged={refresh} />
             )}
         </div>
     )

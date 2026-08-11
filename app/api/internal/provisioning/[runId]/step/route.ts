@@ -59,11 +59,24 @@ const STEP_STATUSES: Record<string, Set<string>> = {
   ready:                   new Set(["succeeded", "failed"]),
 };
 
+/**
+ * Every callback, unconditionally, before any validation — accepted or
+ * rejected. This is the only record of a step n8n sent that never made it
+ * into provisioning_events, which is exactly the case a "missing step"
+ * report needs: the DB shows nothing because the row was never written, but
+ * the request did arrive.
+ */
+function logCallback(runId: string, rawBody: string, outcome: string, extra?: unknown): void {
+  console.log(`[provisioning/step] ${runId} ${outcome} — payload:`, rawBody, ...(extra !== undefined ? ["—", extra] : []));
+}
+
 export async function POST(req: NextRequest, { params }: Params) {
   const denied = requireInternalAuth(req);
   if (denied) return denied;
 
   const { runId } = await params;
+
+  const rawBody = await req.text();
 
   let body: {
     runToken?: string;
@@ -74,16 +87,19 @@ export async function POST(req: NextRequest, { params }: Params) {
   };
 
   try {
-    body = await req.json();
+    body = JSON.parse(rawBody);
   } catch {
+    logCallback(runId, rawBody, "REJECTED (invalid JSON)");
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   if (!body.runToken) {
+    logCallback(runId, rawBody, "REJECTED (missing runToken)");
     return NextResponse.json({ error: "runToken is required" }, { status: 400 });
   }
 
   if (!body.step || !N8N_STEPS.has(body.step)) {
+    logCallback(runId, rawBody, `REJECTED (unknown step "${body.step}")`);
     return NextResponse.json(
       { error: `step must be one of: ${[...N8N_STEPS].join(", ")}` },
       { status: 400 },
@@ -91,6 +107,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   if (!body.status || !STATUSES.has(body.status)) {
+    logCallback(runId, rawBody, `REJECTED (unknown status "${body.status}")`);
     return NextResponse.json(
       { error: `status must be one of: ${[...STATUSES].join(", ")}` },
       { status: 400 },
@@ -98,22 +115,13 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   if (!STEP_STATUSES[body.step]?.has(body.status)) {
+    logCallback(runId, rawBody, `REJECTED (status "${body.status}" invalid for step "${body.step}")`);
     return NextResponse.json(
       {
         error: `status "${body.status}" is not valid for step "${body.step}" — ` +
           `expected one of: ${[...(STEP_STATUSES[body.step] ?? [])].join(", ")}`,
       },
       { status: 400 },
-    );
-  }
-
-  // domain_purchase gets its own log line. It is the one step that spends
-  // money, and having it in application logs independent of the events table
-  // is worth the noise when reconciling a Namecheap invoice.
-  if (body.step === "domain_purchase") {
-    console.info(
-      `[provisioning] ${runId} domain_purchase ${body.status}`,
-      JSON.stringify(body.detail ?? {}),
     );
   }
 
@@ -140,15 +148,14 @@ export async function POST(req: NextRequest, { params }: Params) {
       message.includes("not found") ||
       message.includes("is already")
     ) {
+      logCallback(runId, rawBody, "REJECTED (409)", message);
       return NextResponse.json({ error: message, retryable: false }, { status: 409 });
     }
 
-    console.error(
-      `[provisioning] ${runId} ${body.step} -> ${body.status} failed:`,
-      message,
-    );
+    logCallback(runId, rawBody, "REJECTED (500)", message);
     return NextResponse.json({ error: message, retryable: true }, { status: 500 });
   }
 
+  logCallback(runId, rawBody, "ACCEPTED", data);
   return NextResponse.json({ ok: true, result: data }, { status: 200 });
 }

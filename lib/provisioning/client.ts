@@ -379,7 +379,15 @@ export function buildTimeline(run: ProvisioningRun | null): TimelineEntry[] {
 
   return run.plan.map((entry) => {
     const events = byStep.get(entry.step) ?? [];
-    const last = events[events.length - 1];
+    // Terminal status wins regardless of arrival order. n8n fires callbacks as
+    // separate requests, so a 'started' can land after its own 'succeeded' when
+    // a step completes in tens of milliseconds — which distribution_configure
+    // does. Taking the last event by time would leave the step spinning forever.
+    const terminal = events
+      .filter((e) => e.status !== "started")
+      .at(-1);
+
+    const last = terminal ?? events.at(-1);
 
     let state: TimelineEntry["state"] = "pending";
 
@@ -421,6 +429,83 @@ export function buildTimeline(run: ProvisioningRun | null): TimelineEntry[] {
 export function elapsedMs(entry: TimelineEntry): number | null {
   if (entry.state !== "running" || !entry.startedAt) return null;
   return Date.now() - new Date(entry.startedAt).getTime();
+}
+
+export interface FailureGuidance {
+  title: string;
+  body: string;
+  /** Diagnostic fields worth showing verbatim — certificateStatus, namecheapErrorCode, etc. */
+  detail: Array<{ label: string; value: string }>;
+  /**
+   * The reaper case: the run went quiet, not "a step reported failure." AWS
+   * resources from steps that already ran may still exist, so a bare retry
+   * button here is how you end up with a second certificate — this makes
+   * retrying require a deliberate acknowledgement instead of one click.
+   */
+  requiresAcknowledgement: boolean;
+  acknowledgementLabel?: string;
+}
+
+const FAILURE_DETAIL_LABELS: Record<string, string> = {
+  certificateStatus: "Certificate status",
+  namecheapErrorCode: "Namecheap error code",
+};
+
+/** Keys already surfaced elsewhere (title/body) — not worth repeating in the detail list. */
+const FAILURE_DETAIL_IGNORED_KEYS = new Set(["message", "source", "reason", "node", "nodeName", "phase", "kind"]);
+
+/**
+ * What to tell the operator about a failed run.
+ *
+ * Three genuinely different situations hide behind the same `status ===
+ * "failed"` — a workflow crash, a step that failed with a real diagnosis, and
+ * the reaper timing out a run that went quiet. Collapsing them into one
+ * generic "failed" message is how a heartbeat timeout gets misread as an
+ * ordinary failure and retried blind.
+ */
+export function failureGuidance(run: ProvisioningRun): FailureGuidance {
+  const detail = run.errorDetail ?? {};
+
+  if (detail.reason === "heartbeat_timeout") {
+    return {
+      title: "The workflow stopped responding",
+      body:
+        "This run was stopped automatically after going quiet — no step reported a failure. " +
+        "AWS resources from steps that already ran (certificate, distribution, DNS records) may " +
+        "still exist. Check the AWS console before retrying; retrying blind risks creating duplicates.",
+      detail: [],
+      requiresAcknowledgement: true,
+      acknowledgementLabel: "I checked AWS and no duplicate resources were left behind",
+    };
+  }
+
+  if (detail.source === "error-workflow") {
+    const node =
+      typeof detail.node === "string" ? detail.node
+      : typeof detail.nodeName === "string" ? detail.nodeName
+      : "an unknown node";
+    return {
+      title: "Unexpected error",
+      body: `The workflow crashed in "${node}" rather than reporting a normal step failure.`,
+      detail: [],
+      requiresAcknowledgement: false,
+    };
+  }
+
+  const diagnostic = Object.entries(detail)
+    .filter((e): e is [string, string | number] =>
+      !FAILURE_DETAIL_IGNORED_KEYS.has(e[0]) && (typeof e[1] === "string" || typeof e[1] === "number"))
+    .map(([key, value]) => ({ label: FAILURE_DETAIL_LABELS[key] ?? key, value: String(value) }));
+
+  return {
+    title: "Step failed",
+    body:
+      typeof detail.message === "string"
+        ? detail.message
+        : "This step reported a failure. Retrying may not resolve it — check the cause below first.",
+    detail: diagnostic,
+    requiresAcknowledgement: false,
+  };
 }
 
 /**
