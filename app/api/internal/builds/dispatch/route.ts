@@ -86,11 +86,14 @@ async function processBuild(build: ClaimedBuild): Promise<void> {
     // Only send the CSP when it differs from what the distribution already
     // carries. After the first publish this is almost always null, so n8n skips
     // the UpdateResponseHeadersPolicy call entirely.
-    const { data: site } = await adminClient()
-      .from("sites")
-      .select("csp_current, response_headers_policy_id")
-      .eq("id", build.site_id)
-      .single();
+    // private is not PostgREST-reachable even for service_role — that's a
+    // schema-exposure restriction, not an RLS one — so this goes through the
+    // internal (no ownership gate; the caller is already trusted) wrapper.
+    const { data: siteRows } = await adminClient()
+      .rpc("orchestrator_get_site_csp", { p_site_id: build.site_id });
+    const site = (siteRows as unknown as Array<{
+      csp_current: string | null; response_headers_policy_id: string | null;
+    }> | null)?.[0];
 
     const cspChanged =
       site?.csp_current === rendered.csp ? null : rendered.csp;

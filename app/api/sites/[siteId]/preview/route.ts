@@ -44,11 +44,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   // Without it, any authenticated user could render arbitrary definitions
   // against any template — not catastrophic, but it is an unbounded compute
   // endpoint behind a login.
-  const { data: site } = await supabase
-    .from("sites")
-    .select("id, draft_definition")
-    .eq("id", siteId)
-    .single();
+  // private is not PostgREST-reachable — owner-scoped wrapper, not .from("sites").
+  const { data: siteRows } = await supabase.rpc("get_site_draft", { p_site_id: siteId });
+  const site = (siteRows as unknown as Array<{ draft_definition: unknown }> | null)?.[0];
 
   if (!site) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });

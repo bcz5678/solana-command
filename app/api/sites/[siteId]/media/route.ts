@@ -70,13 +70,10 @@ export async function POST(req: NextRequest, { params }: Params) {
   // The storage policies enforce this too (via private.owns_site_text on path
   // segment [1]), but checking here gives a clean 404 instead of an opaque
   // storage error, and avoids doing sharp work that would be rejected anyway.
-  const { data: site } = await supabase
-    .from("sites")
-    .select("id")
-    .eq("id", siteId)
-    .single();
+  // private is not PostgREST-reachable — owner-scoped wrapper, not .from("sites").
+  const { data: siteRows } = await supabase.rpc("get_site_draft", { p_site_id: siteId });
 
-  if (!site) {
+  if (!(siteRows as unknown[] | null)?.length) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
   }
 

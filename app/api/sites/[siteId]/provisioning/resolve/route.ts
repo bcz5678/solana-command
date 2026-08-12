@@ -65,13 +65,14 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  // The RPC checks ownership of the run's site; this is a cheap early guard so
-  // a mismatched siteId in the URL fails clearly rather than as "not found".
-  const { data: run } = await supabase
-    .from("provisioning_runs")
-    .select("id, site_id, status, blocked_step")
-    .eq("id", body.runId)
-    .single();
+  // resolve_provisioning_block() below checks ownership authoritatively; this
+  // is a cheap early guard so a mismatched siteId in the URL fails clearly
+  // rather than as "not found". private is not PostgREST-reachable — owner-
+  // scoped wrapper, not .from("provisioning_runs").
+  const { data: runRows } = await supabase.rpc("get_provisioning_run", { p_run_id: body.runId });
+  const run = (runRows as unknown as Array<{
+    id: string; site_id: string; status: string; blocked_step: string | null;
+  }> | null)?.[0];
 
   if (!run || run.site_id !== siteId) {
     return NextResponse.json({ error: "Provisioning run not found" }, { status: 404 });

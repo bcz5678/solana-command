@@ -71,12 +71,15 @@ export async function POST(req: NextRequest) {
   }
 
   // Captured BEFORE the action, so the AWS cleanup notice can name resources
-  // the RPC is about to null out.
-  const { data: before } = await supabase
-    .from("sites")
-    .select("id, name, domain, s3_prefix, provisioning_status, cert_arn, distribution_id")
-    .eq("id", body.siteId)
-    .single();
+  // the RPC is about to null out. private is not PostgREST-reachable — this
+  // is dev tooling operated by a super admin, not necessarily the site's
+  // owner, so it goes through the super-admin-scoped wrapper (same gating as
+  // list_sites_admin), not owner-scoped and not .from("sites").
+  const { data: beforeRows } = await supabase.rpc("get_site_admin", { p_site_id: body.siteId });
+  const before = (beforeRows as unknown as Array<{
+    id: string; name: string; domain: string | null; s3_prefix: string | null;
+    provisioning_status: string; cert_arn: string | null; distribution_id: string | null;
+  }> | null)?.[0];
 
   let result: unknown;
   let error: { message: string } | null = null;

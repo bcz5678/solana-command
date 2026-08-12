@@ -38,7 +38,6 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { useSiteDraft, emptySiteDefinition, useBuildStatus, publishSite, PublishError } from '@/lib/sites/client'
 import { useTemplateManifest, showsDesignTab } from '@/lib/templates/client'
@@ -57,8 +56,11 @@ import ModulesTab from './modules-tab'
 import SettingsTab from './settings-tab'
 import { normalizeForValidation, remapSectionIssuePaths, firstError, fieldElementId } from './validation'
 
-export default function SiteConfig() {
-    const [siteId, setSiteId] = useState('')
+type Props = {
+    siteId: string
+}
+
+export default function SiteConfig({ siteId }: Props) {
     const { definition, templateId, status, error, savedAt, domain, provisioningStatus, setDefinition, selectTemplate } =
         useSiteDraft(siteId || null)
 
@@ -202,17 +204,19 @@ export default function SiteConfig() {
         <div className="w-full flex flex-col gap-4">
             <Card>
                 <CardContent className="flex flex-col gap-4 pt-2">
-                    <div className="flex flex-col gap-1.5">
-                        <label className="text-xs font-medium text-muted-foreground">Site ID</label>
-                        <Input
-                            value={siteId}
-                            onChange={(e) => setSiteId(e.target.value.trim())}
-                            placeholder="uuid of a row in private.sites"
-                            className="max-w-96 font-mono text-sm"
-                        />
-                    </div>
+                    {/* Loading and error are deliberately outside the definition
+                        gate below — a failed fetch leaves definition null
+                        forever, and this is the only place that would ever
+                        surface why. */}
+                    {status === 'loading' && definition === null && (
+                        <p className="text-sm text-muted-foreground">Loading site…</p>
+                    )}
 
-                    {siteId && definition !== null && (
+                    {error && (
+                        <p className="text-xs text-destructive">{error}</p>
+                    )}
+
+                    {definition !== null && (
                         <>
                             <BuilderHeader
                                 status={status}
@@ -229,10 +233,6 @@ export default function SiteConfig() {
                                 <span className="text-xs text-destructive">Invalid JSON — not saving</span>
                             )}
 
-                            {error && (
-                                <p className="text-xs text-destructive">{error}</p>
-                            )}
-
                             {publishMessage && (
                                 <p className="text-xs text-muted-foreground">{publishMessage}</p>
                             )}
@@ -246,11 +246,11 @@ export default function SiteConfig() {
                 </CardContent>
             </Card>
 
-            {siteId && showPicker && (
+            {showPicker && (
                 <TemplatePicker onSelect={onTemplateSelect} />
             )}
 
-            {siteId && !showPicker && definition !== null && (
+            {!showPicker && definition !== null && (
                 <Card>
                     <CardContent className="flex flex-col gap-4 pt-2">
                         <div className="flex items-center justify-between">

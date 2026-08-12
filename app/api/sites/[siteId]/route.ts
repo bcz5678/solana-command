@@ -30,27 +30,17 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  // RLS restricts this to owner-or-super-admin, so a missing row covers both
-  // "no such site" and "not yours" without leaking which.
-  const { data, error } = await supabase
-    .from("sites")
-    .select(`
-      id, name, token_symbol, contract_address,
-      domain, domain_source, domain_released_at, s3_prefix,
-      provisioning_status, distribution_id, distribution_domain, cert_arn,
-      draft_template_id, draft_updated_at,
-      published_version_id, published_at, is_archived,
-      created_at, updated_at
-    `)
-    .eq("id", siteId)
-    .single();
+  // private is not PostgREST-reachable — owner-scoped wrapper, not .from("sites").
+  const { data, error } = await supabase.rpc("get_site", { p_site_id: siteId });
 
-  if (error || !data) {
+  const site = (data as unknown as Array<Record<string, unknown>> | null)?.[0];
+
+  if (error || !site) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
   }
 
   return NextResponse.json(
-    { site: data },
+    { site },
     { status: 200, headers: { "Cache-Control": "no-store" } },
   );
 }

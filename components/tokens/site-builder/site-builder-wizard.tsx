@@ -257,8 +257,8 @@ export default function SiteBuilderWizard() {
                         onReadyChange={setDomainReady}
                     />
                 )}
-                {currentStep === 3 && (
-                    <SiteConfig />
+                {currentStep === 3 && siteId && (
+                    <SiteConfig siteId={siteId} />
                 )}
                 {currentStep === 4 && (
                     <SiteExecute config={config} />

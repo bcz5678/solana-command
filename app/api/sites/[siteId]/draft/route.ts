@@ -38,24 +38,17 @@ export async function GET(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // RLS on private.sites restricts this to owner-or-super-admin, so a
-  // not-found result covers both "no such site" and "not yours" without
-  // leaking which.
-  const { data, error } = await supabase
-    .from("sites")
-    .select(`
-      id, name, domain, provisioning_status,
-      draft_definition, draft_template_id, draft_updated_at,
-      published_version_id, published_at
-    `)
-    .eq("id", siteId)
-    .single();
+  // private is not PostgREST-reachable — this goes through the owner-scoped
+  // wrapper, same as every other read here, not a direct .from("sites").
+  const { data, error } = await supabase.rpc("get_site_draft", { p_site_id: siteId });
 
-  if (error || !data) {
+  const site = (data as unknown as Array<Record<string, unknown>> | null)?.[0];
+
+  if (error || !site) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ site: data }, { status: 200 });
+  return NextResponse.json({ site }, { status: 200 });
 }
 
 // ============================================================================

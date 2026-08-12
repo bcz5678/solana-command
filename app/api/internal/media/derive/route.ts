@@ -83,11 +83,14 @@ export async function POST(req: NextRequest) {
   //
   // Binding to a live claim means a caller must also hold a token issued to an
   // in-flight build, and the destKey must sit under that build's own prefix.
-  const { data: build, error: buildErr } = await supabase
-    .from("builds")
-    .select("id, site_id, status, claim_token, s3_prefix")
-    .eq("id", buildId)
-    .single();
+  // private is not PostgREST-reachable even for service_role — that's a
+  // schema-exposure restriction, not an RLS one — so this goes through the
+  // internal (no ownership gate; the caller is already trusted) wrapper.
+  const { data: buildRows, error: buildErr } = await supabase
+    .rpc("orchestrator_get_build", { p_build_id: buildId });
+  const build = (buildRows as unknown as Array<{
+    id: string; site_id: string; status: string; claim_token: string; s3_prefix: string | null;
+  }> | null)?.[0];
 
   if (buildErr || !build) {
     return NextResponse.json({ error: "Build not found" }, { status: 404 });
