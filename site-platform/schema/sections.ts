@@ -58,6 +58,10 @@ const SectionBaseShape = {
 
   backgroundImage: ImageAssetSchema.optional(),
 
+    /** Overrides the asset's intrinsic focal for THIS placement only.
+   *  Exists because text occlusion is a property of the section, not the image. */
+  backgroundFocal: z.object({ x: z.number(), y: z.number() }).optional(),
+
   /**
    * Scrim alpha over backgroundImage. Bright photos need ~0.6, already-dark
    * ones ~0.1. A single global value is why generated sites end up with
@@ -68,10 +72,30 @@ const SectionBaseShape = {
     help: "Higher values darken the background image, improving text contrast.",
   }),
 
+  /**
+ * Scrim geometry. `overlayOpacity` remains the PEAK alpha in all cases, so
+ * stored rows that predate this field render unchanged under "uniform".
+ *
+ * "auto" derives the origin from where the text actually sits — see
+ * resolveScrimOrigin(). It's the sensible default for new content because the
+ * information needed is already in the definition; asking the user to pick a
+ * direction that duplicates their own alignment choice is a control that can
+ * only be set wrong.
+ */
+overlayDirection: z
+  .enum(["uniform", "auto", "top", "bottom", "left", "right",
+         "top-left", "top-right", "bottom-left", "bottom-right"])
+  .default("uniform"),
+
   backgroundColor: field(z.string().optional(), {
     label: "Background colour", widget: "color", group: "Appearance",
     help: "Used when no background image is set.",
   }),
+
+  /** Where this template places section copy within the frame. Feeds scrim
+  *  origin derivation. A side-scroller anchors differently to a stacked page. */
+  contentAnchor: z.enum(["block-start", "block-center", "block-end"])
+  .default("block-center"),
 
   /**
    * Alignment along the CROSS axis. Reads as left/centre/right in a vertical

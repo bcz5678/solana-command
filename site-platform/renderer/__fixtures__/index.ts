@@ -119,6 +119,8 @@ export const golden: SiteDefinition = {
       ],
       backgroundImage: image("hero", "Abstract golden gradient"),
       overlayOpacity: 0.5,
+      overlayDirection: "uniform",
+      contentAnchor: "block-center",
       crossAlign: "start",
       ctas: [
         { label: "Buy now", href: "https://dex.example/swap", external: true, variant: "primary" },
@@ -139,6 +141,8 @@ export const golden: SiteDefinition = {
         body: ["A paragraph about the project.", "And another one."],
         backgroundImage: image("about", "Team at work"),
         overlayOpacity: 0.45,
+        overlayDirection: "uniform",
+        contentAnchor: "block-center",
         crossAlign: "start",
         cta: { label: "Learn more", href: "https://docs.example", external: true, variant: "outline" },
       },
@@ -152,6 +156,8 @@ export const golden: SiteDefinition = {
         showInNav: true,
         title: "By the numbers",
         intro: "Supply and distribution at a glance.",
+        overlayDirection: "uniform",
+        contentAnchor: "block-center",
         crossAlign: "center",
         stats: [
           { id: "s1", value: "1,000,000,000", label: "Total supply" },
@@ -168,6 +174,8 @@ export const golden: SiteDefinition = {
         navLabel: "Roadmap",
         showInNav: true,
         title: "Roadmap",
+        overlayDirection: "uniform",
+        contentAnchor: "block-center",
         crossAlign: "start",
         milestones: [
           { id: "m1", marker: "Q1 2026", title: "Launch", body: "Token goes live.", status: "done" },
@@ -184,6 +192,8 @@ export const golden: SiteDefinition = {
         navLabel: "FAQ",
         showInNav: true,
         title: "Questions",
+        overlayDirection: "uniform",
+        contentAnchor: "block-center",
         crossAlign: "start",
         items: [
           { id: "q1", question: "Is this financial advice?", answer: "No." },
@@ -202,6 +212,8 @@ export const golden: SiteDefinition = {
         showInNav: true,
         title: "Should not render",
         body: ["Invisible."],
+        overlayDirection: "uniform",
+        contentAnchor: "block-center",
         crossAlign: "start",
       },
     ],
@@ -258,6 +270,8 @@ export const stress: SiteDefinition = {
       body: [],                  // empty array: must emit no <p>, not <p></p>
       // No backgroundImage: the panel must render on the theme background with
       // the scrim suppressed, not as a black rectangle.
+      overlayDirection: "uniform",
+      contentAnchor: "block-center",
       crossAlign: "start",
       ctas: [],                  // empty: no .cta-row wrapper
     },
@@ -275,6 +289,8 @@ export const stress: SiteDefinition = {
         showInNav: true,
         title: "First About",
         body: ["One."],
+        overlayDirection: "uniform",
+        contentAnchor: "block-center",
         crossAlign: "start",
       },
       {
@@ -287,6 +303,8 @@ export const stress: SiteDefinition = {
         showInNav: true,
         title: "Second About",
         body: [],
+        overlayDirection: "uniform",
+        contentAnchor: "block-center",
         crossAlign: "start",
       },
       {
@@ -301,6 +319,8 @@ export const stress: SiteDefinition = {
         showInNav: true,
         title: "Emoji nav",
         body: ["Slug must not be empty."],
+        overlayDirection: "uniform",
+        contentAnchor: "block-center",
         crossAlign: "center",
       },
       {
@@ -315,6 +335,8 @@ export const stress: SiteDefinition = {
         showInNav: true,
         title: `<script>alert('xss')</script>`,
         body: [`Body with "quotes" & <b>tags</b> and 'apostrophes'.`],
+        overlayDirection: "uniform",
+        contentAnchor: "block-center",
         crossAlign: "start",
         cta: {
           // javascript: URL must be neutralised to "#".
@@ -335,6 +357,8 @@ export const stress: SiteDefinition = {
         navLabel: "Cards",
         showInNav: false,        // in the page but not the nav
         title: "Cards",
+        overlayDirection: "uniform",
+        contentAnchor: "block-center",
         crossAlign: "start",
         cards: [
           { id: "c1", title: "No image card" },
@@ -352,6 +376,8 @@ export const stress: SiteDefinition = {
         navLabel: "Empty stats",
         showInNav: false,
         title: "Nothing here",
+        overlayDirection: "uniform",
+        contentAnchor: "block-center",
         crossAlign: "start",
         stats: [],
       },

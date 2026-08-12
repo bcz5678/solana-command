@@ -97,7 +97,7 @@ export interface ValidationIssue {
 }
 
 /** Resolve a dotted path, supporting `[]` as "every element of this array". */
-function resolvePaths(root: unknown, path: string): Array<{ path: string; value: unknown }> {
+export function resolvePaths(root: unknown, path: string): Array<{ path: string; value: unknown }> {
   const segments = path.split(".");
   let frontier: Array<{ path: string; value: unknown }> = [{ path: "", value: root }];
 

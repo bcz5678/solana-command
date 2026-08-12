@@ -51,10 +51,35 @@ export const SiteHeroSchema = z.object({
     label: "Paragraphs", widget: "repeater", group: "Hero", order: 3,
   }),
   backgroundImage: ImageAssetSchema.optional(),
+  
+  /** Overrides the asset's intrinsic focal for THIS placement only.
+  *  Exists because text occlusion is a property of the section, not the image. */
+  backgroundFocal: z.object({ x: z.number(), y: z.number() }).optional(),
+
+
   overlayOpacity: z.number().min(0).max(1).optional(),
+    /**
+   * Scrim geometry. `overlayOpacity` remains the PEAK alpha in all cases, so
+   * stored rows that predate this field render unchanged under "uniform".
+   *
+   * "auto" derives the origin from where the text actually sits — see
+   * resolveScrimOrigin(). It's the sensible default for new content because the
+   * information needed is already in the definition; asking the user to pick a
+   * direction that duplicates their own alignment choice is a control that can
+   * only be set wrong.
+   */
+  overlayDirection: z
+  .enum(["uniform", "auto", "top", "bottom", "left", "right",
+         "top-left", "top-right", "bottom-left", "bottom-right"])
+  .default("uniform"),
   crossAlign: CrossAlignSchema.default("start"),
   /** Plural — templates commonly want a primary plus a secondary action. */
   ctas: z.array(SiteCtaSchema).default([]),
+
+  /** Where this template places section copy within the frame. Feeds scrim
+  *  origin derivation. A side-scroller anchors differently to a stacked page. */
+  contentAnchor: z.enum(["block-start", "block-center", "block-end"])
+  .default("block-center"),
 });
 
 /**

@@ -87,6 +87,26 @@ export const ImageAssetSchema = z.object({
 
   /** Base64 LQIP or blurhash. */
   placeholder: z.string().optional(),
+
+    /**
+   * Set ONLY on images shipped with a template preset.
+   *
+   * Path under the template's published prefix, e.g. "hero" for
+   * `_templates/{templateId}@{version}/seed/hero/`. Its presence routes the
+   * publish-time copy at the template prefix (server-side S3 CopyObject, same
+   * as bundleAssets and vendor packages) instead of a Supabase Storage
+   * download — and, because uploading a replacement produces an ImageAsset
+   * without it, its presence is also the exact test for "still the seed image".
+   *
+   * `variants` is populated by the import script from the same
+   * 2400/1200/600 webp generation the upload path uses, so focal handling,
+   * crop geometry and srcset emission stay one code path.
+   */
+  seedPath: z.string().optional(),
+ 
+// `stagingKey` holds the template-prefix key for seed images. It means "where
+// the source bytes live", which is honest in both cases. `url` holds the
+// published CDN URL, so preview needs no special case and no signing.
 });
 export type ImageAsset = z.infer<typeof ImageAssetSchema>;
 

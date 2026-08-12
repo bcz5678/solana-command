@@ -102,3 +102,12 @@ export type {
   SanitizePolicy,
   SlottedSpec,
 } from "./slotted";
+
+// ---- SECTION 10 — preset.ts (template starting points) ----
+export {
+  PresetContentSchema,
+  TemplatePresetSchema,
+  materializePreset,
+  validateAgainstPreset,
+} from "./preset";
+export type { PresetContent, TemplatePreset } from "./preset";
