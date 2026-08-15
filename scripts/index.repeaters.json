@@ -1,0 +1,34 @@
+[
+  {
+    "_hint": "prose",
+    "_confidence": 0.55,
+    "_notes": [],
+    "_constantFields": [],
+    "selector": ".bar",
+    "containerSelector": ".menu-toggle",
+    "path": "TODO.prose",
+    "max": 12,
+    "slots": []
+  },
+  {
+    "_hint": "nav",
+    "_confidence": 0.66,
+    "_notes": [
+      "2 sibling(s) did not match — check whether one is a heading or a differently-shaped item.",
+      "No shared class on the items — this selector is structural and will break if the source markup changes."
+    ],
+    "_constantFields": [],
+    "selector": ".nav-links > li",
+    "containerSelector": ".nav-links",
+    "path": "TODO.nav",
+    "max": 12,
+    "slots": [
+      {
+        "selector": "a",
+        "path": "TODO",
+        "mode": "link",
+        "note": "url"
+      }
+    ]
+  }
+]

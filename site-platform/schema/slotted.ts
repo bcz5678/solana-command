@@ -234,6 +234,8 @@ export const SanitizePolicySchema = z.object({
 });
 export type SanitizePolicy = z.infer<typeof SanitizePolicySchema>;
 
+
+
 // ============================================================================
 // SLOTTED SPEC
 // ============================================================================
@@ -272,6 +274,32 @@ export const SlottedSpecSchema = z.object({
    * the renderer rewrites in-page hrefs to match generated section slugs.
    */
   rewriteAnchors: z.boolean().default(false),
+
+  /** Present when the bundle's CSS has been tokenized at import. Its absence is
+ *  what makes a slotted template's look fixed. */
+  cssTokenized: z.object({
+    /** "inline" or a bundleAssets path. Which one is a page-weight decision;
+     *  tokenization needs owned bytes, not inlined ones. */
+    source: z.string().default("inline"),
+    /** sha256 of the rewritten stylesheet, so --check catches a manual edit. */
+    cssHash: z.string(),
+  }).optional(),
+  /**
+ * Maps each section to its node, so a disabled section can be removed.
+ *
+ * Slot paths are positional, so a disabled section keeps its array entry and
+ * its index — only the DOM node and its nav link are removed. Deleting the
+ * entry would shift every later section's content by one.
+ */
+  sectionNodes: z.array(z.object({
+    /** "sections[0]" */
+    path: z.string().min(1),
+    selector: z.string().min(1),
+    /** The in-page nav link, removed alongside — otherwise it's a dead anchor. */
+    navSelector: z.string().optional(),
+  })).default([]),
 });
 export type SlottedSpec = z.infer<typeof SlottedSpecSchema>;
+
+
 

@@ -111,3 +111,17 @@ export {
   validateAgainstPreset,
 } from "./preset";
 export type { PresetContent, TemplatePreset } from "./preset";
+
+// ---- SECTION 11 — base-theme.ts (template starting points) ----
+export {
+  BASE_CORE,
+  mergeCore,
+} from "./base-theme";
+
+
+// ---- SECTION 12 — token-vars.ts (template starting points) ----
+export {
+  ALL_VAR_NAMES,  
+  tokenToVar,
+  hasVar
+} from "./token-vars";

@@ -11,17 +11,17 @@
 // ============================================================================
 
 import { parseHTML } from "linkedom";
-import type { SlottedSpec, TemplateManifest, SiteDefinition, ImageAsset } from "@site/schema";
+import type { SlottedSpec, TemplateManifest, SiteDefinition, ImageAsset, SiteContent } from "@site/schema";
 import type { RenderInput, RenderOutput, TemplateContext, AssetManifest }
   from "../types";
 import { sanitizeDocument, type StripReport } from "./sanitize";
-import { applySlot, applyRepeater, rewriteBundleAssets, type ApplyResult }
+import { applySlot, applyRepeater, rewriteBundleAssets, resolvePath, type ApplyResult }
   from "./apply";
 import { resolveTheme } from "../theme";
 import { buildMetaTags } from "../document";
 import { scriptHash, sha256Hex, invalidationPaths, planMedia, makeImageUrlResolver }
   from "../assets";
-import { esc } from "../escape";
+import { cssIdent } from "../escape";
 
 import { SlottedDocument, SlottedElement } from './dom';
 
@@ -98,7 +98,7 @@ export async function renderSlotted(input: RenderInput): Promise<SlottedRenderRe
   }
 
   const { document } = parseHTML(source);
-    const doc = document as unknown as SlottedDocument;
+  const doc = document as unknown as SlottedDocument;
 
   // ---- 2. Sanitize ----
   // Before anything else touches the tree: strip scripts, event handlers,
@@ -136,6 +136,14 @@ export async function renderSlotted(input: RenderInput): Promise<SlottedRenderRe
 
   const applied: ApplyResult = { warnings: [], images: [] };
 
+  // ---- 3.5. Disabled sections ----
+  // Before repeaters and slots: cloning prototypes into a subtree that's about
+  // to vanish is wasted work, and the slot pass would warn on selectors that no
+  // longer match — noise indistinguishable from a mapping bug.
+  //
+  // No mode branch. Preview and build must take the identical path.
+  removeDisabledSections(doc as never, spec, definition.content, applied);
+
   // ---- 4. Repeaters first ----
   // Before slots, so top-level selectors do not accidentally match inside a
   // prototype node that is about to be cloned and removed.
@@ -166,6 +174,16 @@ export async function renderSlotted(input: RenderInput): Promise<SlottedRenderRe
 
   // ---- 7. Anchors ----
   if (spec.rewriteAnchors) rewriteAnchors(doc as never, ctx, applied);
+
+  // In-page links whose target was removed. Warn rather than delete: the link
+  // may be a CTA whose label still reads correctly, and silently removing a
+  // button is worse than a dead scroll.
+  for (const a of Array.from(doc.querySelectorAll('a[href^="#"]'))) {
+    const target = (a.getAttribute("href") ?? "").slice(1);
+    if (target && !doc.querySelector(`#${cssIdent(target)}`)) {
+      applied.warnings.push(`Link to #${target} has no target — its section is disabled or removed.`);
+    }
+  }
 
   // ---- 8. Head ----
   replaceMetaTags(doc as never, definition, imageUrl);
@@ -319,3 +337,40 @@ export function registerSlottedTemplate(sourceKey: string, html: string): void {
 
 export { formatReport } from "./sanitize";
 export type { StripReport } from "./sanitize";
+
+
+
+/**
+ * Remove the DOM node for every section the site has switched off.
+ *
+ * Slot paths are POSITIONAL — `sections[1].title` — so a disabled section keeps
+ * its array entry and its index. Only the node and its nav link go. Deleting
+ * the entry instead would shift every later section's content by one, silently.
+ *
+ * A section absent from content is also removed: a preset may cover fewer
+ * sections than the source markup provides.
+ */
+function removeDisabledSections(
+  doc: SlottedDocument,
+  spec: SlottedSpec,
+  content: SiteContent,
+  applied: ApplyResult,
+): void {
+  for (const node of spec.sectionNodes) {
+    const section = resolvePath(content, node.path) as { enabled?: boolean } | undefined;
+    if (section && section.enabled !== false) continue;
+
+    const el = doc.querySelector(node.selector);
+    if (!el) {
+      applied.warnings.push(
+        `sectionNodes: "${node.selector}" (${node.path}) matched nothing — ` +
+        `the mapping is stale relative to the source.`,
+      );
+      continue;
+    }
+
+    el.remove();
+    // Leaving the nav link behind ships a menu item that scrolls nowhere.
+    if (node.navSelector) doc.querySelector(node.navSelector)?.remove();
+  }
+}

@@ -12,8 +12,9 @@
 // ============================================================================
 
 import type { LayeredTheme, TemplateManifest } from "@site/schema";
+import { tokenToVar } from "@site/schema";
 import type { ResolvedTheme } from "./types";
-import { cssValue, cssIdent } from "./escape";
+import { cssValue } from "./escape";
 
 // ============================================================================
 // COLOUR HELPERS
@@ -121,7 +122,9 @@ function typeScale(baseFontSize: string, ratio: number): Record<string, string> 
     scale[`--st-font-size-h${level}`] = `${round(size)}${unit}`;
   }
 
-  scale["--st-font-size-base"] = `${value}${unit}`;
+  // Unlike h1..h6, this one has a real token path — route it through
+  // tokenToVar() like everything else rather than repeating the literal.
+  scale[tokenToVar("core.typography.baseFontSize")] = `${value}${unit}`;
   return scale;
 }
 
@@ -202,71 +205,78 @@ export function resolveTheme(input: ResolveThemeInput): ResolvedTheme {
   const textOnImage = sem.textOnImage
     ?? (contrastRatio("#ffffff", c.overlay) > 3 ? "#ffffff" : c.text);
 
+  // Every key goes through tokenToVar() rather than a literal — that's the
+  // whole point. A hardcoded "--st-x" here can drift from what token-vars.ts
+  // declares without either side erroring; routing through the same function
+  // token-vars.ts exports makes that drift impossible instead of just unlikely.
   const vars: Record<string, string> = {
     // ---- Colours ----
-    "--st-color-bg":            cssValue(c.background),
-    "--st-color-surface":       cssValue(c.surface),
-    "--st-color-primary":       cssValue(c.primary),
-    "--st-color-primary-hover": cssValue(primaryHover),
-    "--st-color-on-primary":    cssValue(c.onPrimary),
-    "--st-color-secondary":     cssValue(c.secondary),
-    "--st-color-secondary-hover": cssValue(secondaryHover),
-    "--st-color-on-secondary":  cssValue(onSecondary),
-    "--st-color-text":          cssValue(c.text),
-    "--st-color-text-muted":    cssValue(c.textMuted),
-    "--st-color-heading":       cssValue(heading),
-    "--st-color-border":        cssValue(c.border),
-    "--st-color-overlay":       cssValue(c.overlay),
-    "--st-color-success":       cssValue(c.success),
-    "--st-color-warning":       cssValue(c.warning),
-    "--st-color-error":         cssValue(c.error),
-    "--st-color-info":          cssValue(c.info ?? c.secondary),
+    [tokenToVar("core.colors.background")]:    cssValue(c.background),
+    [tokenToVar("core.colors.surface")]:       cssValue(c.surface),
+    [tokenToVar("core.colors.primary")]:       cssValue(c.primary),
+    [tokenToVar("core.colors.primaryHover")]:  cssValue(primaryHover),
+    [tokenToVar("core.colors.onPrimary")]:     cssValue(c.onPrimary),
+    [tokenToVar("core.colors.secondary")]:     cssValue(c.secondary),
+    [tokenToVar("core.colors.secondaryHover")]: cssValue(secondaryHover),
+    [tokenToVar("core.colors.onSecondary")]:   cssValue(onSecondary),
+    [tokenToVar("core.colors.text")]:          cssValue(c.text),
+    [tokenToVar("core.colors.textMuted")]:     cssValue(c.textMuted),
+    [tokenToVar("core.colors.heading")]:       cssValue(heading),
+    [tokenToVar("core.colors.border")]:        cssValue(c.border),
+    [tokenToVar("core.colors.overlay")]:       cssValue(c.overlay),
+    [tokenToVar("core.colors.success")]:       cssValue(c.success),
+    [tokenToVar("core.colors.warning")]:       cssValue(c.warning),
+    [tokenToVar("core.colors.error")]:         cssValue(c.error),
+    [tokenToVar("core.colors.info")]:          cssValue(c.info ?? c.secondary),
 
     // ---- Semantic ----
-    "--st-text-on-image":       cssValue(textOnImage),
-    "--st-surface-elevated":    cssValue(sem.surfaceElevated ?? shade(c.surface, 0.06)),
-    "--st-nav-bg":              cssValue(sem.navBackground ?? "rgba(0,0,0,.2)"),
-    "--st-nav-fg":              cssValue(sem.navForeground ?? c.text),
-    "--st-footer-bg":           cssValue(sem.footerBackground ?? c.surface),
-    "--st-footer-fg":           cssValue(sem.footerForeground ?? c.textMuted),
-    "--st-footer-border":       cssValue(sem.footerBorder ?? c.border),
-    "--st-overlay-scrim":       cssValue(sem.overlayScrim ?? c.overlay),
-    "--st-mobile-menu-bg":      cssValue(sem.mobileMenuBackground ?? c.surface),
+    [tokenToVar("semantic.textOnImage")]:          cssValue(textOnImage),
+    [tokenToVar("semantic.surfaceElevated")]:      cssValue(sem.surfaceElevated ?? shade(c.surface, 0.06)),
+    [tokenToVar("semantic.navBackground")]:        cssValue(sem.navBackground ?? "rgba(0,0,0,.2)"),
+    [tokenToVar("semantic.navForeground")]:        cssValue(sem.navForeground ?? c.text),
+    [tokenToVar("semantic.footerBackground")]:     cssValue(sem.footerBackground ?? c.surface),
+    [tokenToVar("semantic.footerForeground")]:     cssValue(sem.footerForeground ?? c.textMuted),
+    [tokenToVar("semantic.footerBorder")]:         cssValue(sem.footerBorder ?? c.border),
+    [tokenToVar("semantic.overlayScrim")]:         cssValue(sem.overlayScrim ?? c.overlay),
+    [tokenToVar("semantic.mobileMenuBackground")]: cssValue(sem.mobileMenuBackground ?? c.surface),
 
     // ---- Typography ----
-    "--st-font-base":           cssValue(t.fontFamilyBase, "system-ui, sans-serif"),
-    "--st-font-heading":        cssValue(t.fontFamilyHeading ?? t.fontFamilyBase, "system-ui, sans-serif"),
-    "--st-font-mono":           cssValue(t.fontFamilyMono ?? "ui-monospace, monospace"),
-    "--st-weight-normal":       String(t.fontWeightNormal),
-    "--st-weight-medium":       String(t.fontWeightMedium ?? 500),
-    "--st-weight-bold":         String(t.fontWeightBold),
-    "--st-line-height-base":    String(t.lineHeightBase),
-    "--st-line-height-heading": String(t.lineHeightHeading),
-    "--st-tracking-tight":      cssValue(t.letterSpacingTight ?? "normal"),
-    "--st-tracking-wide":       cssValue(t.letterSpacingWide ?? "0.1em"),
-    "--st-heading-transform":   cssValue(t.headingTransform, "none"),
-    "--st-kicker-transform":    cssValue(t.kickerTransform, "uppercase"),
+    [tokenToVar("core.typography.fontFamilyBase")]:      cssValue(t.fontFamilyBase, "system-ui, sans-serif"),
+    [tokenToVar("core.typography.fontFamilyHeading")]:   cssValue(t.fontFamilyHeading ?? t.fontFamilyBase, "system-ui, sans-serif"),
+    [tokenToVar("core.typography.fontFamilyMono")]:      cssValue(t.fontFamilyMono ?? "ui-monospace, monospace"),
+    [tokenToVar("core.typography.fontWeightNormal")]:    String(t.fontWeightNormal),
+    [tokenToVar("core.typography.fontWeightMedium")]:    String(t.fontWeightMedium ?? 500),
+    [tokenToVar("core.typography.fontWeightBold")]:      String(t.fontWeightBold),
+    [tokenToVar("core.typography.lineHeightBase")]:      String(t.lineHeightBase),
+    [tokenToVar("core.typography.lineHeightHeading")]:   String(t.lineHeightHeading),
+    [tokenToVar("core.typography.letterSpacingTight")]:  cssValue(t.letterSpacingTight ?? "normal"),
+    [tokenToVar("core.typography.letterSpacingWide")]:   cssValue(t.letterSpacingWide ?? "0.1em"),
+    [tokenToVar("core.typography.headingTransform")]:    cssValue(t.headingTransform, "none"),
+    [tokenToVar("core.typography.kickerTransform")]:     cssValue(t.kickerTransform, "uppercase"),
 
     // ---- Spacing (logical axes) ----
-    "--st-space-unit":          cssValue(s.unit),
-    "--st-container-max":       cssValue(s.containerMaxInline),
-    "--st-content-max":         cssValue(s.contentMaxInline),
-    "--st-section-pad-block":   cssValue(s.sectionPaddingBlock),
-    "--st-section-pad-inline":  cssValue(s.sectionPaddingInline),
-    "--st-radius":              cssValue(s.radius),
-    "--st-radius-sm":           cssValue(s.radiusSm ?? s.radius),
-    "--st-radius-lg":           cssValue(s.radiusLg ?? s.radius),
+    [tokenToVar("core.spacing.unit")]:                cssValue(s.unit),
+    [tokenToVar("core.spacing.containerMaxInline")]:  cssValue(s.containerMaxInline),
+    [tokenToVar("core.spacing.contentMaxInline")]:    cssValue(s.contentMaxInline),
+    [tokenToVar("core.spacing.sectionPaddingBlock")]: cssValue(s.sectionPaddingBlock),
+    [tokenToVar("core.spacing.sectionPaddingInline")]: cssValue(s.sectionPaddingInline),
+    [tokenToVar("core.spacing.radius")]:              cssValue(s.radius),
+    [tokenToVar("core.spacing.radiusSm")]:            cssValue(s.radiusSm ?? s.radius),
+    [tokenToVar("core.spacing.radiusLg")]:            cssValue(s.radiusLg ?? s.radius),
 
     // ---- Motion ----
-    "--st-transition-speed":    cssValue(m.speed),
-    "--st-transition-easing":   cssValue(m.easing),
+    [tokenToVar("core.motion.speed")]:  cssValue(m.speed),
+    [tokenToVar("core.motion.easing")]: cssValue(m.easing),
 
     // ---- Shadows ----
-    "--st-shadow-sm":           cssValue(theme.core.shadows?.sm ?? "none"),
-    "--st-shadow-md":           cssValue(theme.core.shadows?.md ?? "none"),
-    "--st-shadow-lg":           cssValue(theme.core.shadows?.lg ?? "none"),
+    [tokenToVar("core.shadows.sm")]: cssValue(theme.core.shadows?.sm ?? "none"),
+    [tokenToVar("core.shadows.md")]: cssValue(theme.core.shadows?.md ?? "none"),
+    [tokenToVar("core.shadows.lg")]: cssValue(theme.core.shadows?.lg ?? "none"),
 
     // ---- Type scale ----
+    // Computed from baseFontSize + scaleRatio, not a 1:1 token — these six
+    // names have no VAR_NAMES entry, only a listing in token-vars.ts's
+    // GENERATED_VAR_NAMES so the declared/emitted test still sees them.
     ...typeScale(t.baseFontSize, t.scaleRatio ?? 1.25),
   };
 
@@ -279,7 +289,7 @@ export function resolveTheme(input: ResolveThemeInput): ResolvedTheme {
 
   for (const [key, spec] of Object.entries(schema)) {
     const value = authored[key] ?? spec.default;
-    custom[`--st-tpl-${cssIdent(kebab(key))}`] = cssValue(String(value));
+    custom[tokenToVar(`templates.${manifest.id}.${key}`)] = cssValue(String(value));
   }
 
   return {
@@ -293,10 +303,6 @@ export function resolveTheme(input: ResolveThemeInput): ResolvedTheme {
       fontFamilyHeading: t.fontFamilyHeading ?? t.fontFamilyBase,
     },
   };
-}
-
-function kebab(input: string): string {
-  return input.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 }
 
 // ============================================================================

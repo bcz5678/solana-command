@@ -19,7 +19,7 @@
 import { describe, it, expect } from "vitest";
 import { renderTemplate } from "../render";
 import { resolveTheme } from "../theme";
-import { assignSlugs, validateAgainstManifest } from "@site/schema";
+import { assignSlugs, validateAgainstManifest, ALL_VAR_NAMES } from "@site/schema";
 import { heroOnepagerManifest } from "../templates/hero-onepager/manifest";
 import { golden, stress, hostileTheme } from "../__fixtures__/index";
 import "../templates/index";   // side-effect: registers templates
@@ -226,6 +226,20 @@ describe("theming", () => {
     expect(theme.vars["--st-color-primary-hover"]).not.toBe(
       theme.vars["--st-color-primary"],
     );
+  });
+
+  // The invariant token-vars.ts's header describes: two independent naming
+  // implementations means a rename can produce CSS referencing a variable
+  // nothing declares — and because rewriteCss emits var(--st-x, <literal>),
+  // the page still looks right while the theme control silently does
+  // nothing. Checked both directions: a table entry resolveTheme never
+  // emits, and a var resolveTheme emits that the table doesn't know about.
+  it("every emitted var is declared, and vice versa", () => {
+    const declared = new Set(Object.keys(resolveTheme({ theme: golden.theme, manifest }).vars));
+    const table = new Set(ALL_VAR_NAMES);
+
+    expect([...table].filter((v) => !declared.has(v))).toEqual([]);
+    expect([...declared].filter((v) => !table.has(v))).toEqual([]);
   });
 });
 

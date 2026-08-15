@@ -17,25 +17,25 @@
 // ============================================================================
 
 import { parseHTML } from "linkedom";
+import type { El } from './dom';
+  
+import  { 
+  kids, 
+  tag, 
+  text, 
+  classesOf, 
+  cssEscape, 
+  truncate, 
+  cssPath, 
+  relativeSelector, 
+  contains 
+} from './dom'; 
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
-/**
- * linkedom's nodes are structurally compatible with the DOM subset used here.
- * Typed locally so this package doesn't need "dom" in its tsconfig lib.
- */
-interface El {
-  tagName: string;
-  id: string;
-  className: unknown;
-  children: ArrayLike<El>;
-  parentElement: El | null;
-  textContent: string | null;
-  getAttribute(name: string): string | null;
-  querySelectorAll(selector: string): ArrayLike<El>;
-}
+
 
 export type FieldKind = "text" | "image" | "link";
 
@@ -104,18 +104,32 @@ export function detectRepeaters(
   html: string,
   options: DetectOptions = {},
 ): RepeaterCandidate[] {
-  const { minRun = 3, skeletonDepth = 3, maxItems = 50 } = options;
+   const { document } = parseHTML(html);
+  return detectRepeatersIn(document.body as unknown as El, document as unknown as El, options);
+};
 
-  const { document } = parseHTML(html);
-  const root = document.body as unknown as El;
+/** Scoped pass. `document` stays separate because selector verification —
+ *  "does this class match more nodes than my group?" — must check the whole
+ *  document, not just the subtree. */
+export function detectRepeatersIn(
+  root: El,
+  document: El,
+  options: DetectOptions = {},
+): RepeaterCandidate[] {
+  const { minRun = 3, skeletonDepth = 3, maxItems = 50 } = options;
   if (!root) return [];
 
   const candidates: RepeaterCandidate[] = [];
   let seq = 0;
 
-  // Every element is a potential container. Cheap enough at one-pager scale
-  // that a smarter traversal isn't worth the complexity.
-  for (const container of walk(root)) {
+  // Every element is a potential container — root included. walk() itself is
+  // descendants-only (right for the old whole-document entry point, where
+  // <body> is never itself the repeater), but detectRepeatersIn() is now
+  // called scoped to a single section, and a section's OWN direct children
+  // being the repeating group — three sibling .card divs right under
+  // <section> — is the common case, not an edge case. Excluding root here
+  // silently missed exactly that.
+  for (const container of [root, ...walk(root)]) {
     const children = kids(container).filter((c) => !SKIP_TAGS.has(tag(c)));
     if (children.length < minRun) continue;
 
@@ -438,39 +452,8 @@ function buildItemSelector(
   };
 }
 
-/** Selector relative to an item root, for use inside Repeater.slots. */
-function relativeSelector(el: El, itemRoot: El): string {
-  const parts: string[] = [];
-  let cursor: El | null = el;
 
-  while (cursor && cursor !== itemRoot) {
-    const cls = [...classesOf(cursor)][0];
-    if (cls) { parts.unshift(`.${cssEscape(cls)}`); break; }
 
-    const siblings = kids(cursor.parentElement ?? itemRoot)
-      .filter((c) => tag(c) === tag(cursor as El));
-    const index = siblings.indexOf(cursor);
-
-    parts.unshift(
-      siblings.length > 1 ? `${tag(cursor)}:nth-of-type(${index + 1})` : tag(cursor),
-    );
-    cursor = cursor.parentElement;
-  }
-
-  return parts.join(" > ") || tag(el);
-}
-
-function cssPath(el: El): string {
-  if (el.id) return `#${cssEscape(el.id)}`;
-
-  const cls = [...classesOf(el)][0];
-  if (cls) return `.${cssEscape(cls)}`;
-
-  const parent = el.parentElement;
-  if (!parent || tag(parent) === "body") return tag(el);
-
-  return `${cssPath(parent)} > ${tag(el)}`;
-}
 
 // ============================================================================
 // SCORING & NESTING
@@ -523,14 +506,6 @@ function markNesting(candidates: RepeaterCandidate[], document: El): RepeaterCan
   });
 }
 
-function contains(ancestor: El, node: El): boolean {
-  let cursor: El | null = node.parentElement;
-  while (cursor) {
-    if (cursor === ancestor) return true;
-    cursor = cursor.parentElement;
-  }
-  return false;
-}
 
 // ============================================================================
 // REPORT
@@ -570,25 +545,3 @@ export function formatReport(candidates: RepeaterCandidate[]): string {
   return lines.join("\n");
 }
 
-// ============================================================================
-// SMALL HELPERS
-// ============================================================================
-
-const kids = (el: El): El[] => Array.from(el.children ?? []);
-const tag = (el: El): string => (el.tagName ?? "").toLowerCase();
-const text = (el: El): string => (el.textContent ?? "").replace(/\s+/g, " ").trim();
-
-/** SVG elements expose className as an object, not a string. */
-function classesOf(el: El): Set<string> {
-  const raw = el.className;
-  if (typeof raw !== "string") return new Set();
-  return new Set(raw.split(/\s+/).filter(Boolean));
-}
-
-function cssEscape(value: string): string {
-  return value.replace(/([^\w-])/g, "\\$1");
-}
-
-function truncate(value: string, max = 48): string {
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
-}

@@ -1,29 +1,135 @@
-// ============================================================================
-// packages/site-renderer/src/templates/hero-onepager/styles.ts
-//
-// Port of the original index-template.html stylesheet.
-//
-// Every colour, size, spacing and timing value now reads from a CSS variable.
-// The original had ~19 separate {{$json.fields.*}} interpolations in the CSS
-// plus a dozen hardcoded values (rgba(0,0,0,.2) header, #e0e0e0 paragraphs,
-// #222 footer border, #333 mobile drawer, 72/56/32px headings) — all of which
-// meant a "theme" could only change about half the page.
-//
-// Sizing uses CSS LOGICAL properties (padding-block / padding-inline,
-// scroll-margin-block-start) so the same token names remain meaningful when a
-// horizontal template maps block -> X.
-//
-// This string is wrapped in @layer template by assembleDocument(), so vendor
-// stylesheets can never outrank it regardless of selector specificity.
-// ============================================================================
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-import type { ResolvedTheme } from "../../types";
-import { cssValue } from "../../escape";
+exports[`golden fixture > matches the committed snapshot 1`] = `
+"<!DOCTYPE html>
+<html lang="en" prefix="og: https://ogp.me/ns#">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Golden Coin</title>
+    <meta name="description" content="The canonical fixture site.">
+    <meta name="keywords" content="fixture, golden, test">
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="canonical" href="https://goldencoin.example">
+    <meta name="theme-color" content="#0b0b0f">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://goldencoin.example">
+    <meta property="og:title" content="Golden Coin">
+    <meta property="og:description" content="The canonical fixture site.">
+    <meta property="og:site_name" content="Golden Coin">
+    <meta property="og:locale" content="en">
+    <meta property="og:image" content="https://goldencoin.example/media/hero-1200.54026b0c.webp">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Golden Coin social card">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Golden Coin">
+    <meta name="twitter:description" content="The canonical fixture site.">
+    <meta name="twitter:image" content="https://goldencoin.example/media/hero-1200.54026b0c.webp">
+    
+    <style>
+@layer reset, vendor, tokens, template, overrides;
 
-export function heroOnepagerStyles(theme: ResolvedTheme): string {
-  const md = cssValue(theme.raw.breakpointMd, "768px");
+@layer reset {
+  *, *::before, *::after { box-sizing: border-box; }
+  * { margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; scroll-padding-block-start: var(--st-header-h, 0px); }
+  img, svg, video { display: block; max-width: 100%; }
+  a { color: inherit; }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+  :where([hidden]) { display: none !important; }
+  :focus-visible { outline: 2px solid var(--st-color-primary); outline-offset: 2px; }
+}
 
-  return `
+@layer tokens {
+:root {
+  color-scheme: dark;
+  --st-color-bg: #0b0b0f;
+  --st-color-surface: #15151c;
+  --st-color-primary: #7c5cff;
+  --st-color-primary-hover: #694ed9;
+  --st-color-on-primary: #ffffff;
+  --st-color-secondary: #22d3ee;
+  --st-color-secondary-hover: #1db3ca;
+  --st-color-on-secondary: #ffffff;
+  --st-color-text: #f4f4f5;
+  --st-color-text-muted: #a1a1aa;
+  --st-color-heading: #f4f4f5;
+  --st-color-border: #27272a;
+  --st-color-overlay: rgba(0,0,0,0.55);
+  --st-color-success: #22c55e;
+  --st-color-warning: #f59e0b;
+  --st-color-error: #ef4444;
+  --st-color-info: #22d3ee;
+  --st-color-text-on-image: #f4f4f5;
+  --st-color-surface-elevated: #23232a;
+  --st-nav-bg: rgba(0,0,0,.2);
+  --st-nav-fg: #f4f4f5;
+  --st-footer-bg: #15151c;
+  --st-footer-fg: #a1a1aa;
+  --st-footer-border: #27272a;
+  --st-color-overlay-scrim: rgba(0,0,0,0.55);
+  --st-mobile-menu-bg: #15151c;
+  --st-font-family-base: Inter, sans-serif;
+  --st-font-family-heading: Inter, sans-serif;
+  --st-font-family-mono: ui-monospace, monospace;
+  --st-font-weight-normal: 400;
+  --st-font-weight-medium: 500;
+  --st-font-weight-bold: 700;
+  --st-line-height-base: 1.6;
+  --st-line-height-heading: 1.15;
+  --st-letter-spacing-tight: normal;
+  --st-letter-spacing-wide: 0.1em;
+  --st-heading-transform: uppercase;
+  --st-kicker-transform: uppercase;
+  --st-space-unit: 8px;
+  --st-container-max-inline: 1200px;
+  --st-content-max-inline: 700px;
+  --st-section-padding-block: 80px;
+  --st-section-padding-inline: 8%;
+  --st-radius: 4px;
+  --st-radius-sm: 4px;
+  --st-radius-lg: 4px;
+  --st-motion-speed: 0.2s;
+  --st-motion-easing: ease;
+  --st-shadow-sm: none;
+  --st-shadow-md: none;
+  --st-shadow-lg: none;
+  --st-font-size-h1: 48.828px;
+  --st-font-size-h2: 39.063px;
+  --st-font-size-h3: 31.25px;
+  --st-font-size-h4: 25px;
+  --st-font-size-h5: 20px;
+  --st-font-size-h6: 16px;
+  --st-font-size-base: 16px;
+  --st-tpl-header-blur: 12px;
+  --st-tpl-section-min-height: 100vh;
+  --st-tpl-btn-pad-y: 14px;
+  --st-tpl-btn-pad-x: 34px;
+  --st-tpl-btn-border-width: 2px;
+  --st-tpl-social-gap: 24px;
+}
+@media (max-width: 768px) {
+  :root {
+    --st-font-size-h1: 35.156px;
+    --st-font-size-h2: 28.125px;
+    --st-font-size-h3: 22.5px;
+    --st-font-size-h4: 18px;
+    --st-font-size-h5: 14.4px;
+    --st-font-size-h6: 11.52px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+}
+
+@layer template {
 /* ---------------------------------------------------------------------------
    Base
    The reset lives in @layer reset (document.ts). This is template-owned look.
@@ -459,7 +565,7 @@ p {
    with the desktop values and inevitably drifted.
 --------------------------------------------------------------------------- */
 
-@media (max-width: ${md}) {
+@media (max-width: 768px) {
   .site-header { padding-inline: calc(var(--st-space-unit) * 2.5); }
 
   .menu-toggle { display: flex; }
@@ -486,5 +592,241 @@ p {
   .panel { padding-inline: calc(var(--st-space-unit) * 2.5); }
   .hero-social svg { inline-size: 26px; block-size: 26px; }
 }
-`.trim();
 }
+    </style>
+    
+  </head>
+  <body>
+
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <a class="logo" href="#top">GOLD</a>
+
+    <nav class="nav" aria-label="Primary">
+      <div class="nav-social">
+          <a href="https://x.com/example" target="_blank" rel="noopener noreferrer"><svg role="img" aria-label="Follow on X"><use href="#i-x-twitter"/></svg></a>
+          <a href="https://t.me/example" target="_blank" rel="noopener noreferrer"><svg role="img" aria-label="Join Telegram"><use href="#i-telegram"/></svg></a>
+        </div>
+
+      <ul class="nav-links" id="nav-links" data-open="false">
+        <li><a href="#about">About</a></li>
+            <li><a href="#numbers">Numbers</a></li>
+            <li><a href="#roadmap">Roadmap</a></li>
+            <li><a href="#faq">FAQ</a></li>
+      </ul>
+
+      <button
+        class="menu-toggle"
+        type="button"
+        aria-label="Toggle navigation"
+        aria-controls="nav-links"
+        aria-expanded="false"
+        data-menu-toggle
+      >
+        <span class="bar"></span>
+        <span class="bar"></span>
+        <span class="bar"></span>
+      </button>
+    </nav>
+  </header>
+
+  <main id="main">
+
+    <section id="top" class="panel hero" style="--section-bg: url(&#39;/media/hero-2400.4ba76339.webp&#39;); --section-focus: 50.0% 40.0%; --section-overlay: 0.5" data-align="start" data-has-image="true">
+      <div class="panel-content">
+        <span class="kicker">Now live</span>
+        <h1>A canonical hero headline</h1>
+        <p>First hero paragraph, written for humans rather than crawlers.</p>
+        <p>Second paragraph, proving the array renders more than one &lt;p&gt;.</p>
+        <div class="cta-row">
+          <a class="btn" href="https://dex.example/swap" target="_blank" rel="noopener noreferrer">Buy now</a>
+          <a class="btn btn--outline" href="#about">Read docs</a>
+        </div>
+        
+        <button class="contract" type="button"
+                data-copy="So11111111111111111111111111111111111111112"
+                data-copy-confirm="Address copied">
+          <span class="contract-label">Contract address — click to copy</span>
+          <span class="contract-value">So11111111111111111111111111111111111111112</span>
+          <span class="contract-status" data-copy-status role="status" aria-live="polite"></span>
+        </button>
+        
+        <div class="hero-social">
+          <span>Join us</span>
+          <a href="https://x.com/example" target="_blank" rel="noopener noreferrer"><svg role="img" aria-label="Follow on X"><use href="#i-x-twitter"/></svg></a>
+          <a href="https://t.me/example" target="_blank" rel="noopener noreferrer"><svg role="img" aria-label="Join Telegram"><use href="#i-telegram"/></svg></a>
+        </div>
+      </div>
+    </section>
+
+    <section id="about" class="panel" style="--section-bg: url(&#39;/media/section-2400.c064aed2.webp&#39;); --section-focus: 50.0% 40.0%; --section-overlay: 0.45" data-align="start" data-has-image="true">
+      <div class="panel-content">
+        <span class="kicker">The idea</span>
+        <h2>About the project</h2>
+        <p>A paragraph about the project.</p>
+        <p>And another one.</p>
+        <a class="btn btn--outline" href="https://docs.example" target="_blank" rel="noopener noreferrer">Learn more</a>
+      </div>
+    </section>
+
+    <section id="numbers" class="panel" data-align="center" data-has-image="false">
+      <div class="panel-content">
+        <h2>By the numbers</h2>
+        <p>Supply and distribution at a glance.</p>
+        <div class="stats-grid">
+          <div class="stat">
+            <div class="stat-value">1,000,000,000</div>
+            <div class="stat-label">Total supply</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value">0%</div>
+            <div class="stat-label">Team allocation</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value">∞</div>
+            <div class="stat-label">Vibes</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="roadmap" class="panel" data-align="start" data-has-image="false">
+      <div class="panel-content">
+        <h2>Roadmap</h2>
+        <ol class="timeline">
+          <li data-status="done">
+            <span class="timeline-marker">Q1 2026</span>
+            <h3>Launch</h3>
+            <p>Token goes live.</p>
+          </li>
+          <li data-status="active">
+            <span class="timeline-marker">Q2 2026</span>
+            <h3>Listings</h3>
+            
+          </li>
+          <li data-status="upcoming">
+            <span class="timeline-marker">Q3 2026</span>
+            <h3>Expansion</h3>
+            
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <section id="faq" class="panel" data-align="start" data-has-image="false">
+      <div class="panel-content">
+        <h2>Questions</h2>
+        <div class="faq">
+          <details>
+            <summary>Is this financial advice?</summary>
+            <p>No.</p>
+          </details>
+          <details>
+            <summary>Where do I buy?</summary>
+            <p>Through any supported DEX.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <ul class="footer-links">
+      <li><a href="/terms">Terms</a></li>
+    </ul>
+    <p>This is a digital collectible for novelty and entertainment, not a financial instrument.</p>
+    <p>&copy;2026 Golden Coin — not affiliated with Example Corp</p>
+    
+  </footer>
+  <script>(function () {
+  "use strict";
+
+  // ---- Mobile menu ----
+  var toggle = document.querySelector("[data-menu-toggle]");
+  var links  = document.getElementById("nav-links");
+
+  if (toggle && links) {
+    toggle.addEventListener("click", function () {
+      var open = toggle.getAttribute("aria-expanded") === "true";
+      toggle.setAttribute("aria-expanded", String(!open));
+      links.setAttribute("data-open", String(!open));
+    });
+
+    // Close on navigation, or the menu covers the section just jumped to.
+    links.addEventListener("click", function (e) {
+      if (e.target.tagName === "A") {
+        toggle.setAttribute("aria-expanded", "false");
+        links.setAttribute("data-open", "false");
+      }
+    });
+
+    // Escape closes and returns focus to the control.
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && toggle.getAttribute("aria-expanded") === "true") {
+        toggle.setAttribute("aria-expanded", "false");
+        links.setAttribute("data-open", "false");
+        toggle.focus();
+      }
+    });
+  }
+
+  // ---- Copy to clipboard ----
+  // The original used alert(), which blocks the page and looks like malware on
+  // a crypto site. Inline status text in an aria-live region instead.
+  document.querySelectorAll("[data-copy]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var value  = btn.getAttribute("data-copy");
+      var status = btn.querySelector("[data-copy-status]");
+
+      function done(message) {
+        if (!status) return;
+        status.textContent = message;
+        setTimeout(function () { status.textContent = ""; }, 2500);
+      }
+
+      // Clipboard API needs a secure context. Published sites are HTTPS, but
+      // a local file:// preview is not — hence the fallback.
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(value).then(
+          function () { done(btn.getAttribute("data-copy-confirm")); },
+          function () { done("Copy failed — select and copy manually"); }
+        );
+      } else {
+        var field = document.createElement("textarea");
+        field.value = value;
+        field.setAttribute("readonly", "");
+        field.style.position = "fixed";
+        field.style.opacity = "0";
+        document.body.appendChild(field);
+        field.select();
+        try {
+          document.execCommand("copy");
+          done(btn.getAttribute("data-copy-confirm"));
+        } catch (err) {
+          done("Copy failed — select and copy manually");
+        }
+        document.body.removeChild(field);
+      }
+    });
+  });
+
+  // ---- Header height ----
+  // Feeds --st-header-h, which drives scroll-padding so anchor jumps do not
+  // land underneath the fixed header. Measured rather than assumed, because
+  // the header's height depends on the theme's font size and padding.
+  var header = document.querySelector(".site-header");
+  if (header) {
+    var setHeight = function () {
+      document.documentElement.style.setProperty(
+        "--st-header-h", header.offsetHeight + "px"
+      );
+    };
+    setHeight();
+    window.addEventListener("resize", setHeight, { passive: true });
+  }
+})();</script>
+  </body>
+</html>
+"
+`;

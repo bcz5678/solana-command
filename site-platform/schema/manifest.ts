@@ -162,7 +162,7 @@ export const TemplateManifestSchema = TemplateManifestObject.superRefine((manife
   // A slotted template's look comes from the imported stylesheet. Listing theme
   // keys would make the form render colour pickers the renderer ignores, which
   // reads as a bug to the author.
-  if (manifest.kind === "slotted") {
+  if (manifest.kind === "slotted"  && !manifest.slotted?.cssTokenized) {
     if (manifest.usesThemeKeys.length > 0) {
       ctx.addIssue({
         code: "custom",
