@@ -55,7 +55,13 @@ function readSlot(
   path: string,
   result: ExtractResult,
 ): void {
-  const matches = [...root.querySelectorAll(slot.selector)];
+  // Mirrors apply.ts: linkedom's :scope only works as a descendant filter, so
+  // "the root itself" (a leaf repeater item with no selectable child) has to
+  // be special-cased rather than queried — an unhandled ":scope" here silently
+  // fails every field detect-repeaters.ts emits for a leaf-item repeater.
+  const matches = slot.selector === ":scope"
+    ? [root as unknown as Element]
+    : [...root.querySelectorAll(slot.selector)];
 
   if (matches.length === 0) {
     result.warnings.push(`No match for "${slot.selector}" (-> ${path})`);

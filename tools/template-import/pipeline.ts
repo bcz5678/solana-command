@@ -14,7 +14,7 @@
 // ============================================================================
 
 import { analyze, type TemplateAnalysis, type AnalyzedSection } from "./analyze.js";
-import { tokenizeCss, type TokenizeResult, type Substitution } from "./css/tokenize-css.js";
+import { tokenizeCss, normalizeValue, type TokenizeResult, type Substitution } from "./css/tokenize-css.js";
 import { merge, type MergedImport } from "./merge.js";
 
 // ============================================================================
@@ -158,8 +158,11 @@ function applySectionOverrides(analysis: TemplateAnalysis, overrides: Overrides)
         type: (patch.type ?? section.type) as AnalyzedSection["type"],
         navLabel: patch.navLabel ?? section.navLabel,
         isHero: patch.isHero ?? section.isHero,
-        // A confirmed section is no longer an inference.
-        confidence: 1,
+        // A confirmed section is no longer an inference — but only an explicit
+        // type correction confirms it. A patch that sets only ignoreRepeaters
+        // or navLabel must not silently drop the section from the "confirm
+        // type" review queue for a type nobody actually looked at.
+        confidence: patch.type !== undefined ? 1 : section.confidence,
       };
     })
     // `order` is positional and must stay dense after an ignore.
@@ -216,7 +219,13 @@ function rebuildTheme(
 ): Record<string, unknown> {
   const theme: Record<string, unknown> = {};
 
-  for (const sub of substitutions) setPath(theme, sub.token, sub.original);
+  // normalizeValue, not sub.original directly — some tokens (lineHeightBase,
+  // fontWeightBold, ...) are typed as numbers in LayeredThemeSchema, and every
+  // substitution's `original` is a raw CSS string. buildThemeDraft() already
+  // gets this right; skipping it here is how a retoken override — or just the
+  // `substitutions: {}` init always seeds overrides.json with, which is enough
+  // to make this path run every time — reintroduced the exact type mismatch.
+  for (const sub of substitutions) setPath(theme, sub.token, normalizeValue(sub.token, sub.property, sub.original));
 
   // Type-scale and breakpoint values aren't substitutions, so carry them over.
   for (const path of [

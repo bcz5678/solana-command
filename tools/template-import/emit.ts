@@ -21,6 +21,7 @@ import { createHash } from "node:crypto";
 import { tokenToVar } from "@site/schema";
 import { rewriteCss,  type Substitution, type TokenizeResult } from "./css/tokenize-css.js";
 import { TemplateAnalysis } from "./analyze.js";
+import type { MergedImport } from "./merge.js";
 import type { TemplatePreset } from "@site/schema";
 
 // ============================================================================
@@ -42,6 +43,9 @@ export interface EmitInput {
 /** Needed for sectionNodes: selectors must use the SOURCE document's ids,
 *  not the preset's generated slugs. They agree only by coincidence. */
   analysis: TemplateAnalysis;
+  /** Supplies cssBackgrounds — merge.ts already joined markup and CSS to find
+   *  section backgrounds that live only in a ::before rule. */
+  merged: MergedImport;
 }
 
 export interface EmitResult {
@@ -53,6 +57,12 @@ export interface EmitResult {
   /** Paths that must not overwrite an existing file. */
   writeOnlyIfAbsent: string[];
   warnings: string[];
+    /**
+   * Conditions that must be resolved before this emit can be trusted. Distinct
+   * from `warnings`: a misaligned sectionNodes map fails silently at render —
+   * every selector still resolves, just to the wrong section.
+   */
+  blockers: string[];
 }
 
 // ============================================================================
@@ -61,6 +71,7 @@ export interface EmitResult {
 
 export function emitTemplate(input: EmitInput): EmitResult {
   const warnings: string[] = [];
+  const blockers: string[] = [];
 
   // --- 1. Rewrite ----------------------------------------------------------
   // Skips substitutions whose token has no variable rather than throwing, so
@@ -118,7 +129,6 @@ export function emitTemplate(input: EmitInput): EmitResult {
     sectionCount: { min: sectionCount, max: sectionCount },
 
     supportsModules: [],
-    sectionNodes: buildSectionNodes(input.analysis, input.preset, warnings),
     requiredContent: ["hero.title", "meta.title"],
     dependencies: [],
 
@@ -136,7 +146,10 @@ export function emitTemplate(input: EmitInput): EmitResult {
     kind: "slotted",
     slotted: {
       ...input.spec,
+      sectionNodes: buildSectionNodes(input.analysis, input.preset, warnings, blockers),
+      cssBackgrounds: buildCssBackgrounds(input.merged),
       sourceHash: sha256(input.html),
+
       // Presence of this is what lifts the "usesThemeKeys must be empty"
       // refinement — the look is fixed exactly when the CSS wasn't tokenized.
       cssTokenized: { source: "inline", cssHash },
@@ -163,6 +176,7 @@ export function emitTemplate(input: EmitInput): EmitResult {
     // Regenerating either would discard the review.
     writeOnlyIfAbsent: ["manifest.ts", "index.ts"],
     warnings,
+    blockers,
   };
 }
 
@@ -199,6 +213,8 @@ function controlType(property: string, value: string): string {
   if (/^-?[\d.]+$/.test(value)) return "number";
   return "select";
 }
+
+
 
 // ============================================================================
 // FILE BODIES
@@ -308,43 +324,119 @@ const titleCase = (value: string): string =>
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
 
-    /**
- * Map each content section to the node it renders into.
+// ============================================================================
+// CSS BACKGROUNDS
+// ============================================================================
+
+/**
+ * Split merge.ts's `cssBackgrounds` (sectionPath/selector/sourceUrl, selector
+ * still carrying the pseudo) into the manifest shape (path/selector/pseudo,
+ * split apart) — SlottedSpecSchema.cssBackgrounds needs the pseudo isolated
+ * so the render path can build `${selector}::${pseudo}` itself rather than
+ * string-matching it back out of a combined selector every render.
  *
- * `path` indexes the PRESET's sections array (hero excluded, since hero is not
- * a member of SiteContent.sections). `selector` targets the SOURCE document's
- * own id, because removal runs before rewriteAnchors — at that point the DOM
- * still carries the ids the bundle shipped with.
+ * `sourceUrl` is dropped: it named the bundle's OWN image, used at import time
+ * to know what to download. At render time the real asset lives at
+ * `content[path]`, already through the asset pipeline.
+ */
+function buildCssBackgrounds(
+  merged: MergedImport,
+): Array<{ path: string; selector: string; pseudo?: "before" | "after" }> {
+  return merged.cssBackgrounds.map((bg) => {
+    const match = bg.selector.match(/^(.*?)::?(before|after)$/);
+
+    return {
+      path: `${bg.sectionPath}.backgroundImage`,
+      selector: match ? match[1]! : bg.selector,
+      pseudo: match ? (match[2] as "before" | "after") : undefined,
+    };
+  });
+}
+
+// ============================================================================
+// SECTION NODES
+// ============================================================================
+
+/**
+ * The sectionNodes alignment check, without doing an emit.
+ *
+ * Separated so `check` can run it without loading a preset module or
+ * rewriting a stylesheet. The condition is worth gating CI on because it
+ * fails SILENTLY at render: a misaligned map still resolves every selector,
+ * just to the wrong section, so a site disables one section and loses a
+ * different one.
+ */
+export function validateEmitInputs(
+  analysis: TemplateAnalysis,
+  sectionCount: number,
+): string[] {
+  const nonHero = analysis.sections.filter((s) => !s.isHero).length;
+
+  return nonHero === sectionCount
+    ? []
+    : [
+        `sectionNodes misaligned: analysis has ${nonHero} non-hero section(s), ` +
+        `preset has ${sectionCount}. Re-run analyze and preset from the same source.`,
+      ];
+}
+
+/**
+ * Map each content section to the DOM node it renders into, so a section
+ * switched off in the wizard can have its node removed.
+ *
+ * Two identifier spaces meet here and they are NOT interchangeable:
+ *
+ *   path       indexes the PRESET's sections array, hero excluded — hero is
+ *              not a member of SiteContent.sections.
+ *   selector   targets the SOURCE document's own id. removeDisabledSections
+ *              runs at step 3.5, before rewriteAnchors, so at that point the
+ *              DOM still carries the ids the bundle shipped with.
+ *
+ * On the reference template these coincide: nav labels "IPO"/"Offering"/"Coin"
+ * slugify to the same ids the source used. A source with id="section-2" and a
+ * nav label of "Roadmap" gives #roadmap from the preset and #section-2 in the
+ * DOM, and every selector misses silently.
  */
 function buildSectionNodes(
   analysis: TemplateAnalysis,
   preset: TemplatePreset,
   warnings: string[],
+  blockers: string[],
 ): Array<{ path: string; selector: string; navSelector?: string }> {
   const nonHero = analysis.sections.filter((s) => !s.isHero);
 
-  if (nonHero.length !== preset.content.sections.length) {
+  // analyze and preset are separate commands, so overrides.json can change
+  // between them. Misalignment here disables the wrong section — silently,
+  // since every selector still resolves to something. validateEmitInputs is
+  // also what `check` runs on its own, without loading a preset module or
+  // doing a full emit — one implementation of the comparison, not two.
+  const emitBlockers = validateEmitInputs(analysis, preset.content.sections.length);
+  blockers.push(...emitBlockers);
+
+  if (emitBlockers.length > 0) {
     warnings.push(
       `Analysis found ${nonHero.length} non-hero section(s) but the preset has ` +
       `${preset.content.sections.length}. sectionNodes will be misaligned — ` +
-      `re-run analyze and preset from the same source.`,
+      `re-run analyze and preset from the same source before emitting.`,
     );
   }
 
   return nonHero.map((section, i) => {
     if (!section.sourceId) {
       warnings.push(
-        `Section ${i} ("${section.navLabel ?? "?"}") has no id in the source. ` +
-        `It cannot be disabled; give it an id in source.html and re-run.`,
+        `Section ${i} ("${section.navLabel ?? "?"}") has no id in the source, so it ` +
+        `cannot be disabled. Give it an id in source.html and re-run init.`,
       );
     }
 
     return {
       path: `sections[${i}]`,
-      selector: section.selector,           // "#ipo" — already an id selector
-      navSelector: section.sourceId
-        ? `a[href="#${section.sourceId}"]`
-        : undefined,
+      // Already "#id" when an id exists; cssPath() fallback otherwise.
+      selector: section.selector,
+      // $= rather than =: sources ship href=" #ipo" and href="page.html#ipo".
+      // normalize.ts trims the whitespace case, but the suffix match costs
+      // nothing and is correct on a one-pager either way.
+      navSelector: section.sourceId ? `a[href$="#${section.sourceId}"]` : undefined,
     };
   });
 }

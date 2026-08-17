@@ -81,7 +81,17 @@ export function applySlot(
   ctx: TemplateContext,
   result: ApplyResult,
 ): void {
-  const matches = scope.querySelectorAll(slot.selector);
+
+  // linkedom supports :scope in querySelectorAll, but only as a descendant
+  // filter — ":scope" alone matches nothing, since the scope element is not its
+  // own descendant. Handled here rather than relied on.
+  //
+  // Only a repeater clone ever emits ":scope" (detect-repeaters.ts only infers
+  // it from an item's own leaf text), so `scope` here is always the element,
+  // never the top-level SlottedDocument.
+  const matches = slot.selector === ":scope"
+    ? [scope as SlottedElement]
+    : Array.from(scope.querySelectorAll(slot.selector));
 
   if (matches.length === 0) {
     // The source changed, or the selector was wrong. Loud, because a silently

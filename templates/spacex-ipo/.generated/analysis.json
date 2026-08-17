@@ -1,0 +1,165 @@
+{
+  "nav": {
+    "selector": ".navbar",
+    "anchors": [
+      {
+        "href": "#ipo",
+        "label": "IPO"
+      },
+      {
+        "href": "#offering",
+        "label": "Offering"
+      },
+      {
+        "href": "#coin",
+        "label": "Coin"
+      }
+    ],
+    "social": [
+      {
+        "href": "https://t.me/spacexipo_coin",
+        "platform": "telegram",
+        "iconClass": "fa-brands fa-xl fa-telegram"
+      }
+    ]
+  },
+  "sections": [
+    {
+      "sourceId": "launch",
+      "selector": "#launch",
+      "order": 0,
+      "isHero": true,
+      "confidence": 0.8,
+      "backgroundFrom": ".hero::before",
+      "notes": [
+        "No nav link targets #launch — navLabel will need writing."
+      ],
+      "type": "prose",
+      "repeaters": [],
+      "roles": {
+        "body": [
+          ".content p:nth-of-type(1)",
+          ".content p:nth-of-type(2)"
+        ],
+        "title": ".content h1",
+        "kicker": ".kicker",
+        "cta": ".btn",
+        "backgroundFrom": ".hero::before"
+      },
+      "samples": {
+        "kicker": "Invest in Exploration",
+        "title": "Celebrating the launch",
+        "cta": "CA Click to copy: 0xXXd5934Ce90228B9B7cE03999b81069ab629XXXX",
+        "body[0]": "In 2020, SpaceX returned America's ability to fly NASA astronauts to and from the International Space Station on American vehicles.",
+        "body[1]": "The SpaceXIPO coin celebrates the launch of $SPCX."
+      }
+    },
+    {
+      "sourceId": "ipo",
+      "selector": "#ipo",
+      "navLabel": "IPO",
+      "order": 1,
+      "isHero": false,
+      "confidence": 0.95,
+      "backgroundFrom": ".section::before, .starship::before",
+      "notes": [],
+      "type": "prose",
+      "repeaters": [],
+      "roles": {
+        "body": [
+          ".content p:nth-of-type(2)"
+        ],
+        "title": ".content h2",
+        "kicker": ".kicker",
+        "backgroundFrom": ".section::before, .starship::before"
+      },
+      "samples": {
+        "kicker": "SpaceX IPO",
+        "title": "$SPCX",
+        "body[0]": "SpaceX was listed on the Nasdaq under the ticker symbol $SPCX on June 12, 2026. The company intended to raise $75 billion by selling 555.6 million shares at $135 apiece, targeting a mind-boggling valuation of roughly $1.75 trillion. However, after a day of trading the stock now values the company at $2.1 trillion."
+      }
+    },
+    {
+      "sourceId": "offering",
+      "selector": "#offering",
+      "navLabel": "Offering",
+      "order": 2,
+      "isHero": false,
+      "confidence": 0.95,
+      "backgroundFrom": ".section::before, .human::before",
+      "notes": [],
+      "type": "prose",
+      "repeaters": [],
+      "roles": {
+        "body": [
+          ".content p:nth-of-type(1)",
+          ".content p:nth-of-type(2)"
+        ],
+        "title": ".content h2",
+        "kicker": ".kicker",
+        "backgroundFrom": ".section::before, .human::before"
+      },
+      "samples": {
+        "kicker": "Access",
+        "title": "A non-traditional offering",
+        "body[0]": "Unlike standard IPOs where financial institutions dominate, SpaceX is offering individual investors up to 30% of the deal at the same price. Brokerages like Robinhood, Fidelity, and SoFi have lowered their minimum participation requirements to as little as $2,000.",
+        "body[1]": "Because of the listing's enormous scale, the Nasdaq-100 has created a new fast-entry rule allowing SpaceX to join the benchmark after just 15 days of trading."
+      }
+    },
+    {
+      "sourceId": "coin",
+      "selector": "#coin",
+      "navLabel": "Coin",
+      "order": 3,
+      "isHero": false,
+      "confidence": 0.95,
+      "backgroundFrom": ".section::before, .network::before",
+      "notes": [],
+      "type": "prose",
+      "repeaters": [],
+      "roles": {
+        "body": [
+          ".content p"
+        ],
+        "title": ".content h2",
+        "kicker": ".kicker",
+        "cta": ".btn",
+        "backgroundFrom": ".section::before, .network::before"
+      },
+      "samples": {
+        "kicker": "The SpaceX IPO Coin",
+        "title": "From Launch to Orbit",
+        "cta": "SpaceX",
+        "body[0]": "SpaceXIPO coin is intended to sustain growth by transitioning from initial hype to continuous trading activity.."
+      }
+    }
+  ],
+  "pendingBackgrounds": [
+    {
+      "section": "#launch",
+      "from": ".hero::before"
+    },
+    {
+      "section": "#ipo",
+      "from": ".section::before, .starship::before"
+    },
+    {
+      "section": "#offering",
+      "from": ".section::before, .human::before"
+    },
+    {
+      "section": "#coin",
+      "from": ".section::before, .network::before"
+    }
+  ],
+  "headingUsage": {
+    "h1": 1,
+    "h2": 3,
+    "h3": 1
+  },
+  "linkedStylesheets": [
+    "assets/fontawesome/css/fontawesome.css",
+    "assets/fontawesome/css/brands.css"
+  ],
+  "warnings": []
+}

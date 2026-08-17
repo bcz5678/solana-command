@@ -1,0 +1,52 @@
+{
+  "core": {
+    "colors": {
+      "background": "#000",
+      "text": "#fff",
+      "overlay": "#000000",
+      "textMuted": "#e0e0e0",
+      "primary": "#fff",
+      "onPrimary": "#000",
+      "primaryHover": "white"
+    },
+    "typography": {
+      "fontFamilyBase": "\"Manrope\",Verdana,Geneva,Tahoma,sans-serif",
+      "letterSpacingWide": "2px",
+      "kickerTransform": "uppercase",
+      "lineHeightHeading": 1.1,
+      "headingTransform": "uppercase",
+      "baseFontSize": "18px",
+      "lineHeightBase": 1.7,
+      "scaleRatio": 1.3281,
+      "scaleRatioMobile": 1.2074
+    },
+    "spacing": {
+      "sectionPaddingBlock": "80px",
+      "sectionPaddingInline": "8%",
+      "contentMaxInline": "700px"
+    },
+    "button": {
+      "textTransform": "uppercase"
+    },
+    "motion": {
+      "speed": ".3s"
+    },
+    "breakpoints": {
+      "md": "768px"
+    }
+  },
+  "semantic": {
+    "navBackground": "rgba(0,0,0,.2)",
+    "navForeground": "white",
+    "footerBackground": "#000",
+    "footerBorder": "#222",
+    "footerForeground": "#888",
+    "mobileMenuBackground": "#333"
+  },
+  "templates": {
+    "$": {
+      "headerBlur": "blur(8px)",
+      "sectionMinHeight": "100vh"
+    }
+  }
+}

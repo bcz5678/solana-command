@@ -279,17 +279,6 @@ function isInsideSelector(node: El, section: El, selector: string): boolean {
   return Boolean(owner && contains(owner, node));
 }
 
-export function sampleRoles(section: El, roles: SectionCandidate["roles"]): Record<string, string> {
-  const out: Record<string, string> = {};
-  const read = (sel?: string) => (sel ? text(section.querySelector(sel) ?? ({} as El)) : "");
-
-  if (roles.kicker) out.kicker = read(roles.kicker);
-  if (roles.title) out.title = read(roles.title);
-  if (roles.cta) out.cta = read(roles.cta);
-  roles.body.forEach((sel, i) => { out[`body[${i}]`] = truncate(read(sel)); });
-
-  return out;
-}
 
 // ============================================================================
 // HELPERS

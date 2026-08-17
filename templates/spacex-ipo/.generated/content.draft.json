@@ -1,0 +1,103 @@
+{
+  "_review": [
+    "Section `type` values are inferred — confirm each.",
+    "Section ids and slugs are minted by the authoring script, not here.",
+    "ANONYMIZE before this becomes a preset: names, addresses, socials, legal entity.",
+    "Background images are source URLs pending download and variant generation."
+  ],
+  "hero": {
+    "kicker": "Invest in Exploration",
+    "title": "Celebrating the launch",
+    "body": [
+      "In 2020, SpaceX returned America's ability to fly NASA astronauts to and from the International Space Station on American vehicles.",
+      "The SpaceXIPO coin celebrates the launch of $SPCX."
+    ],
+    "ctas": [
+      {
+        "label": "CA Click to copy: 0xXXd5934Ce90228B9B7cE03999b81069ab629XXXX",
+        "href": "TODO"
+      }
+    ],
+    "overlayOpacity": 0.35,
+    "overlayDirection": "uniform",
+    "backgroundImage": {
+      "_sourceUrl": "assets/banner.jpeg",
+      "_pending": "download + variants"
+    }
+  },
+  "sections": [
+    {
+      "_sourceId": "ipo",
+      "_confidence": 0.95,
+      "order": 0,
+      "type": "prose",
+      "navLabel": "IPO",
+      "kicker": "SpaceX IPO",
+      "title": "$SPCX",
+      "body": [
+        "SpaceX was listed on the Nasdaq under the ticker symbol $SPCX on June 12, 2026. The company intended to raise $75 billion by selling 555.6 million shares at $135 apiece, targeting a mind-boggling valuation of roughly $1.75 trillion. However, after a day of trading the stock now values the company at $2.1 trillion."
+      ],
+      "overlayOpacity": 0.35,
+      "overlayDirection": "uniform",
+      "backgroundImage": {
+        "_sourceUrl": "assets/img1.jpeg",
+        "_pending": "download + variants"
+      }
+    },
+    {
+      "_sourceId": "offering",
+      "_confidence": 0.95,
+      "order": 1,
+      "type": "prose",
+      "navLabel": "Offering",
+      "kicker": "Access",
+      "title": "A non-traditional offering",
+      "body": [
+        "Unlike standard IPOs where financial institutions dominate, SpaceX is offering individual investors up to 30% of the deal at the same price. Brokerages like Robinhood, Fidelity, and SoFi have lowered their minimum participation requirements to as little as $2,000.",
+        "Because of the listing's enormous scale, the Nasdaq-100 has created a new fast-entry rule allowing SpaceX to join the benchmark after just 15 days of trading."
+      ],
+      "overlayOpacity": 0.35,
+      "overlayDirection": "uniform",
+      "backgroundImage": {
+        "_sourceUrl": "assets/img2.jpeg",
+        "_pending": "download + variants"
+      }
+    },
+    {
+      "_sourceId": "coin",
+      "_confidence": 0.95,
+      "order": 2,
+      "type": "prose",
+      "navLabel": "Coin",
+      "kicker": "The SpaceX IPO Coin",
+      "title": "From Launch to Orbit",
+      "body": [
+        "SpaceXIPO coin is intended to sustain growth by transitioning from initial hype to continuous trading activity.."
+      ],
+      "cta": {
+        "label": "SpaceX",
+        "href": "TODO"
+      },
+      "overlayOpacity": 0.35,
+      "overlayDirection": "uniform",
+      "backgroundImage": {
+        "_sourceUrl": "assets/img3.jpeg",
+        "_pending": "download + variants"
+      }
+    }
+  ],
+  "social": [
+    {
+      "platform": "telegram",
+      "label": "telegram",
+      "url": "https://t.me/spacexipo_coin",
+      "showInNav": true
+    }
+  ],
+  "footer": {
+    "disclaimer": "TODO",
+    "legal": {
+      "copyrightYear": "auto"
+    }
+  }
+}

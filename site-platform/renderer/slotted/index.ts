@@ -21,7 +21,7 @@ import { resolveTheme } from "../theme";
 import { buildMetaTags } from "../document";
 import { scriptHash, sha256Hex, invalidationPaths, planMedia, makeImageUrlResolver }
   from "../assets";
-import { cssIdent } from "../escape";
+import { cssIdent, cssValue } from "../escape";
 
 import { SlottedDocument, SlottedElement } from './dom';
 
@@ -188,6 +188,18 @@ export async function renderSlotted(input: RenderInput): Promise<SlottedRenderRe
   // ---- 8. Head ----
   replaceMetaTags(doc as never, definition, imageUrl);
 
+  // ---- 8.5. CSS-only backgrounds ----
+  // Appended, not prepended: the bundle's own <link>/<style> is never wrapped
+  // in @layer for a slotted template (the look is the source's own), so
+  // whichever rule comes LAST in source order wins an equal-specificity
+  // match. Landing this before the bundle's stylesheet would mean every
+  // per-site background silently loses to the bundle's original literal.
+  const cssBackgrounds = emitCssBackgrounds(spec, definition.content, imageUrl);
+  if (cssBackgrounds) {
+    const head = doc.querySelector("head");
+    if (head) head.innerHTML += `<style>${cssBackgrounds}</style>`;
+  }
+
   // ---- 9. Approved scripts ----
   // Source scripts were stripped unconditionally in step 2. These are the
   // reviewed replacements, emitted inline and hashed for the CSP.
@@ -223,7 +235,7 @@ export async function renderSlotted(input: RenderInput): Promise<SlottedRenderRe
   return {
     html,
     body: html,      // no separate fragment; the source is the document
-    css: "",         // the source owns its own styling
+    css: cssBackgrounds, // the source owns its own styling; this is the per-site override on top
     inlineScriptHashes,
     assetManifest,
     stripReport,
@@ -316,6 +328,36 @@ function rewriteAnchors(
       );
     }
   }
+}
+
+
+/**
+ * Per-site background rules. Emitted rather than inlined so the CSP needs no
+ * unsafe-inline, and keyed by the source's own selectors since removal and
+ * slots have already run against them.
+ *
+ * A Slot targets an element; there is no selector that reaches a
+ * pseudo-element's own generated box, so a ::before/::after background can't
+ * go through applySlot at all — this is the other half of that gap.
+ */
+function emitCssBackgrounds(
+  spec: SlottedSpec,
+  content: SiteContent,
+  imageUrl: (asset: ImageAsset | undefined) => string,
+): string {
+  return spec.cssBackgrounds.flatMap((bg) => {
+    const image = resolvePath(content, bg.path) as ImageAsset | undefined;
+    if (!image) return [];
+
+    const url = imageUrl(image);
+    if (!url) return [];
+
+    const target = bg.pseudo ? `${bg.selector}::${bg.pseudo}` : bg.selector;
+    const position =
+      `${((image.focalX ?? 0.5) * 100).toFixed(1)}% ${((image.focalY ?? 0.5) * 100).toFixed(1)}%`;
+
+    return [`${target}{background-image:url(${cssValue(url)});background-position:${position}}`];
+  }).join("");
 }
 
 // ============================================================================

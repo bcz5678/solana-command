@@ -1,13 +1,20 @@
 // ============================================================================
 // scripts/import-template.ts
 //
-//   pnpm import-template init    <file.html> <template-id>
+//   pnpm import-template init    <file.html> <template-id> [--dir <root>]
 //   pnpm import-template analyze <template-dir>
 //   pnpm import-template check   <template-dir>      # CI, no writes
 //
+//   pnpm import-template preset  <template-dir> [--dir <root>]  # mint ids, assign slugs, parse PresetContentSchema
+//
+// --dir overrides the repo-relative root a command would otherwise hardcode:
+// for init, where templates/{id} is created; for preset, where the authored
+// preset package is written. Without it, both commands can only ever act on
+// the real repo tree — there's no way to point either at a scratch directory,
+// which is exactly the friction a test suite around this CLI runs into.
+//
 // Not yet implemented — the stages that follow review:
 //   assets  <dir>   download source images, generate variants, upload to seed
-//   preset  <dir>   mint ids, assign slugs, parse PresetContentSchema
 //   emit    <dir>   rewriteCss, hash, write manifest
 //   verify  <dir>   render the preset, diff against source.html
 //
@@ -31,26 +38,29 @@
 // ============================================================================
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join, basename, dirname } from "node:path";
 import { parseHTML } from "linkedom";
 import { normalizeSource } from "../tools/template-import/normalize";
 
 
 import { authorPreset } from "../tools/template-import/author-preset";
 import { runImport, type Overrides, type ImportArtifacts, type ReviewItem } from '../tools/template-import/pipeline'
+import { emitTemplate, validateEmitInputs } from "../tools/template-import/emit";
+import type { TemplatePreset } from "@site/schema";
 
 const EXIT = { ok: 0, usage: 1, failed: 2 } as const;0
 
-const [command, ...args] = process.argv.slice(2);
+const [command, ...rest] = process.argv.slice(2);
+const { positional: args, dir: dirFlag } = parseArgs(rest);
 
 switch (command) {
-  case "init":    init(args[0], args[1]); break;
+  case "init":    init(args[0], args[1], dirFlag); break;
   case "analyze": analyzeDir(args[0], { write: true }); break;
-  case "check":   checkDir(args[0]); break;
+  case "check":   checkDir(args[0], dirFlag); break;
+  case "preset":  presetDir(args[0], dirFlag); break;
+  case "emit":    emitDir(args[0], dirFlag); break;
 
-  case "assets":  presetDir(args[0]); break;
-  case "preset":
-  case "emit":
+  case "assets":
   case "verify":
     console.error(`"${command}" is not implemented yet.`);
     process.exit(EXIT.usage);
@@ -59,11 +69,35 @@ switch (command) {
   default:
     console.error(
       "usage:\n" +
-      "  import-template init    <file.html> <template-id>\n" +
+      "  import-template init    <file.html> <template-id> [--dir <root>]\n" +
       "  import-template analyze <template-dir>\n" +
-      "  import-template check   <template-dir>",
+      "  import-template check   <template-dir> [--dir <root>]\n" +
+      "  import-template preset  <template-dir> [--dir <root>]\n" +
+      "  import-template emit    <template-dir> [--dir <root>]",
     );
     process.exit(EXIT.usage);
+}
+
+/** Pulls `--dir <value>` (or `--dir=<value>`) out of the raw args, wherever it appears. */
+function parseArgs(raw: string[]): { positional: string[]; dir?: string } {
+  const positional: string[] = [];
+  let dir: string | undefined;
+
+  for (let i = 0; i < raw.length; i++) {
+    const arg = raw[i]!;
+
+    if (arg === "--dir") {
+      dir = raw[++i];
+      continue;
+    }
+    if (arg.startsWith("--dir=")) {
+      dir = arg.slice("--dir=".length);
+      continue;
+    }
+    positional.push(arg);
+  }
+
+  return { positional, dir };
 }
 
 
@@ -80,13 +114,13 @@ switch (command) {
  * single input, and a stylesheet that stays inline can't be diffed after
  * rewriting.
  */
-function init(file: string, id: string): void {
+function init(file: string, id: string, dirRoot?: string): void {
   if (!file || !id) {
-    console.error("usage: import-template init <file.html> <template-id>");
+    console.error("usage: import-template init <file.html> <template-id> [--dir <root>]");
     process.exit(EXIT.usage);
   }
 
-  const dir = join("templates", id);
+  const dir = join(dirRoot ?? "templates", id);
   if (existsSync(dir)) {
     console.error(`${dir} already exists — delete it or pick another id.`);
     process.exit(EXIT.usage);
@@ -168,19 +202,33 @@ function analyzeDir(dir: string, options: { write: boolean }): ImportArtifacts {
  * The blocker that always fires until addressed is anonymisation — a preset
  * ships to every site created from the template.
  */
-function checkDir(dir: string): void {
+function checkDir(dir: string, dirRoot?: string): void {
   const artifacts = analyzeDir(dir, { write: false });
   const blockers = artifacts.review.filter((r) => r.severity === "blocker");
 
   const todos = JSON.stringify(artifacts.spec).match(/"TODO/g)?.length ?? 0;
 
-  if (blockers.length === 0 && todos === 0) {
-    console.log("OK");
-    process.exit(EXIT.ok);
-  }
+  let failed = blockers.length > 0 || todos > 0;
 
   for (const item of blockers) console.error(`BLOCKER  ${item.at}  ${item.message}`);
   if (todos > 0) console.error(`BLOCKER  spec  ${todos} unresolved TODO path(s).`);
+
+  // Only meaningful once a preset exists — check runs on fresh imports too,
+  // where the count it would compare against doesn't exist yet.
+  const presetJsonFile = join(presetRoot(basename(dir), dirRoot), "presets", "original.json");
+
+  if (existsSync(presetJsonFile)) {
+    const preset = json<TemplatePreset>(dirname(presetJsonFile), basename(presetJsonFile));
+    const emitBlockers = validateEmitInputs(artifacts.analysis, preset.content.sections.length);
+
+    for (const blocker of emitBlockers) console.error(`BLOCKER  emit  ${blocker}`);
+    if (emitBlockers.length > 0) failed = true;
+  }
+
+  if (!failed) {
+    console.log("OK");
+    process.exit(EXIT.ok);
+  }
 
   process.exit(EXIT.failed);
 }
@@ -190,21 +238,40 @@ function checkDir(dir: string): void {
 // ============================================================================
 
 /**
+ * Base directory a template package (bundle, manifest, presets/) is written
+ * into. The one place `--dir`'s default gets hardcoded, so `preset` and
+ * `emit` — which write into the same package — cannot silently disagree on
+ * where it lives.
+ */
+function presetRoot(templateId: string, dirRoot?: string): string {
+  return join(dirRoot ?? "site-platform/renderer/templates", templateId);
+}
+
+/**
  * Step 7. Unlike `analyze`, this writes OUTSIDE the working directory and into
  * the template package, and the result is meant to be edited by hand
  * afterwards — so it refuses to clobber rather than regenerating silently.
+ *
+ * Writes a .json sibling alongside the hand-edited .ts: `emit` needs to read
+ * the preset back, and a CLI reading a .ts module means either a dynamic
+ * import() (making every caller async for one read) or a plain data file.
+ * The .json is generated output like the .ts, just consumed by the tool
+ * instead of by a human — never hand-edit it, it's overwritten every run
+ * whether or not the .ts already exists.
  */
-function presetDir(dir: string): void {
+function presetDir(dir: string, dirRoot?: string): void {
   if (!dir) {
-    console.error("usage: import-template preset <template-dir>");
+    console.error("usage: import-template preset <template-dir> [--dir <root>]");
     process.exit(EXIT.usage);
   }
 
   const templateId = basename(dir);
   const presetId = "original";
 
-  const outDir = join("site-platform/renderer/templates", templateId, "presets");
+  const outDir = join(presetRoot(templateId, dirRoot), "presets");
   const outFile = join(outDir, `${presetId}.ts`);
+  const jsonFile = join(outDir, `${presetId}.json`);
+  const pendingFile = join(outDir, `${presetId}.pending.json`);
 
   if (existsSync(outFile)) {
     console.error(
@@ -215,7 +282,7 @@ function presetDir(dir: string): void {
     process.exit(EXIT.usage);
   }
 
-  const { preset, source, warnings } = authorPreset({
+  const { preset, source, warnings, pendingAssets } = authorPreset({
     templateId,
     templateVersion: "1.0.0",
     presetId,
@@ -228,12 +295,112 @@ function presetDir(dir: string): void {
 
   mkdirSync(outDir, { recursive: true });
   writeFileSync(outFile, source);
+  writeFileSync(jsonFile, `${JSON.stringify(preset, null, 2)}\n`);
+  writeFileSync(pendingFile, `${JSON.stringify(pendingAssets, null, 2)}\n`);
 
   console.log(`Wrote ${outFile}`);
   console.log(`  ${preset.content.sections.length} sections, ${preset.mustReplace.length} mustReplace paths`);
+  if (pendingAssets.length > 0) {
+    console.log(`  ${pendingAssets.length} image(s) pending fetch — see ${pendingFile}`);
+  }
 
   for (const warning of warnings) console.log(`  ! ${warning}`);
 }
+
+/**
+ * Read a preset back for tooling (emit, check) via its .json sibling rather
+ * than the hand-edited .ts — see presetDir()'s comment for why.
+ */
+function loadPreset(tsPath: string): TemplatePreset {
+  const jsonPath = tsPath.replace(/\.ts$/, ".json");
+
+  if (!existsSync(jsonPath)) {
+    console.error(
+      `Missing ${jsonPath} — run \`import-template preset\` to author it ` +
+      `(it's written alongside the .ts, not instead of it).`,
+    );
+    process.exit(EXIT.usage);
+  }
+
+  return json<TemplatePreset>(dirname(jsonPath), basename(jsonPath));
+}
+
+
+// ============================================================================
+// EMIT
+// ============================================================================
+
+/**
+ * Step 8A. Rewrites the stylesheet against the substitution map and generates
+ * the template package.
+ *
+ * Writes into the template package, not the working directory. `manifest.ts`
+ * and `index.ts` are skipped when present — they hold reviewed selector work
+ * and hand-wiring, and regenerating them discards it.
+ */
+function emitDir(dir: string, dirRoot?: string): void {
+  if (!dir) {
+    console.error("usage: import-template emit <template-dir> [--dir <root>]");
+    process.exit(EXIT.usage);
+  }
+
+  const templateId = basename(dir);
+  const html = read(dir, "source.html");
+  const css = read(dir, "source.css");
+  const overrides = readOverrides(dir);
+
+  // Re-derived rather than read from .generated/, so an edited overrides.json
+  // can't produce an emit that disagrees with its own analysis.
+  const artifacts = runImport({ html, css, overrides, templateName: templateId });
+
+  const presetPath = join(presetRoot(templateId, dirRoot), "presets", "original.ts");
+
+  if (!existsSync(presetPath)) {
+    console.error(`No preset at ${presetPath} — run \`import-template preset\` first.`);
+    process.exit(EXIT.usage);
+  }
+
+  const result = emitTemplate({
+    templateId,
+    templateVersion: "1.0.0",
+    html,
+    css,
+    tokenize: artifacts.css,
+    spec: artifacts.spec,
+    preset: loadPreset(presetPath),
+    analysis: artifacts.analysis,
+    linkedStylesheets: artifacts.analysis.linkedStylesheets,
+    merged: artifacts.merged,
+  });
+
+  // Nothing is written when the map can't be trusted. A misaligned
+  // sectionNodes fails silently at render — every selector still resolves,
+  // just to the wrong section.
+  if (result.blockers.length > 0) {
+    for (const blocker of result.blockers) console.error(`BLOCKER  ${blocker}`);
+    console.error("\nNothing written.");
+    process.exit(EXIT.failed);
+  }
+
+  const outDir = presetRoot(templateId, dirRoot);
+  mkdirSync(outDir, { recursive: true });
+
+  for (const [name, contents] of Object.entries(result.files)) {
+    const path = join(outDir, name);
+
+    if (result.writeOnlyIfAbsent.includes(name) && existsSync(path)) {
+      console.log(`  skipped ${name} (exists — hand-edited)`);
+      continue;
+    }
+
+    writeFileSync(path, contents);
+    console.log(`  wrote ${name}`);
+  }
+
+  console.log(`\ncss hash ${result.cssHash.slice(0, 12)}`);
+  for (const warning of result.warnings) console.log(`  ! ${warning}`);
+}
+
 
 // ============================================================================
 // OUTPUT

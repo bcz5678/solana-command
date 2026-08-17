@@ -307,7 +307,18 @@ interface ValueNode {
 }
 
 /** Leaf text, images and links, with a selector relative to the item root. */
+// An item with no element children IS the value. Without this a bare
+// <li>text</li> or <span class="tag">DeFi</span> run produces zero fields,
+// and analyze() then drops the repeater entirely — invisible everywhere,
+// including the review queue.
 function collectValues(node: El, itemRoot: El): ValueNode[] {
+    if (node === itemRoot) {
+    const childElements = kids(node).filter((c) => !SKIP_TAGS.has(tag(c)));
+    if (childElements.length === 0) {
+      const value = text(node);
+      return value ? [{ selector: ":scope", kind: "text", value }] : [];
+    }
+  }
   const out: ValueNode[] = [];
 
   for (const child of kids(node)) {

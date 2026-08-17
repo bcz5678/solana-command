@@ -298,6 +298,25 @@ export const SlottedSpecSchema = z.object({
     /** The in-page nav link, removed alongside — otherwise it's a dead anchor. */
     navSelector: z.string().optional(),
   })).default([]),
+
+  // slotted.ts, on SlottedSpecSchema
+
+  /**
+   * Backgrounds defined in the source's CSS rather than its markup.
+   *
+   * A slot cannot target a ::before rule, so these are emitted as a per-site
+   * stylesheet appended after the bundle's own. Unlayered, so it beats the
+   * unlayered bundle by source order — no !important, no inline style, no
+   * `style-src 'unsafe-inline'` on pages running third-party markup.
+   */
+  cssBackgrounds: z.array(z.object({
+    /** Content path, e.g. "sections[0].backgroundImage". */
+    path: z.string().min(1),
+    /** Element to set the background on, WITHOUT the pseudo. */
+    selector: z.string().min(1),
+    /** Pseudo-element carrying it in the source, if any. */
+    pseudo: z.enum(["before", "after"]).optional(),
+  })).default([]),
 });
 export type SlottedSpec = z.infer<typeof SlottedSpecSchema>;
 

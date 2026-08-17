@@ -1,0 +1,194 @@
+{
+  "id": "original",
+  "templateId": "spacex-ipo",
+  "templateVersion": "1.0.0",
+  "name": "Original",
+  "isDefault": true,
+  "theme": {
+    "id": "spacex-ipo-original",
+    "name": "Original theme",
+    "schemaVersion": 1,
+    "mode": "dark",
+    "core": {
+      "colors": {
+        "background": "#000",
+        "surface": "#111111",
+        "primary": "#fff",
+        "primaryHover": "white",
+        "onPrimary": "#000",
+        "secondary": "#1a1a1a",
+        "text": "#fff",
+        "textMuted": "#e0e0e0",
+        "border": "#222222",
+        "overlay": "#000000",
+        "success": "#22c55e",
+        "warning": "#f59e0b",
+        "error": "#ef4444"
+      },
+      "typography": {
+        "fontFamilyBase": "\"Manrope\",Verdana,Geneva,Tahoma,sans-serif",
+        "baseFontSize": "18px",
+        "scaleRatio": 1.3281,
+        "scaleRatioMobile": 1.2074,
+        "fontWeightNormal": 400,
+        "fontWeightBold": 700,
+        "lineHeightBase": 1.7,
+        "lineHeightHeading": 1.1,
+        "letterSpacingWide": "2px",
+        "headingTransform": "uppercase",
+        "kickerTransform": "uppercase"
+      },
+      "spacing": {
+        "unit": "8px",
+        "containerMaxInline": "1200px",
+        "contentMaxInline": "700px",
+        "sectionPaddingBlock": "80px",
+        "sectionPaddingInline": "8%",
+        "radius": "0px"
+      },
+      "motion": {
+        "speed": ".3s",
+        "easing": "ease",
+        "respectReducedMotion": true
+      },
+      "breakpoints": {
+        "md": "768px"
+      }
+    },
+    "semantic": {
+      "navBackground": "rgba(0,0,0,.2)",
+      "navForeground": "white",
+      "mobileMenuBackground": "#333",
+      "footerBackground": "#000",
+      "footerForeground": "#888",
+      "footerBorder": "#222"
+    },
+    "templates": {
+      "spacex-ipo": {
+        "headerBlur": "blur(8px)",
+        "sectionMinHeight": "100vh"
+      }
+    }
+  },
+  "content": {
+    "schemaVersion": 1,
+    "meta": {
+      "fqdn": "",
+      "title": "SpaceX IPO",
+      "description": "The SpaceXIPO coin celebrates the launch of $SPCX.",
+      "keywords": "spacex, spacexipo, meme coin, dexscreener, pump.fun, social media links",
+      "locale": "en",
+      "noindex": true
+    },
+    "brand": {
+      "name": "TODO"
+    },
+    "hero": {
+      "kicker": "Invest in Exploration",
+      "title": "Celebrating the launch",
+      "body": [
+        "In 2020, SpaceX returned America's ability to fly NASA astronauts to and from the International Space Station on American vehicles.",
+        "The SpaceXIPO coin celebrates the launch of $SPCX."
+      ],
+      "overlayOpacity": 0.35,
+      "overlayDirection": "uniform",
+      "crossAlign": "start",
+      "ctas": [
+        {
+          "label": "CA Click to copy: 0xXXd5934Ce90228B9B7cE03999b81069ab629XXXX",
+          "href": "#",
+          "external": false,
+          "variant": "primary"
+        }
+      ],
+      "contentAnchor": "block-center"
+    },
+    "sections": [
+      {
+        "id": "8f820b1c-ad18-4afc-8fb5-e40ea2067464",
+        "slug": "ipo",
+        "order": 0,
+        "enabled": true,
+        "navLabel": "IPO",
+        "showInNav": true,
+        "kicker": "SpaceX IPO",
+        "title": "$SPCX",
+        "overlayOpacity": 0.35,
+        "overlayDirection": "uniform",
+        "contentAnchor": "block-center",
+        "crossAlign": "start",
+        "type": "prose",
+        "body": [
+          "SpaceX was listed on the Nasdaq under the ticker symbol $SPCX on June 12, 2026. The company intended to raise $75 billion by selling 555.6 million shares at $135 apiece, targeting a mind-boggling valuation of roughly $1.75 trillion. However, after a day of trading the stock now values the company at $2.1 trillion."
+        ]
+      },
+      {
+        "id": "5550a64b-0287-478c-b7ee-9e6650ee721c",
+        "slug": "offering",
+        "order": 1,
+        "enabled": true,
+        "navLabel": "Offering",
+        "showInNav": true,
+        "kicker": "Access",
+        "title": "A non-traditional offering",
+        "overlayOpacity": 0.35,
+        "overlayDirection": "uniform",
+        "contentAnchor": "block-center",
+        "crossAlign": "start",
+        "type": "prose",
+        "body": [
+          "Unlike standard IPOs where financial institutions dominate, SpaceX is offering individual investors up to 30% of the deal at the same price. Brokerages like Robinhood, Fidelity, and SoFi have lowered their minimum participation requirements to as little as $2,000.",
+          "Because of the listing's enormous scale, the Nasdaq-100 has created a new fast-entry rule allowing SpaceX to join the benchmark after just 15 days of trading."
+        ]
+      },
+      {
+        "id": "08536cad-8a16-452f-99f9-3f9bd8f74dbe",
+        "slug": "coin",
+        "order": 2,
+        "enabled": true,
+        "navLabel": "Coin",
+        "showInNav": true,
+        "kicker": "The SpaceX IPO Coin",
+        "title": "From Launch to Orbit",
+        "overlayOpacity": 0.35,
+        "overlayDirection": "uniform",
+        "contentAnchor": "block-center",
+        "crossAlign": "start",
+        "type": "prose",
+        "body": [
+          "SpaceXIPO coin is intended to sustain growth by transitioning from initial hype to continuous trading activity.."
+        ],
+        "cta": {
+          "label": "SpaceX",
+          "href": "#",
+          "external": false,
+          "variant": "primary"
+        }
+      }
+    ],
+    "social": [
+      {
+        "id": "909be192-576a-4fbc-b48d-a4a29a3546d1",
+        "platform": "telegram",
+        "label": "telegram",
+        "url": "https://t.me/spacexipo_coin",
+        "showInNav": true,
+        "showInHero": false
+      }
+    ],
+    "footer": {
+      "disclaimer": "TODO",
+      "legal": {
+        "copyrightYear": "auto"
+      },
+      "links": []
+    }
+  },
+  "mustReplace": [
+    "brand.name",
+    "meta.title",
+    "meta.description",
+    "hero.title",
+    "social[].url"
+  ]
+}

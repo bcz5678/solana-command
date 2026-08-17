@@ -277,6 +277,8 @@ export function tokenizeCss(css: string, options: TokenizeOptions = {}): Tokeniz
   };
 }
 
+
+
 // ============================================================================
 // TYPE SCALE
 // ============================================================================
@@ -368,7 +370,7 @@ function buildThemeDraft(
   for (const sub of substitutions) {
     // Tier 3 paths carry a `$` placeholder for the template id; the authoring
     // script substitutes it once the template is named.
-    setPath(draft, sub.token, normalizeValue(sub.property, sub.original));
+    setPath(draft, sub.token, normalizeValue(sub.token, sub.property, sub.original));
   }
 
   if (typeScale) {
@@ -386,16 +388,37 @@ function buildThemeDraft(
 }
 
 /**
- * Strip what the token doesn't carry.
+ * Tokens the schema types as numbers. CSS values are always strings, so
+ * anything landing in one of these needs coercion or LayeredThemeSchema.parse()
+ * throws at authoring time — several stages after the extraction that caused it.
  *
- * A scrim's alpha becomes per-section overlayOpacity, so the colour token holds
- * the colour only. A transition shorthand contributes its duration to
- * motion.speed; the easing is a separate token.
+ * Keyed on TOKEN, not property: `core.spacing.radius` is a string "0px" while
+ * `core.typography.lineHeightBase` is a number, and nothing about the property
+ * name distinguishes them.
  */
-function normalizeValue(property: string, value: string): string {
+const NUMERIC_TOKENS = new Set([
+  "core.typography.lineHeightBase",
+  "core.typography.lineHeightHeading",
+  "core.typography.scaleRatio",
+  "core.typography.scaleRatioMobile",
+  "core.typography.fontWeightNormal",
+  "core.typography.fontWeightMedium",
+  "core.typography.fontWeightBold",
+]);
+
+export function normalizeValue(token: string, property: string, value: string): string | number {
   if (property === "transition") {
     return value.match(/([\d.]+m?s)/)?.[1] ?? value;
   }
+
+  if (NUMERIC_TOKENS.has(token)) {
+    const n = Number.parseFloat(value);
+    // `line-height: normal` and `font-weight: bold` are valid CSS with no
+    // numeric form. Returning the string lets the schema reject it with a
+    // useful path rather than writing NaN into the theme.
+    return Number.isFinite(n) ? n : value;
+  }
+
   return value.trim();
 }
 

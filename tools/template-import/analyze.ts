@@ -56,6 +56,13 @@ export interface TemplateAnalysis {
   pendingBackgrounds: Array<{ section: string; from: string }>;
   /** Feeds tokenizeCss's type-scale fit. A tag used once is usually a label. */
   headingUsage: Record<string, number>;
+  /**
+   * `<link rel="stylesheet">` hrefs found in source.html. Re-derived here
+   * rather than threaded through from normalize.ts's NormalizeResult — init
+   * only ever logged that field, so it was lost the moment the run ended.
+   * emit needs it to warn when a linked sheet was never tokenized.
+   */
+  linkedStylesheets: string[];
   warnings: string[];
 }
 
@@ -132,6 +139,7 @@ export function analyze(html: string, options: AnalyzeOptions = {}): TemplateAna
     sections: analyzed,
     pendingBackgrounds,
     headingUsage: countHeadings(doc),
+    linkedStylesheets: linkedStylesheetsOf(doc),
     warnings,
   };
 }
@@ -173,6 +181,12 @@ function countHeadings(doc: El): Record<string, number> {
   }
 
   return counts;
+}
+
+function linkedStylesheetsOf(doc: El): string[] {
+  return Array.from(doc.querySelectorAll('link[rel="stylesheet"]'))
+    .map((el) => el.getAttribute("href"))
+    .filter((href): href is string => Boolean(href));
 }
 
 // ============================================================================

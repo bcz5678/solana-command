@@ -59,6 +59,13 @@ export interface AuthorResult {
   /** Ready to write as presets/{id}.ts */
   source: string;
   warnings: string[];
+  /**
+   * Images the source referenced but this pass never fetched, keyed by the
+   * content path they belong at. Not part of the preset: ImageAsset means
+   * resolvable, and a source reference isn't one yet. The assets stage reads
+   * this to know what to fetch and where the result goes.
+   */
+  pendingAssets: Array<{ path: string; sourceUrl: string }>;
 }
 
 // ============================================================================
@@ -85,11 +92,29 @@ export function authorPreset(input: AuthorInput): AuthorResult {
   // --- Content -------------------------------------------------------------
   const draft = input.contentDraft;
 
+  // Keyed by section id rather than array index: assignSlugs sorts by
+  // `order`, so the index a section builds at is not necessarily where it
+  // lands in the final array. Resolved to `sections[N]` paths below, once
+  // that order is final.
+  const pendingBySection = new Map<string, string>();
+
   const sections = assignSlugs(
     (draft.sections ?? []).map((entry: any, index: number) =>
-      buildSection(entry, index, uuid, warnings),
+      buildSection(entry, index, uuid, warnings, pendingBySection),
     ),
   );
+
+  const pendingAssets: Array<{ path: string; sourceUrl: string }> = [];
+  sections.forEach((s, i) => {
+    const sourceUrl = pendingBySection.get(s.id);
+    if (sourceUrl) pendingAssets.push({ path: `sections[${i}].backgroundImage`, sourceUrl });
+  });
+
+  const heroPending: { sourceUrl?: string } = {};
+  const hero = buildHero(draft.hero, warnings, heroPending);
+  if (heroPending.sourceUrl) {
+    pendingAssets.push({ path: "hero.backgroundImage", sourceUrl: heroPending.sourceUrl });
+  }
 
   const content = PresetContentSchema.parse({
     meta: readMeta(input.html),
@@ -98,7 +123,7 @@ export function authorPreset(input: AuthorInput): AuthorResult {
       // section-less div, and the SEO name is usually decorated.
       name: input.overrides.anonymize?.["brand.name"] ?? "TODO",
     },
-    hero: buildHero(draft.hero, warnings),
+    hero,
     sections: SiteSectionListSchema.parse(sections),
     social: (draft.social ?? []).map((s: any) => ({
       id: uuid(),
@@ -124,7 +149,7 @@ export function authorPreset(input: AuthorInput): AuthorResult {
 
   warnings.push(...roundTrip(preset, uuid));
 
-  return { preset, source: emit(preset), warnings };
+  return { preset, source: emit(preset), warnings, pendingAssets };
 }
 
 // ============================================================================
@@ -148,9 +173,17 @@ function buildSection(
   index: number,
   uuid: () => string,
   warnings: string[],
+  pendingBySection: Map<string, string>,
 ): SiteSection {
+  const id = uuid();
+
+  // Not an ImageAsset yet — the source referenced it, nothing has fetched it.
+  // Recorded for the assets stage rather than forced into the shape early.
+  const sourceUrl: string | undefined = entry.backgroundImage?._sourceUrl;
+  if (sourceUrl) pendingBySection.set(id, sourceUrl);
+
   const base = {
-    id: uuid(),
+    id,
     slug: "",                       // assignSlugs fills this
     order: entry.order ?? index,
     enabled: true,
@@ -158,9 +191,7 @@ function buildSection(
     showInNav: true,
     kicker: entry.kicker || undefined,
     title: entry.title ?? "TODO",
-    backgroundImage: entry.backgroundImage
-      ? placeholderImage(entry.backgroundImage, uuid, warnings)
-      : undefined,
+    backgroundImage: undefined,
     overlayOpacity: entry.overlayOpacity ?? undefined,
     overlayDirection: entry.overlayDirection ?? "uniform",
     crossAlign: "start" as const,
@@ -213,7 +244,7 @@ function buildSection(
   }
 }
 
-function buildHero(hero: any, warnings: string[]) {
+function buildHero(hero: any, warnings: string[], pending: { sourceUrl?: string }) {
   if (!hero) {
     warnings.push("No hero found — the preset will not render without one.");
     return { title: "TODO", body: [], ctas: [] };
@@ -230,14 +261,16 @@ function buildHero(hero: any, warnings: string[]) {
     );
   }
 
+  // Not an ImageAsset yet — the source referenced it, nothing has fetched it.
+  // Recorded for the assets stage rather than forced into the shape early.
+  pending.sourceUrl = hero.backgroundImage?._sourceUrl;
+
   return {
     kicker: hero.kicker || undefined,
     title: hero.title ?? "TODO",
     body: hero.body ?? [],
     ctas: (hero.ctas ?? []).filter((c: any) => c.label).map(cta),
-    backgroundImage: hero.backgroundImage
-      ? placeholderImage(hero.backgroundImage, randomUUID, warnings)
-      : undefined,
+    backgroundImage: undefined,
     overlayOpacity: hero.overlayOpacity ?? undefined,
     overlayDirection: hero.overlayDirection ?? "uniform",
     crossAlign: "start" as const,
@@ -250,40 +283,6 @@ const cta = (c: any) => ({
   external: /^https?:/.test(c.href ?? ""),
   variant: "primary" as const,
 });
-
-// ============================================================================
-// IMAGES
-// ============================================================================
-
-/**
- * Placeholder seed image, pending step 6.
- *
- * `width`/`height` are optional in ImageAssetSchema, so they're omitted rather
- * than faked — a wrong intrinsic size causes layout shift, which is worse than
- * none. Step 6 fills them along with `variants`.
- */
-function placeholderImage(
-  ref: { _sourceUrl?: string },
-  uuid: () => string,
-  warnings: string[],
-) {
-  const source = ref._sourceUrl ?? "";
-  const name = source.split("/").pop()?.replace(/\.\w+$/, "") ?? "image";
-
-  warnings.push(`Image "${source}" is a placeholder — run step 6 to generate variants.`);
-
-  return {
-    id: uuid(),
-    seedPath: name,
-    stagingKey: `_pending/${source}`,
-    url: source,
-    alt: "",
-    decorative: false,
-    focalX: 0.5,
-    focalY: 0.5,
-    variants: {},
-  };
-}
 
 // ============================================================================
 // MUST REPLACE
