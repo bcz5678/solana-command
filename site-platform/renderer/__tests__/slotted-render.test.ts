@@ -17,7 +17,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { TemplateManifest, SiteDefinition, ImageAsset } from "@site/schema";
+import { LayeredThemeSchema, type TemplateManifest, type SiteDefinition, type ImageAsset } from "@site/schema";
 import { renderSlotted, registerSlottedTemplate } from "../slotted/index";
 import { normalizeSource } from "../../../tools/template-import/normalize";
 
@@ -52,7 +52,11 @@ function image(id: string): ImageAsset {
   } as ImageAsset;
 }
 
-const theme: SiteDefinition["theme"] = {
+// Parsed, not just typed as a literal — an object literal typed against the
+// schema's output type still lets a .prefault()/.default() field (core.button,
+// for instance) go unpopulated if whoever wrote the literal didn't include it.
+// Parsing means every defaulted field is populated by construction.
+const theme: SiteDefinition["theme"] = LayeredThemeSchema.parse({
   id: "slotted-fixture",
   name: "Slotted Fixture",
   schemaVersion: 1,
@@ -75,7 +79,7 @@ const theme: SiteDefinition["theme"] = {
     motion: { speed: "0.2s", easing: "ease", respectReducedMotion: true },
     breakpoints: { md: "768px" },
   },
-};
+});
 
 const definition: SiteDefinition = {
   schemaVersion: 1,
@@ -119,6 +123,10 @@ const definition: SiteDefinition = {
         // No <img> or inline style anywhere for this one — the only thing
         // that can carry it is the cssBackgrounds override below.
         backgroundImage: image("features-bg"),
+        // core.colors.overlay carries no alpha (see base-theme.ts) — this is
+        // the per-section value the cssScrims override below has to combine
+        // with it, the same way the background above needs cssBackgrounds.
+        overlayOpacity: 0.4,
         overlayDirection: "uniform",
         contentAnchor: "block-center",
         crossAlign: "start",
@@ -207,6 +215,10 @@ const manifest: TemplateManifest = {
     // no selector that reaches a pseudo-element's own generated box, so this
     // is the only way this background can ever become per-site editable.
     cssBackgrounds: [{ path: "sections[0].backgroundImage", selector: "#features", pseudo: "before" }],
+    // Same gap, for opacity instead of an image: overlayOpacity is content,
+    // core.colors.overlay is theme, and no property can hold both — this is
+    // the per-site rule that recombines them.
+    cssScrims: [{ path: "sections[0].overlayOpacity", selector: "#features", pseudo: "after" }],
   },
 };
 
@@ -267,7 +279,10 @@ describe("renderSlotted", () => {
     it("emits a per-site override for a selector no slot can reach", async () => {
       const { html } = await render("build");
 
-      const styleIndex = html.indexOf("<style>#features::before{background-image:url(");
+      // Consolidated into one <style> tag alongside the token block and
+      // SOURCE_CSS now (createElement + appendChild, not its own tag) — the
+      // declaration itself, not a "<style>" prefix, is what's checked.
+      const styleIndex = html.indexOf("#features::before{background-image:url(");
       expect(styleIndex).toBeGreaterThan(-1);
       expect(html).toContain("/media/");
 
@@ -282,6 +297,36 @@ describe("renderSlotted", () => {
     it("also appears in the render's returned css, for parity with the tokenized path's RenderOutput shape", async () => {
       const { css } = await render("build");
       expect(css).toContain("#features::before{background-image:url(");
+    });
+  });
+
+  // ---- CSS-only scrim opacity ----
+  // overlayOpacity (content, per-section) and core.colors.overlay (theme,
+  // global, alpha-less) have no single property that can hold both — this is
+  // the per-site rule that recombines them, the slotted equivalent of the
+  // --section-overlay custom property a tokenized template's section
+  // renderer emits. No renderer here, so it's this instead.
+  describe("cssScrims", () => {
+    it("emits a per-site color-mix() rule combining the theme colour with the section's own opacity", async () => {
+      const { html } = await render("build");
+
+      const styleIndex = html.indexOf(
+        "#features::after{background-color:color-mix(in srgb, var(--st-color-overlay) 40.0%, transparent)}",
+      );
+      expect(styleIndex).toBeGreaterThan(-1);
+
+      // Same ordering requirement as cssBackgrounds — must win the cascade
+      // over the bundle's own stylesheet, so it has to land after it.
+      const bundleLinkIndex = html.indexOf('href="assets/vendor.css"');
+      expect(bundleLinkIndex).toBeGreaterThan(-1);
+      expect(styleIndex).toBeGreaterThan(bundleLinkIndex);
+    });
+
+    it("also appears in the render's returned css", async () => {
+      const { css } = await render("build");
+      expect(css).toContain(
+        "#features::after{background-color:color-mix(in srgb, var(--st-color-overlay) 40.0%, transparent)}",
+      );
     });
   });
 
@@ -302,5 +347,101 @@ describe("renderSlotted", () => {
       expect(html).toContain("staging.example");
       expect(html).not.toContain("/media/");
     });
+  });
+});
+
+// ============================================================================
+// Full pipeline — one render exercising every step
+// ============================================================================
+// The regression this guards against: an edit deleted step 9 (approved
+// scripts) entirely, and every one of the 56 tests above still passed —
+// none of them render a source with an approved script. A test suite where
+// each test asserts on the one feature it's named for has this blind spot by
+// construction. This describe block renders ONCE, with every step's inputs
+// present at the same time, and checks every step's output against that
+// single render — deleting any step's code should fail something here.
+//
+// A fresh definition/manifest/source, not the fixtures above: disabling a
+// section and adding an approved script both mutate shared state, and the
+// suite above depends on nothing here being disabled.
+describe("full pipeline (one render exercises every step)", () => {
+  const FULL_SOURCE_KEY = "card-grid-full@1";
+  // Registered WITH its extracted css this time — emitBundle always passes a
+  // third argument in production (tools/template-import/emit.ts), so a
+  // registration that omits it isn't exercising the real path.
+  const fullNormalized = normalizeSource(CARD_GRID_RAW);
+
+  const fullDefinition: SiteDefinition = structuredClone(definition);
+  // FAQ is the LAST nav anchor. Disabling it can't shift the positional index
+  // rewriteAnchors uses to map the earlier two anchors to their slugs — a
+  // section in the middle would silently relabel every anchor after it.
+  fullDefinition.content.sections[2].enabled = false;
+
+  const fullManifest: TemplateManifest = structuredClone(manifest);
+  fullManifest.slotted!.sourceKey = FULL_SOURCE_KEY;
+  // The base manifest only maps #features — FAQ needs its own entry for
+  // removeDisabledSections to find a node to remove.
+  fullManifest.slotted!.sectionNodes.push({
+    path: "sections[2]",
+    selector: "#faq",
+    navSelector: 'a[href="#faq"]',
+  });
+  fullManifest.slotted!.sanitize.approvedScripts = [
+    { name: "analytics-stub", source: 'console.log("approved replacement");' },
+  ];
+
+  let html: string;
+  let inlineScriptHashes: string[];
+
+  beforeAll(async () => {
+    registerSlottedTemplate(FULL_SOURCE_KEY, fullNormalized.html, fullNormalized.css);
+    const result = await renderSlotted({
+      definition: fullDefinition,
+      manifest: fullManifest,
+      vendor: [],
+      rendererKey: fullManifest.rendererKey,
+      mode: "build",
+      s3Prefix: "test-site/",
+    });
+    html = result.html;
+    inlineScriptHashes = result.inlineScriptHashes;
+  });
+
+  it("emits a populated token block", () => {
+    expect(html).toContain("--st-color-primary:#7c5cff");
+  });
+
+  it("carries SOURCE_CSS content", () => {
+    // Verbatim from card-grid.html's <style> block, extracted by normalizeSource.
+    expect(html).toContain("background-color: #0b0b12");
+  });
+
+  it("removes the disabled section and its nav link", () => {
+    expect(html).not.toContain('id="faq"');
+    expect(html).not.toContain('href="#faq"');
+  });
+
+  it("applies slots and repeaters", () => {
+    expect(html).toContain("Buy the dip, or don't");
+    expect(html).toContain("Replaced Card One");
+  });
+
+  it("replaces meta tags", () => {
+    expect(html).toContain("Card Grid Test");
+    expect(html).not.toContain("<title>Token Onepager</title>");
+  });
+
+  it("emits per-site background rules", () => {
+    expect(html).toContain("#features::before{background-image:url(");
+  });
+
+  it("injects approved scripts with non-empty hashes", () => {
+    expect(html).toContain('console.log("approved replacement");');
+    expect(inlineScriptHashes).toHaveLength(1);
+    expect(inlineScriptHashes[0]).toMatch(/^sha256-/);
+  });
+
+  it("consolidates the token block, SOURCE_CSS and background rules into exactly one <style> tag", () => {
+    expect(html.match(/<style>/g)).toHaveLength(1);
   });
 });

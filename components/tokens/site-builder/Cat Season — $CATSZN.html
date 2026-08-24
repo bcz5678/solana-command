@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<!-- saved from url=(0025)https://www.catszn.world/ -->
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cat Season — $CATSZN</title>
+  <meta name="description" content="Cat Season is here — Solana&#39;s cat meme tokens are waking up, running wild, and pumping together. $CATSZN on pump.fun">
+  <meta property="og:title" content="Cat Season — $CATSZN">
+  <meta property="og:description" content="Solana&#39;s cat meme tokens are waking up, running wild, and pumping together.">
+  <meta property="og:image" content="banner.png">
+  <link rel="icon" type="image/png" href="./Cat Season — $CATSZN_files/logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com/">
+  <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="">
+  <link href="./Cat Season — $CATSZN_files/css2" rel="stylesheet">
+  <link rel="stylesheet" href="./Cat Season — $CATSZN_files/styles.css">
+</head>
+<body class="is-ready">
+  
+
+  <div id="paw-cursor" class="paw-cursor is-visible" aria-hidden="true" style="left: 303px; top: 598px;"></div>
+  <div id="paw-trail" class="paw-trail" aria-hidden="true"></div>
+
+  <canvas id="bg-canvas" class="bg-canvas" aria-hidden="true" width="1920" height="919"></canvas>
+  <div class="bg-mesh" aria-hidden="true"></div>
+  <div class="bg-grain" aria-hidden="true"></div>
+  <div class="bg-vignette" aria-hidden="true"></div>
+
+  <div class="ticker" id="ticker">
+    <div class="ticker__inner">
+      <span>Live Mcap <strong id="stat-mcap">$538.8K</strong></span>
+      <span>24h <strong id="stat-change" class="positive">+317.0%</strong></span>
+      <span>Price <strong id="stat-price">$0.000541</strong></span>
+      <span>Liq <strong id="stat-liq">$68.2K</strong></span>
+      <span>Vol <strong id="stat-vol">$7.65M</strong></span>
+    </div>
+  </div>
+
+  <header class="nav">
+    <a class="nav__brand" href="https://www.catszn.world/#top">
+      <img src="./Cat Season — $CATSZN_files/logo.png" alt="Cat Season" class="nav__logo">
+      <span>Cat Season</span>
+    </a>
+
+    <nav class="nav__chapters" aria-label="Chapters">
+      <a href="https://www.catszn.world/#ch-i" class="" data-ch="I"><div style="width: 5px; height: 5px; border-radius: 100%; background-color: grey; display: inline-block;"></div></a>
+      <a href="https://www.catszn.world/#ch-ii" data-ch="II" class=""><div style="width: 5px; height: 5px; border-radius: 100%; background-color: grey; display: inline-block;"></div></a>
+      <a href="https://www.catszn.world/#ch-iii" data-ch="III" class=""><div style="width: 5px; height: 5px; border-radius: 100%; background-color: grey; display: inline-block;"></div></a>
+      <a href="https://www.catszn.world/#ch-iv" data-ch="IV" class=""><div style="width: 5px; height: 5px; border-radius: 100%; background-color: grey; display: inline-block;"></div></a>
+      <a href="https://www.catszn.world/#ch-v" data-ch="V" class=""><div style="width: 5px; height: 5px; border-radius: 100%; background-color: grey; display: inline-block;"></div></a>
+      <a href="https://www.catszn.world/#ch-vi" data-ch="VI" class=""><div style="width: 5px; height: 5px; border-radius: 100%; background-color: grey; display: inline-block;"></div></a>
+      <a href="https://www.catszn.world/#ch-vii" data-ch="VII" class=""><div style="width: 5px; height: 5px; border-radius: 100%; background-color: grey; display: inline-block;"></div></a>
+      <a href="https://www.catszn.world/#ch-viii" data-ch="VIII" class=""><div style="width: 5px; height: 5px; border-radius: 100%; background-color: grey; display: inline-block;"></div></a>
+      <a href="https://www.catszn.world/#ch-ix" data-ch="IX" class="is-active"><div style="width: 5px; height: 5px; border-radius: 100%; background-color: grey; display: inline-block;"></div></a>
+    </nav>
+
+    <div class="nav__actions">
+      <div class="dropdown">
+        <button class="dropdown__btn" type="button" aria-expanded="false">Buy ▾</button>
+        <div class="dropdown__menu">
+          <a href="https://pump.fun/coin/918p2GRyDLkhsRvtAHaKZg8yrP5kXSe6CYustqTcpump" id="buy-nav" target="_blank" rel="noopener noreferrer">pump.fun</a>
+        </div>
+      </div>
+      <div class="dropdown">
+        <button class="dropdown__btn" type="button" aria-expanded="false">Links ▾</button>
+        <div class="dropdown__menu">
+          <a href="https://www.catszn.world/#ch-vii">Chart</a>
+          <a href="https://x.com/CATSZNSOL" target="_blank" rel="noopener noreferrer">X / Twitter</a>
+          <a href="https://t.me/catsznsol" target="_blank" rel="noopener noreferrer">Telegram</a>
+          <a href="https://dexscreener.com/solana/6fgfnwury3nblbrtyer39ocezdm67r5zcah4dtgbelmd" id="link-dex-nav" target="_blank" rel="noopener noreferrer">DexScreener</a>
+        </div>
+      </div>
+      <button class="nav__toggle" id="nav-toggle" aria-label="Open menu" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <div class="mobile-menu" id="mobile-menu">
+    <a href="https://www.catszn.world/#ch-i">I — Awakening</a>
+    <a href="https://www.catszn.world/#ch-ii">II — The Purr</a>
+    <a href="https://www.catszn.world/#ch-iii">III — The Coin</a>
+    <a href="https://www.catszn.world/#ch-iv">IV — The Pack</a>
+    <a href="https://www.catszn.world/#ch-v">V — The Law</a>
+    <a href="https://www.catszn.world/#ch-vi">VI — The Numbers</a>
+    <a href="https://www.catszn.world/#ch-vii">VII — The Chart</a>
+    <a href="https://www.catszn.world/#ch-viii">VIII — The Ritual</a>
+    <a href="https://www.catszn.world/#ch-ix">IX — Yours</a>
+    <a href="https://pump.fun/coin/918p2GRyDLkhsRvtAHaKZg8yrP5kXSe6CYustqTcpump" id="buy-mobile" target="_blank" rel="noopener noreferrer">Buy on pump.fun</a>
+  </div>
+
+  <main id="top">
+    <!-- I — Awakening -->
+    <section id="ch-i" class="chapter chapter--hero" data-chapter="I">
+      <div class="chapter__media">
+        <img src="./Cat Season — $CATSZN_files/banner.png" alt="Cat Season characters">
+        <div class="chapter__overlay"></div>
+      </div>
+      <div class="chapter__content">
+        <p class="chapter__label">Life I — Awakening</p>
+        <h1 class="chapter__title">Cat Season</h1>
+        <p class="chapter__subtitle">The Ninth Life on Solana</p>
+        <p class="chapter__meta">$CATSZN · SOLANA · FAIR LAUNCH</p>
+        <p class="chapter__line">Solana's cat meme tokens are waking up, running wild, and pumping together.</p>
+        <div class="chapter__cta">
+          <a href="https://pump.fun/coin/918p2GRyDLkhsRvtAHaKZg8yrP5kXSe6CYustqTcpump" id="buy-hero" class="btn btn--sol" target="_blank" rel="noopener noreferrer">Get $CATSZN</a>
+          <a href="https://www.catszn.world/#ch-ii" class="btn btn--outline">Begin the story ↓</a>
+        </div>
+        <p class="chapter__note">on pump.fun</p>
+      </div>
+      <div class="scroll-hint" aria-hidden="true">
+        <span>Scroll</span>
+        <div class="scroll-hint__line"></div>
+      </div>
+    </section>
+
+    <!-- II — The Purr -->
+    <section id="ch-ii" class="chapter chapter--story" data-chapter="II">
+      <div class="chapter__inner reveal is-in">
+        <p class="chapter__label">Life II — The Purr</p>
+        <h2 class="chapter__headline">First, the dogs had their day.<br><em>The cats were still napping.</em></h2>
+        <p class="chapter__prose">Then something shifted on the chain — a whisper, a meow, a thousand notifications at once. The season didn't ask permission. It simply <strong>arrived</strong>.</p>
+      </div>
+    </section>
+
+    <!-- III — The Coin -->
+    <section id="ch-iii" class="chapter chapter--story chapter--accent" data-chapter="III">
+      <div class="chapter__inner reveal is-in">
+        <p class="chapter__label">Life III — The Coin</p>
+        <h2 class="chapter__headline">On the windowsill, something <em>purple</em> was counting.</h2>
+        <p class="chapter__acronym"><span>C</span>ats <span>A</span>lways <span>T</span>ake <span>S</span>olana's <span>Z</span>eitgeist <span>N</span>ow</p>
+        <p class="chapter__tag">one coin. one season. no promises.</p>
+      </div>
+    </section>
+
+    <!-- IV — The Pack -->
+    <section id="ch-iv" class="chapter chapter--story" data-chapter="IV">
+      <div class="chapter__inner reveal is-in">
+        <p class="chapter__label">Life IV — The Pack</p>
+        <h2 class="chapter__headline">She is walking the old road home.<br><strong>The degens finally have company.</strong></h2>
+        <p class="chapter__prose">Every legend is somebody's little sister — and every pump needs a pack. Cat Season is the call. The telegram is the den.</p>
+      </div>
+    </section>
+
+    <!-- V — The Law -->
+    <section id="ch-v" class="chapter chapter--laws" data-chapter="V">
+      <div class="chapter__inner">
+        <p class="chapter__label reveal is-in">Life V — The Law</p>
+        <h2 class="chapter__headline reveal is-in">Four things are <em>carved</em>. Everything else is play.</h2>
+        <div class="laws">
+          <article class="law reveal is-in">
+            <span class="law__num">LAW 01</span>
+            <h3>Fair born</h3>
+            <p>Launched on pump.fun. No presale, no team allocation, no insider bags. Every wallet started at the same bowl.</p>
+          </article>
+          <article class="law reveal is-in">
+            <span class="law__num">LAW 02</span>
+            <h3>Community sealed</h3>
+            <p>Built by holders, for holders. No roadmap promises — just claws, memes, and the pack showing up every day.</p>
+          </article>
+          <article class="law reveal is-in">
+            <span class="law__num">LAW 03</span>
+            <h3>Season mode</h3>
+            <p>When Cat Season hits, everything with whiskers pumps. One ticker. One vibe. One unstoppable feline energy.</p>
+          </article>
+          <article class="law reveal is-in">
+            <span class="law__num">LAW 04</span>
+            <h3>Nothing taken</h3>
+            <p>0% buy tax, 0% sell tax. She takes everything eventually — but never at the checkout.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- VI — The Numbers -->
+    <section id="ch-vi" class="chapter chapter--stats" data-chapter="VI">
+      <div class="chapter__inner">
+        <p class="chapter__label reveal is-in">Life VI — The Number</p>
+        <h2 class="chapter__headline reveal is-in">pieces of one season · total supply</h2>
+        <div class="stats">
+          <div class="stat reveal is-in">
+            <strong id="stat-supply">1B</strong>
+            <span>total supply</span>
+          </div>
+          <div class="stat reveal is-in">
+            <strong>0% / 0%</strong>
+            <span>buy · sell tax</span>
+          </div>
+          <div class="stat reveal is-in">
+            <strong>Solana</strong>
+            <span>native chain</span>
+          </div>
+          <div class="stat reveal is-in">
+            <strong>pump.fun</strong>
+            <span>fair launch</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VII — The Chart -->
+    <section id="ch-vii" class="chapter chapter--chart" data-chapter="VII">
+      <div class="chapter__inner">
+        <p class="chapter__label reveal is-in">Life VII — The Chart</p>
+        <h2 class="chapter__headline reveal is-in">Watch the season <em>move</em></h2>
+        <p class="chapter__prose reveal is-in">Live DexScreener — track price action as the cats run.</p>
+
+        <div class="ca-box reveal is-in" id="ca-bar">
+          <span class="ca-box__label">Token contract · Solana</span>
+          <code class="ca-box__value" id="ca-display">918p2GRyDLkhsRvtAHaKZg8yrP5kXSe6CYustqTcpump</code>
+          <button type="button" class="btn btn--outline btn--small" id="copy-ca">Copy</button>
+        </div>
+
+        <div class="chart__frame reveal is-in" id="chart-frame">
+          <div class="chart__placeholder is-hidden" id="chart-placeholder">
+            <img src="./Cat Season — $CATSZN_files/logo.png" alt="">
+            <p>Chart loading…</p>
+          </div>
+          <iframe id="dex-iframe" title="DexScreener $CATSZN chart" loading="lazy" allow="clipboard-write; encrypted-media; fullscreen" referrerpolicy="no-referrer-when-downgrade" src="./Cat Season — $CATSZN_files/6fgfnwury3nblbrtyer39ocezdm67r5zcah4dtgbelmd.html"></iframe>
+        </div>
+
+        <div class="chart__links reveal is-in">
+          <a href="https://dexscreener.com/solana/6fgfnwury3nblbrtyer39ocezdm67r5zcah4dtgbelmd" id="link-dex" class="text-link" target="_blank" rel="noopener noreferrer">DexScreener ↗</a>
+          <a href="https://pump.fun/coin/918p2GRyDLkhsRvtAHaKZg8yrP5kXSe6CYustqTcpump" id="link-pump" class="text-link" target="_blank" rel="noopener noreferrer">pump.fun ↗</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIII — The Ritual -->
+    <section id="ch-viii" class="chapter chapter--ritual" data-chapter="VIII">
+      <div class="chapter__inner">
+        <p class="chapter__label reveal is-in">Life VIII — The Ritual</p>
+        <h2 class="chapter__headline reveal is-in">Three steps. Five minutes. No permission.</h2>
+        <div class="steps">
+          <article class="step reveal is-in">
+            <span class="step__num">STEP 01</span>
+            <h3>Set up a wallet</h3>
+            <p>Install Phantom or Solflare. Write the recovery phrase on paper and keep it offline. Never type it into any website.</p>
+          </article>
+          <article class="step reveal is-in">
+            <span class="step__num">STEP 02</span>
+            <h3>Add SOL to your wallet</h3>
+            <p>Buy SOL on an exchange and send it to your wallet, or use the buy option inside the wallet app. Leave a little SOL for fees.</p>
+          </article>
+          <article class="step reveal is-in">
+            <span class="step__num">STEP 03</span>
+            <h3>Buy $CATSZN</h3>
+            <p>Open pump.fun, verify the contract address character by character, then swap. Cat Season begins.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- IX — Yours -->
+    <section id="ch-ix" class="chapter chapter--finale" data-chapter="IX">
+      <div class="chapter__inner reveal is-in">
+        <p class="chapter__label">Life IX — Yours</p>
+        <h2 class="chapter__headline">Eight lives were theirs.<br><em>The ninth is yours.</em></h2>
+
+        <div class="finale__ca" id="finale-ca">
+          <span>Token contract address · Solana</span>
+          <code id="ca-display-finale">918p2GRyDLkhsRvtAHaKZg8yrP5kXSe6CYustqTcpump</code>
+          <button type="button" class="btn btn--sol" id="copy-ca-finale">Copy Contract Address</button>
+          <a href="https://solscan.io/token/918p2GRyDLkhsRvtAHaKZg8yrP5kXSe6CYustqTcpump" id="link-solscan" class="text-link" target="_blank" rel="noopener noreferrer">check on-chain → Solscan ↗</a>
+        </div>
+
+        <div class="finale__cta">
+          <a href="https://pump.fun/coin/918p2GRyDLkhsRvtAHaKZg8yrP5kXSe6CYustqTcpump" id="buy-finale" class="btn btn--sol" target="_blank" rel="noopener noreferrer">Buy on pump.fun</a>
+          <a href="https://x.com/CATSZNSOL" class="btn btn--outline" target="_blank" rel="noopener noreferrer">X / Twitter</a>
+          <a href="https://t.me/catsznsol" class="btn btn--outline" target="_blank" rel="noopener noreferrer">Telegram</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p><strong>This is a meme coin.</strong> $CATSZN has no intrinsic value and no expectation of financial return. It is not an investment product, and nothing on this page is financial advice. Prices can go to zero. Only spend what you can afford to lose completely, verify the contract address yourself before swapping, and never share your recovery phrase.</p>
+    <div class="footer__links">
+      <a href="https://x.com/CATSZNSOL" target="_blank" rel="noopener noreferrer">X</a>
+      <a href="https://t.me/catsznsol" target="_blank" rel="noopener noreferrer">Telegram</a>
+      <a href="https://dexscreener.com/solana/6fgfnwury3nblbrtyer39ocezdm67r5zcah4dtgbelmd" id="link-dex-footer" target="_blank" rel="noopener noreferrer">DexScreener</a>
+    </div>
+    <p class="footer__copy">© 2026 Cat Season · $CATSZN · The Ninth Life</p>
+  </footer>
+
+  <script src="./Cat Season — $CATSZN_files/config.js.download"></script>
+  <script src="./Cat Season — $CATSZN_files/main.js.download"></script>
+
+
+</body><mozbar-toolbar data-wxt-shadow-root=""><template shadowrootmode="open">
+<!-- saved from url=(0025)https://www.catszn.world/ -->
+<html><head><style>/* WXT Shadow Root Reset */ :host{all:initial !important;}
+:host,:host{--background: #ffffff;--foreground: #09090b;--card: #ffffff;--card-foreground: #09090b;--popover: #ffffff;--popover-foreground: #09090b;--primary: #3b82f6;--primary-foreground: #ffffff;--secondary: #f4f4f5;--secondary-foreground: #18181b;--muted: #f4f4f5;--muted-foreground: #52525b;--accent: #f4f4f5;--accent-foreground: #18181b;--destructive: #dc2626;--destructive-foreground: #ffffff;--border: #e4e4e7;--input: #e4e4e7;--ring: #a1a1aa;--radius: .5rem;--radius-xl: calc(var(--radius) + 4px);--radius-lg: var(--radius);--radius-md: calc(var(--radius) - 2px);--radius-sm: calc(var(--radius) - 4px);--chart-1: #3b82f6;--chart-2: #22c55e;--chart-3: #eab308;--chart-4: #ef4444;--chart-5: #a855f7;--sidebar: #fafafa;--sidebar-foreground: #3f3f46;--sidebar-primary: #18181b;--sidebar-primary-foreground: #fafafa;--sidebar-accent: #f4f4f5;--sidebar-accent-foreground: #18181b;--sidebar-border: #e4e4e7;--sidebar-ring: #3b82f6;--color-background: var(--background);--color-foreground: var(--foreground);--color-card: var(--card);--color-card-foreground: var(--card-foreground);--color-popover: var(--popover);--color-popover-foreground: var(--popover-foreground);--color-primary: var(--primary);--color-primary-foreground: var(--primary-foreground);--color-secondary: var(--secondary);--color-secondary-foreground: var(--secondary-foreground);--color-muted: var(--muted);--color-muted-foreground: var(--muted-foreground);--color-accent: var(--accent);--color-accent-foreground: var(--accent-foreground);--color-destructive: var(--destructive);--color-destructive-foreground: var(--destructive-foreground);--color-border: var(--border);--color-input: var(--input);--color-ring: var(--ring);--color-chart-1: var(--chart-1);--color-chart-2: var(--chart-2);--color-chart-3: var(--chart-3);--color-chart-4: var(--chart-4);--color-chart-5: var(--chart-5);--color-sidebar: var(--sidebar);--color-sidebar-foreground: var(--sidebar-foreground);--color-sidebar-primary: var(--sidebar-primary);--color-sidebar-primary-foreground: var(--sidebar-primary-foreground);--color-sidebar-accent: var(--sidebar-accent);--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);--color-sidebar-border: var(--sidebar-border);--color-sidebar-ring: var(--sidebar-ring)}.dark,:host(.dark){--background: #09090b;--foreground: #fafafa;--card: #09090b;--card-foreground: #fafafa;--popover: #09090b;--popover-foreground: #fafafa;--primary: #2563eb;--primary-foreground: #ffffff;--secondary: #27272a;--secondary-foreground: #fafafa;--muted: #18181b;--muted-foreground: #d4d4d8;--accent: #18181b;--accent-foreground: #fafafa;--destructive: #dc2626;--destructive-foreground: #ffffff;--border: #27272a;--input: #27272a;--ring: #52525b;--chart-1: #3b82f6;--chart-2: #22c55e;--chart-3: #eab308;--chart-4: #ef4444;--chart-5: #a855f7;--sidebar: #18181b;--sidebar-foreground: #f4f4f5;--sidebar-primary: #3b82f6;--sidebar-primary-foreground: #ffffff;--sidebar-accent: #27272a;--sidebar-accent-foreground: #f4f4f5;--sidebar-border: #27272a;--sidebar-ring: #3b82f6;--color-background: var(--background);--color-foreground: var(--foreground);--color-card: var(--card);--color-card-foreground: var(--card-foreground);--color-popover: var(--popover);--color-popover-foreground: var(--popover-foreground);--color-primary: var(--primary);--color-primary-foreground: var(--primary-foreground);--color-secondary: var(--secondary);--color-secondary-foreground: var(--secondary-foreground);--color-muted: var(--muted);--color-muted-foreground: var(--muted-foreground);--color-accent: var(--accent);--color-accent-foreground: var(--accent-foreground);--color-destructive: var(--destructive);--color-destructive-foreground: var(--destructive-foreground);--color-border: var(--border);--color-input: var(--input);--color-ring: var(--ring);--color-chart-1: var(--chart-1);--color-chart-2: var(--chart-2);--color-chart-3: var(--chart-3);--color-chart-4: var(--chart-4);--color-chart-5: var(--chart-5);--color-sidebar: var(--sidebar);--color-sidebar-foreground: var(--sidebar-foreground);--color-sidebar-primary: var(--sidebar-primary);--color-sidebar-primary-foreground: var(--sidebar-primary-foreground);--color-sidebar-accent: var(--sidebar-accent);--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);--color-sidebar-border: var(--sidebar-border);--color-sidebar-ring: var(--sidebar-ring)}.spam-low{--spam-color: #22c55e;--spam-bg: #dcfce7}.spam-medium{--spam-color: #eab308;--spam-bg: #fef9c3}.spam-high{--spam-color: #ef4444;--spam-bg: #fee2e2}.dark .spam-low,:host(.dark) .spam-low{--spam-bg: #14532d}.dark .spam-medium,:host(.dark) .spam-medium{--spam-bg: #713f12}.dark .spam-high,:host(.dark) .spam-high{--spam-bg: #7f1d1d}.mozbar-base{font-family:ui-sans-serif,system-ui,sans-serif,"Apple Color Emoji","Segoe UI Emoji";font-size:14px;line-height:1.5;color:var(--foreground);background-color:var(--background);box-sizing:border-box}.mozbar-base *,.mozbar-base *:before,.mozbar-base *:after{box-sizing:border-box}.mozbar-base button{font-family:inherit;font-size:inherit;line-height:inherit;cursor:pointer;border:none;background:transparent;padding:0;margin:0}.mozbar-base *:focus-visible{outline:2px solid var(--ring);outline-offset:2px;border-radius:var(--radius-sm)}#mozbar-toolbar-wrapper{font-family:ui-sans-serif,system-ui,sans-serif,"Apple Color Emoji","Segoe UI Emoji";font-size:14px;line-height:1.5;color:var(--foreground);box-sizing:border-box}#mozbar-toolbar-wrapper *,#mozbar-toolbar-wrapper *:before,#mozbar-toolbar-wrapper *:after{box-sizing:border-box}#mozbar-toolbar-wrapper button{font-family:inherit;font-size:inherit;line-height:inherit;cursor:pointer;border:none;background:transparent;padding:0;margin:0}</style></head><body style="color-scheme: initial; forced-color-adjust: initial; math-depth: initial; position-anchor: initial; text-size-adjust: initial; appearance: initial; color: initial; font-feature-settings: initial; font-kerning: initial; font-language-override: initial; font-optical-sizing: initial; font-palette: initial; font-size: initial; font-size-adjust: initial; font-stretch: initial; font-style: initial; font-synthesis: initial; font-variant: initial; font-variation-settings: initial; font-weight: initial; position-area: initial; text-orientation: initial; text-rendering: initial; text-spacing-trim: initial; -webkit-font-smoothing: initial; -webkit-locale: initial; -webkit-text-orientation: initial; -webkit-writing-mode: initial; writing-mode: initial; zoom: initial; accent-color: initial; place-content: initial; place-items: initial; place-self: initial; alignment-baseline: initial; anchor-name: initial; anchor-scope: initial; animation-composition: initial; animation: initial; animation-trigger: initial; app-region: initial; aspect-ratio: initial; backdrop-filter: initial; backface-visibility: initial; background: initial; background-blend-mode: initial; baseline-shift: initial; baseline-source: initial; block-size: initial; border-block: initial; border: initial; border-radius: initial; border-collapse: initial; border-end-end-radius: initial; border-end-start-radius: initial; border-inline: initial; border-shape: initial; border-start-end-radius: initial; border-start-start-radius: initial; inset: initial; box-decoration-break: initial; box-shadow: initial; box-sizing: initial; break-after: initial; break-before: initial; break-inside: initial; buffered-rendering: initial; caption-side: initial; caret-animation: initial; caret-color: initial; caret-shape: initial; clear: initial; clip: initial; clip-path: initial; clip-rule: initial; color-interpolation: initial; color-interpolation-filters: initial; color-rendering: initial; columns: initial; column-fill: initial; gap: initial; rule-break: initial; rule: initial; rule-inset: initial; rule-visibility-items: initial; column-span: initial; contain: initial; contain-intrinsic-block-size: initial; contain-intrinsic-size: initial; contain-intrinsic-inline-size: initial; container: initial; content: initial; content-visibility: initial; corner-shape: initial; corner-block-end-shape: initial; corner-block-start-shape: initial; counter-increment: initial; counter-reset: initial; counter-set: initial; cursor: initial; cx: initial; cy: initial; d: initial; dominant-baseline: initial; dynamic-range-limit: initial; empty-cells: initial; field-sizing: initial; fill: initial; fill-opacity: initial; fill-rule: initial; filter: initial; flex: initial; flex-flow: initial; flex-line-count: initial; float: initial; flood-color: initial; flood-opacity: initial; grid: initial; grid-area: initial; height: initial; hyphenate-character: initial; hyphenate-limit-chars: initial; hyphens: initial; image-orientation: initial; image-rendering: initial; initial-letter: initial; inline-size: initial; inset-block: initial; inset-inline: initial; interactivity: initial; interest-delay: initial; interpolate-size: initial; isolation: initial; letter-spacing: initial; lighting-color: initial; line-break: initial; line-height: initial; list-style: initial; margin-block: initial; margin: initial; margin-inline: initial; marker: initial; mask: initial; mask-type: initial; math-shift: initial; math-style: initial; max-block-size: initial; max-height: initial; max-inline-size: initial; max-width: initial; min-block-size: initial; min-height: initial; min-inline-size: initial; min-width: initial; mix-blend-mode: initial; object-fit: initial; object-position: initial; object-view-box: initial; offset: initial; opacity: initial; order: initial; orphans: initial; outline: initial; outline-offset: initial; overflow-anchor: initial; overflow-block: initial; overflow-clip-margin: initial; overflow-inline: initial; overflow-wrap: initial; overflow: initial; overlay: initial; overscroll-behavior-block: initial; overscroll-behavior-inline: initial; overscroll-behavior: initial; padding-block: initial; padding: initial; padding-inline: initial; page: initial; page-margin-safety: initial; page-orientation: initial; paint-order: initial; perspective: initial; perspective-origin: initial; pointer-events: initial; position-try: initial; position-visibility: initial; print-color-adjust: initial; quotes: initial; r: initial; reading-flow: initial; reading-order: initial; resize: initial; rotate: initial; ruby-align: initial; ruby-overhang: initial; ruby-position: initial; rule-overlap: initial; rx: initial; ry: initial; scale: initial; scroll-behavior: initial; scroll-initial-target: initial; scroll-margin-block: initial; scroll-margin: initial; scroll-margin-inline: initial; scroll-marker-group: initial; scroll-padding-block: initial; scroll-padding: initial; scroll-padding-inline: initial; scroll-snap-align: initial; scroll-snap-stop: initial; scroll-snap-type: initial; scroll-target-group: initial; scroll-timeline: initial; scrollbar-color: initial; scrollbar-gutter: initial; scrollbar-width: initial; shape-image-threshold: initial; shape-margin: initial; shape-outside: initial; shape-rendering: initial; size: initial; speak: initial; stop-color: initial; stop-opacity: initial; stroke: initial; stroke-dasharray: initial; stroke-dashoffset: initial; stroke-linecap: initial; stroke-linejoin: initial; stroke-miterlimit: initial; stroke-opacity: initial; stroke-width: initial; tab-size: initial; table-layout: initial; text-align: initial; text-align-last: initial; text-anchor: initial; text-autospace: initial; text-box: initial; text-combine-upright: initial; text-decoration: initial; text-decoration-skip-ink: initial; text-emphasis: initial; text-emphasis-position: initial; text-fit: initial; text-indent: initial; text-justify: initial; text-overflow: initial; text-shadow: initial; text-transform: initial; text-underline-offset: initial; text-underline-position: initial; text-wrap: initial; timeline-scope: initial; timeline-trigger: initial; touch-action: initial; transform: initial; transform-box: initial; transform-origin: initial; transform-style: initial; transition: initial; translate: initial; trigger-scope: initial; user-select: initial; vector-effect: initial; vertical-align: initial; view-timeline: initial; view-transition-class: initial; view-transition-group: initial; view-transition-name: initial; view-transition-scope: initial; visibility: initial; border-spacing: initial; -webkit-box-align: initial; -webkit-box-decoration-break: initial; -webkit-box-direction: initial; -webkit-box-flex: initial; -webkit-box-ordinal-group: initial; -webkit-box-orient: initial; -webkit-box-pack: initial; -webkit-box-reflect: initial; -webkit-line-break: initial; -webkit-line-clamp: initial; -webkit-mask-box-image: initial; -webkit-rtl-ordering: initial; -webkit-ruby-position: initial; -webkit-tap-highlight-color: initial; -webkit-text-combine: initial; -webkit-text-decorations-in-effect: initial; -webkit-text-fill-color: initial; -webkit-text-security: initial; -webkit-text-stroke: initial; -webkit-user-drag: initial; white-space-collapse: initial; widows: initial; width: initial; will-change: initial; word-break: initial; word-spacing: initial; x: initial; y: initial; display: block; position: relative; z-index: 2147483647; font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, Roboto, sans-serif;"><div id="mozbar-toolbar-wrapper"></div></body></html></template></mozbar-toolbar></html>

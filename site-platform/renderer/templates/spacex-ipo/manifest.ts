@@ -20,7 +20,9 @@ export const manifest: TemplateManifest = {
     "min": 3,
     "max": 3
   },
-  "supportsModules": [],
+  "supportsModules": [
+    "token"
+  ],
   "requiredContent": [
     "hero.title",
     "meta.title"
@@ -33,6 +35,7 @@ export const manifest: TemplateManifest = {
     "gallery": "1/1"
   },
   "usesThemeKeys": [
+    "core.button.textTransform",
     "core.colors.background",
     "core.colors.onPrimary",
     "core.colors.overlay",
@@ -77,7 +80,7 @@ export const manifest: TemplateManifest = {
   },
   "kind": "slotted",
   "slotted": {
-    "sourceKey": "spacex-ipo@1",
+    "sourceKey": "spacex-ipo@1.0.0",
     "slots": [
       {
         "selector": "#launch .kicker",
@@ -100,9 +103,14 @@ export const manifest: TemplateManifest = {
         "mode": "text"
       },
       {
-        "selector": "#launch .btn",
-        "path": "hero.ctas[0]",
-        "mode": "link"
+        "selector": "#launch .btn #textToCopy",
+        "path": "modules.token.contractAddress",
+        "mode": "text"
+      },
+      {
+        "selector": "#launch .btn > div:not([id])",
+        "path": "modules.token.copyLabel",
+        "mode": "text"
       },
       {
         "selector": "#ipo .kicker",
@@ -192,25 +200,84 @@ export const manifest: TemplateManifest = {
         "pseudo": "before"
       },
       {
-        "path": "sections[1].backgroundImage",
+        "path": "sections[0].backgroundImage",
         "selector": ".starship",
         "pseudo": "before"
       },
       {
-        "path": "sections[2].backgroundImage",
+        "path": "sections[1].backgroundImage",
         "selector": ".human",
         "pseudo": "before"
       },
       {
-        "path": "sections[3].backgroundImage",
+        "path": "sections[2].backgroundImage",
         "selector": ".network",
         "pseudo": "before"
+      }
+    ],
+    "cssScrims": [
+      {
+        "path": "hero.overlayOpacity",
+        "selector": "#launch",
+        "pseudo": "after"
+      },
+      {
+        "path": "sections[0].overlayOpacity",
+        "selector": "#ipo",
+        "pseudo": "after"
+      },
+      {
+        "path": "sections[1].overlayOpacity",
+        "selector": "#offering",
+        "pseudo": "after"
+      },
+      {
+        "path": "sections[2].overlayOpacity",
+        "selector": "#coin",
+        "pseudo": "after"
+      }
+    ],
+    "bundleAssets": [
+      {
+        "path": "assets/fontawesome/css/fontawesome.css",
+        "integrity": "sha384-+DNG9ViMNGni41xCMRferX1b/hzZcFcfbdDz/Te2GTTpaAFeKODzrWUyDzczC8dp",
+        "contentType": "text/css"
+      },
+      {
+        "path": "assets/fontawesome/css/brands.css",
+        "integrity": "sha384-SPEw8qBv9YYirHxFAoYMypag7EhmMjLKGS41mqzLJ7rFmByvAH+LcK+9+bbDjwr2",
+        "contentType": "text/css"
+      },
+      {
+        "path": "assets/favicon/favicon-96x96.png",
+        "integrity": "sha384-7LaM6pnQ6Qb+7oP8fEr76JcjAGDby0bYUGwidhlXUue4HE+YMi55ZoGdsg+j9ISJ",
+        "contentType": "image/png"
+      },
+      {
+        "path": "assets/favicon/favicon.svg",
+        "integrity": "sha384-HIOfW5LtFpmXFpIE1YzvUM/W3Fia53DvgNyGvKGuY9XgAaaL8BRyhqrpHZyobRc8",
+        "contentType": "image/svg+xml"
+      },
+      {
+        "path": "assets/favicon/favicon.ico",
+        "integrity": "sha384-WdOHkFN24d1VquOs+jCrOkmkG0tg4dBEp/29FAsIHpxtkNi2zzEG5hSoge/Gi4Yu",
+        "contentType": "image/x-icon"
+      },
+      {
+        "path": "assets/favicon/apple-touch-icon.png",
+        "integrity": "sha384-fsrdHZlrPCtn3yyN/0UeyCHnTirk06oQsf53eYYqk4fblwSFh62gtiSH5oNJv+ne",
+        "contentType": "image/png"
+      },
+      {
+        "path": "assets/favicon/site.webmanifest",
+        "integrity": "sha384-wm1xu04vsP5vYGQmJd0iih9CObx5uzL79Z3+ermmeTyRtvLfrC/KjXYT35NlWKZh",
+        "contentType": "application/manifest+json"
       }
     ],
     "sourceHash": "cc12a8f81207f3687beecc84558e3e9a78fcd133bc658c52251bead96e72ef38",
     "cssTokenized": {
       "source": "inline",
-      "cssHash": "0ec898642b960150e496ce2ebfa0bac9e3647c6aaa5be0ba13756c63044a863b"
+      "cssHash": "83e0c26096c886a0dc8572b6fdbf7cf51b3d94e2bf485fc4a56721b1ad9df4d1"
     }
   }
 } as TemplateManifest;

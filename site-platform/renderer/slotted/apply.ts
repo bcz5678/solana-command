@@ -63,6 +63,33 @@ function isEmpty(value: unknown): boolean {
   );
 }
 
+/**
+ * True when a textContent write would silently delete real markup rather
+ * than just replace text — `el.textContent = ...` removes every child node,
+ * element or otherwise. There's no legitimate case for a text-writing mode
+ * targeting a node that has element children: the fix is always a narrower
+ * selector (".btn span", not ".btn"), never overwriting anyway. Pushes a
+ * warning naming what would have been destroyed and returns true so the
+ * caller skips the write, leaving the source's own content in place.
+ */
+function guardStructuredWrite(
+  el: SlottedElement,
+  slot: Slot,
+  result: ApplyResult,
+): boolean {
+  const children = el.children;
+  if (children.length === 0) return false;
+
+  const tags = children.map((c) => c.tagName.toLowerCase()).join(", ");
+  result.warnings.push(
+    `Slot "${slot.path}" (selector "${slot.selector}") would overwrite element ` +
+    `children (${tags}) with text — skipped. The source's own content is left ` +
+    `in place; narrow the selector to the specific text node instead of the ` +
+    `structured container.`,
+  );
+  return true;
+}
+
 // ============================================================================
 // SLOT APPLICATION
 // ============================================================================
@@ -142,7 +169,7 @@ function applyToElement(
     // keepFallback leaves the source's own copy in place, for placeholder text
     // a client might legitimately keep.
     if (!slot.keepFallback) {
-      if (slot.mode === "text") el.textContent = "";
+      if (slot.mode === "text" && !guardStructuredWrite(el, slot, result)) el.textContent = "";
     }
     return;
   }
@@ -153,7 +180,7 @@ function applyToElement(
     // there is no "html" mode: a content field must never become markup.
     // ------------------------------------------------------------------
     case "text":
-      el.textContent = String(value);
+      if (!guardStructuredWrite(el, slot, result)) el.textContent = String(value);
       break;
 
     case "attr": {
@@ -177,7 +204,7 @@ function applyToElement(
       }
 
       el.setAttribute("href", safeUrl(cta.href));
-      if (cta.label) el.textContent = cta.label;
+      if (cta.label && !guardStructuredWrite(el, slot, result)) el.textContent = cta.label;
 
       if (cta.external) {
         el.setAttribute("target", "_blank");
@@ -346,33 +373,42 @@ export interface BundleRewriteResult {
  * Content-hashed, so these are immutable and never need invalidating — which
  * is what keeps a rebuild's invalidation list at two paths.
  */
-export function rewriteBundleAssets(
-  doc: SlottedDocument,
-  assets: BundleAsset[],
-  templateKey: string,
-  s3Prefix: string,
-): BundleRewriteResult {
-  const copies: AssetCopy[] = [];
-  const warnings: string[] = [];
+/**
+ * Published path for every bundle asset, independent of s3Prefix/templateKey
+ * — the one thing rewriteBundleAssets (DOM attributes) and rewriteCssAssetUrls
+ * (raw CSS text) both need, built once so they can't disagree on a mapping.
+ */
+function bundleUrlMap(assets: BundleAsset[]): Map<string, string> {
   const urlMap = new Map<string, string>();
 
   for (const asset of assets) {
-    const file = hashedName(asset.path, asset.integrity);
-    const published = `/assets/${file}`;
+    const published = `/assets/${hashedName(asset.path, asset.integrity)}`;
 
     urlMap.set(asset.path, published);
     // Sources reference the same file as "assets/x.css", "./assets/x.css" and
     // "/assets/x.css" interchangeably; normalise all three.
     urlMap.set(`./${asset.path}`, published);
     urlMap.set(`/${asset.path}`, published);
-
-    copies.push({
-      sourceKey: `_templates/${templateKey}/${asset.path}`,
-      destKey: `${s3Prefix}assets/${file}`,
-      contentType: asset.contentType,
-      cacheControl: IMMUTABLE,
-    });
   }
+
+  return urlMap;
+}
+
+export function rewriteBundleAssets(
+  doc: SlottedDocument,
+  assets: BundleAsset[],
+  templateKey: string,
+  s3Prefix: string,
+): BundleRewriteResult {
+  const warnings: string[] = [];
+  const urlMap = bundleUrlMap(assets);
+
+  const copies: AssetCopy[] = assets.map((asset) => ({
+    sourceKey: `_templates/${templateKey}/${asset.path}`,
+    destKey: `${s3Prefix}assets/${hashedName(asset.path, asset.integrity)}`,
+    contentType: asset.contentType,
+    cacheControl: IMMUTABLE,
+  }));
 
   const ATTRS: Array<[string, string]> = [
     ["link[href]", "href"],
@@ -403,24 +439,30 @@ export function rewriteBundleAssets(
     }
   }
 
-  // Inline styles referencing bundled images: url('assets/bg.jpg')
-  for (const el of doc.querySelectorAll("style")) {
-    let css = el.textContent ?? "";
-    let changed = false;
+  return { copies, warnings };
+}
 
-    for (const [from, to] of urlMap) {
-      const pattern = new RegExp(
-        `url\\(\\s*['"]?${from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}['"]?\\s*\\)`,
-        "g",
-      );
-      if (pattern.test(css)) {
-        css = css.replace(pattern, `url('${to}')`);
-        changed = true;
-      }
-    }
+/**
+ * Rewrite bundle-asset url() references inside a CSS string.
+ *
+ * rewriteBundleAssets only reaches DOM attributes. That's fine for a
+ * tokenized template's inline <style>, but the slotted path never has one at
+ * this point in the render — normalizeSource extracted it at import time,
+ * and nothing recreates it until the "Styles" step consolidates the token
+ * block, SOURCE_CSS and cssBackgrounds into one <style>, well after bundle
+ * assets are rewritten. This is called there instead, directly against the
+ * CSS string, with the identical mapping rewriteBundleAssets uses for markup.
+ */
+export function rewriteCssAssetUrls(css: string, assets: BundleAsset[]): string {
+  let rewritten = css;
 
-    if (changed) el.textContent = css;
+  for (const [from, to] of bundleUrlMap(assets)) {
+    const pattern = new RegExp(
+      `url\\(\\s*['"]?${from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}['"]?\\s*\\)`,
+      "g",
+    );
+    rewritten = rewritten.replace(pattern, `url('${to}')`);
   }
 
-  return { copies, warnings };
+  return rewritten;
 }

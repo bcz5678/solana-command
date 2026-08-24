@@ -177,7 +177,7 @@ export async function POST(req: NextRequest) {
           "X-Signature": signPayload(serialised),
           // The webhook trigger node's own Header Auth credential — separate
           // check, same secret, raw rather than HMAC'd.
-          "X-N8N_WEBHOOK_SECRET": N8N_WEBHOOK_SECRET(),
+          "X-N8N-WEBHOOK-SECRET": N8N_WEBHOOK_SECRET(),
         },
         body: serialised,
         // The workflow responds at the END (Respond to Webhook), not on

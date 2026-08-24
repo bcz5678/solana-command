@@ -12,6 +12,7 @@ export interface SlottedDocument {
   documentElement: SlottedElement;
   querySelector(selector: string): SlottedElement | null;
   querySelectorAll(selector: string): SlottedElement[];
+  createElement(tagName: string): SlottedElement;
 }
 
 export interface SlottedElement {
@@ -20,6 +21,8 @@ export interface SlottedElement {
   outerHTML: string;
   textContent: string | null;
   attributes: Array<{ name: string; value: string }>;
+  /** Direct element children only — not text nodes, not descendants. */
+  children: SlottedElement[];
   getAttribute(name: string): string | null;
   setAttribute(name: string, value: string): void;
   removeAttribute(name: string): void;
@@ -27,5 +30,6 @@ export interface SlottedElement {
   cloneNode(deep: boolean): SlottedElement;
   querySelector(selector: string): SlottedElement | null;
   querySelectorAll(selector: string): SlottedElement[];
+  appendChild(node: SlottedElement): void;
   parentNode: { insertBefore(node: SlottedElement, ref: SlottedElement | null): void } | null;
 }

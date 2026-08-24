@@ -117,6 +117,7 @@ export {
   BASE_CORE,
   mergeCore,
 } from "./base-theme";
+export type { PartialCore } from "./base-theme";
 
 
 // ---- SECTION 12 — token-vars.ts (template starting points) ----

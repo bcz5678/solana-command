@@ -61,12 +61,18 @@ export default function DesignTab({ manifest, value, onChange }: Props) {
     const customEntries = Object.entries(custom)
 
     // Same computation regardless of which key is being rendered — done once
-    // per render rather than per key. null until enough of theme.core.colors
-    // is filled in for a real derivation (see derived-theme.ts).
-    const derivedVars = useMemo(
-        () => tryResolveDerivedVars(theme, manifest),
-        [theme, manifest],
-    )
+    // per render rather than per key. vars stays null until enough of
+    // theme.core.colors is filled in for a real derivation (see
+    // derived-theme.ts); error distinguishes "nothing to derive yet" from
+    // "this actually broke" without changing what the UI shows for either —
+    // logged the same way the usesThemeKeys mismatch above already is.
+    const derivedVars = useMemo(() => {
+        const result = tryResolveDerivedVars(theme, manifest)
+        if (result.error) {
+            console.warn(`[DesignTab] derived theme preview unavailable: ${result.error}`)
+        }
+        return result
+    }, [theme, manifest])
 
     return (
         <div className="flex flex-col gap-5">
@@ -97,7 +103,7 @@ export default function DesignTab({ manifest, value, onChange }: Props) {
                                     key={path}
                                     meta={meta}
                                     value={getPath(theme, path) as string | undefined}
-                                    derived={cssVar ? derivedVars?.[cssVar] : undefined}
+                                    derived={cssVar ? derivedVars.vars?.[cssVar] : undefined}
                                     onChange={(next) => onChange(setPath(theme, path, next))}
                                 />
                             )

@@ -31,7 +31,7 @@ import { join, relative, extname, basename } from "node:path";
 import { createHash } from "node:crypto";
 import { parseHTML } from "linkedom";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
-import { sanitizeDocument, formatReport, SanitizePolicySchema } from "@site/renderer";
+import { sanitizeDocument, formatReport, SanitizePolicySchema } from "@site/schema";
 
 // ============================================================================
 // ARGS

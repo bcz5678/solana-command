@@ -33,8 +33,8 @@ export const preset: TemplatePreset = {
       "typography": {
         "fontFamilyBase": "\"Manrope\",Verdana,Geneva,Tahoma,sans-serif",
         "baseFontSize": "18px",
-        "scaleRatio": 1.3281,
-        "scaleRatioMobile": 1.2074,
+        "scaleRatio": 1.3229,
+        "scaleRatioMobile": 1.2107,
         "fontWeightNormal": 400,
         "fontWeightBold": 700,
         "lineHeightBase": 1.7,
@@ -58,6 +58,12 @@ export const preset: TemplatePreset = {
       },
       "breakpoints": {
         "md": "768px"
+      },
+      "button": {
+        "textTransform": "uppercase",
+        "paddingBlock": "14px",
+        "paddingInline": "28px",
+        "borderWidth": "0px"
       }
     },
     "semantic": {
@@ -95,22 +101,32 @@ export const preset: TemplatePreset = {
         "In 2020, SpaceX returned America's ability to fly NASA astronauts to and from the International Space Station on American vehicles.",
         "The SpaceXIPO coin celebrates the launch of $SPCX."
       ],
+      "backgroundImage": {
+        "id": "5164d7ef-16d4-48f2-9ef6-34dac9329881",
+        "stagingKey": "_templates/spacex-ipo@1.0.0/seed/banner/",
+        "url": "/seed/banner/original.jpeg",
+        "alt": "",
+        "decorative": false,
+        "focalX": 0.5,
+        "focalY": 0.5,
+        "variants": {
+          "original": "/seed/banner/original.jpeg"
+        },
+        "seedPath": "banner"
+      },
       "overlayOpacity": 0.35,
       "overlayDirection": "uniform",
       "crossAlign": "start",
-      "ctas": [
-        {
-          "label": "CA Click to copy: 0xXXd5934Ce90228B9B7cE03999b81069ab629XXXX",
-          "href": "#",
-          "external": false,
-          "variant": "primary"
-        }
-      ],
+      // The CA-copy widget is no longer a CTA slot (see manifest.ts and
+      // overrides.json's sections.launch.ignoreCta) — this entry was the
+      // flattened text extract.ts read back before the widget had its own
+      // slots. Nothing maps to hero.ctas[0] anymore, so it stays empty.
+      "ctas": [],
       "contentAnchor": "block-center"
     },
     "sections": [
       {
-        "id": "8f820b1c-ad18-4afc-8fb5-e40ea2067464",
+        "id": "c5e501df-1cc0-42f8-808a-d9e2e47c01b7",
         "slug": "ipo",
         "order": 0,
         "enabled": true,
@@ -118,6 +134,19 @@ export const preset: TemplatePreset = {
         "showInNav": true,
         "kicker": "SpaceX IPO",
         "title": "$SPCX",
+        "backgroundImage": {
+          "id": "8081704f-5c18-4e41-9778-bec5c3afae69",
+          "stagingKey": "_templates/spacex-ipo@1.0.0/seed/img1/",
+          "url": "/seed/img1/original.jpeg",
+          "alt": "",
+          "decorative": false,
+          "focalX": 0.5,
+          "focalY": 0.5,
+          "variants": {
+            "original": "/seed/img1/original.jpeg"
+          },
+          "seedPath": "img1"
+        },
         "overlayOpacity": 0.35,
         "overlayDirection": "uniform",
         "contentAnchor": "block-center",
@@ -128,7 +157,7 @@ export const preset: TemplatePreset = {
         ]
       },
       {
-        "id": "5550a64b-0287-478c-b7ee-9e6650ee721c",
+        "id": "c62bc799-dcd1-4420-817d-f6c2d79a120f",
         "slug": "offering",
         "order": 1,
         "enabled": true,
@@ -136,6 +165,19 @@ export const preset: TemplatePreset = {
         "showInNav": true,
         "kicker": "Access",
         "title": "A non-traditional offering",
+        "backgroundImage": {
+          "id": "667f98b6-4a1b-44a8-bd8b-54bcb96a2f12",
+          "stagingKey": "_templates/spacex-ipo@1.0.0/seed/img2/",
+          "url": "/seed/img2/original.jpeg",
+          "alt": "",
+          "decorative": false,
+          "focalX": 0.5,
+          "focalY": 0.5,
+          "variants": {
+            "original": "/seed/img2/original.jpeg"
+          },
+          "seedPath": "img2"
+        },
         "overlayOpacity": 0.35,
         "overlayDirection": "uniform",
         "contentAnchor": "block-center",
@@ -147,7 +189,7 @@ export const preset: TemplatePreset = {
         ]
       },
       {
-        "id": "08536cad-8a16-452f-99f9-3f9bd8f74dbe",
+        "id": "297b5a13-addc-4f87-8eab-37ac23600853",
         "slug": "coin",
         "order": 2,
         "enabled": true,
@@ -155,6 +197,19 @@ export const preset: TemplatePreset = {
         "showInNav": true,
         "kicker": "The SpaceX IPO Coin",
         "title": "From Launch to Orbit",
+        "backgroundImage": {
+          "id": "d1d05ed4-1353-4f22-8c4e-35f18569dcb4",
+          "stagingKey": "_templates/spacex-ipo@1.0.0/seed/img3/",
+          "url": "/seed/img3/original.jpeg",
+          "alt": "",
+          "decorative": false,
+          "focalX": 0.5,
+          "focalY": 0.5,
+          "variants": {
+            "original": "/seed/img3/original.jpeg"
+          },
+          "seedPath": "img3"
+        },
         "overlayOpacity": 0.35,
         "overlayDirection": "uniform",
         "contentAnchor": "block-center",
@@ -173,7 +228,15 @@ export const preset: TemplatePreset = {
     ],
     "social": [
       {
-        "id": "909be192-576a-4fbc-b48d-a4a29a3546d1",
+        "id": "bec82625-31d7-46ec-b11d-d957b34b2afd",
+        "platform": "x-twitter",
+        "label": "x-twitter",
+        "url": "https://x.com/spacexipo_coin",
+        "showInNav": true,
+        "showInHero": false
+      },
+      {
+        "id": "bd6368ff-bef5-45f3-ace9-d59085f4ebf6",
         "platform": "telegram",
         "label": "telegram",
         "url": "https://t.me/spacexipo_coin",
@@ -181,6 +244,25 @@ export const preset: TemplatePreset = {
         "showInHero": false
       }
     ],
+    // Hand-added — author-preset has no extraction path for modules yet, so
+    // overrides.json's anonymize entry for modules.token.contractAddress
+    // never reaches a generated draft to act on. Applied here by hand
+    // instead: this must NOT be the source's real address (see
+    // overrides.json), same reasoning as brand.name/social[].url. copyLabel
+    // and copyConfirmation come straight from the source widget's own text.
+    //
+    // Accessibility follow-up for the eventual approved copy-to-clipboard
+    // script: see ../../../../../templates/spacex-ipo/TODO.md. Not here,
+    // because this file is generated (preset refuses to clobber it, but the
+    // header above still says "generated") — the TODO lives somewhere no
+    // pipeline step ever touches.
+    "modules": {
+      "token": {
+        "contractAddress": "0x0000000000000000000000000000000000000000",
+        "copyLabel": "Click to copy:",
+        "copyConfirmation": "Coin identifier copied to clipboard"
+      }
+    },
     "footer": {
       "disclaimer": "TODO",
       "legal": {
@@ -194,6 +276,9 @@ export const preset: TemplatePreset = {
     "meta.title",
     "meta.description",
     "hero.title",
-    "social[].url"
+    "social[].url",
+    // Anonymized to the zero address above — every site launches its own
+    // token and must supply its own contract, same rationale as brand.name.
+    "modules.token.contractAddress"
   ]
 };

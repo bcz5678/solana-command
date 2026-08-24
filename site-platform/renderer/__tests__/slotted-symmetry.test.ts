@@ -202,3 +202,76 @@ describe(":scope symmetry (bug 5)", () => {
     expect(extracted.content.tags).toEqual([{ value: "DeFi" }]);
   });
 });
+
+// ============================================================================
+// Structured-node guard (fix #1)
+// ============================================================================
+// verify on spacex-ipo found this for real: a contract-address "click to
+// copy" widget — <a class="btn"><h3>CA</h3><div>Click to copy:</div>
+// <div id="textToCopy">0x…</div></a> — with the hero CTA slot's selector
+// (.btn) matching the whole wrapper. mode:"link" set el.textContent, which
+// deletes every child node. Visually destroyed, and #textToCopy no longer
+// existed for the approved copy script to query. text mode carries the
+// identical risk through the same el.textContent assignment.
+describe("guardStructuredWrite (fix #1 — spacex-ipo's destroyed CA widget)", () => {
+  it("link mode: skips the textContent write against a structured target, sets href anyway, warns with the path", () => {
+    const html = `<a class="btn"><h3>CA</h3><div>Click to copy:</div><div id="textToCopy">0x1234</div></a>`;
+    const { document } = parseHTML(html);
+    const target = document.querySelector(".btn") as unknown as SlottedElement;
+    const originalHtml = target.innerHTML;
+
+    const slot: Slot = { selector: ".btn", path: "value", mode: "link", all: false, keepFallback: false };
+    const applied: ApplyResult = { warnings: [], images: [] };
+    const cta: SiteCta = { label: "Buy now", href: "https://dex.example/buy", external: true, variant: "primary" };
+
+    applySlot(document as never, slot, { value: cta }, stubCtx(() => RESOLVED_URL), applied);
+
+    // href is an attribute, not a child-destroying write — it still applies.
+    expect(target.getAttribute("href")).toBe("https://dex.example/buy");
+    // The structured content — h3, both divs, #textToCopy — survives untouched.
+    expect(target.innerHTML).toBe(originalHtml);
+    expect(target.children.map((c) => c.tagName.toLowerCase())).toEqual(["h3", "div", "div"]);
+    expect(target.querySelector("#textToCopy")).not.toBeNull();
+
+    expect(applied.warnings).toHaveLength(1);
+    expect(applied.warnings[0]).toContain('"value"');
+    expect(applied.warnings[0]).toContain('".btn"');
+    expect(applied.warnings[0]).toContain("h3, div, div");
+  });
+
+  it("text mode: skips the textContent write against a structured target, warns with the path", () => {
+    const html = `<p class="target"><span class="kept">Kept</span></p>`;
+    const { document } = parseHTML(html);
+    const target = document.querySelector(".target") as unknown as SlottedElement;
+    const originalHtml = target.innerHTML;
+
+    const slot: Slot = { selector: ".target", path: "value", mode: "text", all: false, keepFallback: false };
+    const applied: ApplyResult = { warnings: [], images: [] };
+
+    applySlot(document as never, slot, { value: "New text" }, stubCtx(() => RESOLVED_URL), applied);
+
+    expect(target.innerHTML).toBe(originalHtml);
+    expect(target.querySelector(".kept")?.textContent).toBe("Kept");
+
+    expect(applied.warnings).toHaveLength(1);
+    expect(applied.warnings[0]).toContain('"value"');
+    expect(applied.warnings[0]).toContain('".target"');
+    expect(applied.warnings[0]).toContain("span");
+  });
+
+  it("does not fire for a leaf target with no element children (the :scope repeater-item case)", () => {
+    // Same shape as the ":scope symmetry" test above, asserted directly against
+    // the guard rather than inferred from that test's own passing assertions.
+    const html = `<span class="tag">PLACEHOLDER</span>`;
+    const { document } = parseHTML(html);
+    const target = document.querySelector(".tag") as unknown as SlottedElement;
+
+    const slot: Slot = { selector: ":scope", path: "value", mode: "text", all: false, keepFallback: false };
+    const applied: ApplyResult = { warnings: [], images: [] };
+
+    applySlot(target as never, slot, { value: "DeFi" }, stubCtx(() => RESOLVED_URL), applied);
+
+    expect(applied.warnings).toEqual([]);
+    expect(target.textContent).toBe("DeFi");
+  });
+});

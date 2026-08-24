@@ -1,6 +1,7 @@
 import { createClient }      from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { SupabaseClient }    from '@supabase/supabase-js'
+import { redirect }          from 'next/navigation'
 
 interface AdminContext {
   admin:  SupabaseClient
@@ -43,4 +44,32 @@ export async function requireSuperAdmin(): Promise<AdminContext> {
   const admin = createAdminClient()
 
   return { admin, userId }
+}
+
+/**
+ * Same check as requireSuperAdmin(), for a Server Component page instead of
+ * a Route Handler — throwing a raw Response there doesn't render anything
+ * useful, so this redirects instead.
+ *
+ * Path-based gating (an `/admin/*` matcher) isn't a substitute for this: this
+ * app's middleware equivalent (proxy.ts at the repo root) is never actually
+ * invoked by Next.js — it exports `proxy`/`config.matcher`, but Next.js only
+ * runs a file named exactly `middleware.ts`. Every route "protected" by that
+ * convention is currently wide open; this function is what actually gates a
+ * page regardless of where that gap gets fixed.
+ */
+export async function requireSuperAdminPage(): Promise<{ userId: string }> {
+  const supabase = await createClient()
+
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
+  if (userError || !user) {
+    redirect('/auth/login')
+  }
+
+  const { data: isAdmin, error: adminError } = await supabase.rpc('is_super_admin')
+  if (adminError || !isAdmin) {
+    redirect('/')
+  }
+
+  return { userId: user.id }
 }

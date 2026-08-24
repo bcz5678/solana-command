@@ -95,6 +95,12 @@ exports[`golden fixture > matches the committed snapshot 1`] = `
   --st-shadow-sm: none;
   --st-shadow-md: none;
   --st-shadow-lg: none;
+  --st-button-transform: none;
+  --st-button-padding-block: 14px;
+  --st-button-padding-inline: 28px;
+  --st-button-letter-spacing: normal;
+  --st-button-border-width: 0px;
+  --st-button-border-color: #7c5cff;
   --st-font-size-h1: 48.828px;
   --st-font-size-h2: 39.063px;
   --st-font-size-h3: 31.25px;

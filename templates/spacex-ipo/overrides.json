@@ -1,5 +1,21 @@
 {
-  "sections": {},
+  "sections": {
+    "launch": {
+      "type": "prose",
+      "ignoreCta": true
+    }
+  },
   "substitutions": {},
-  "anonymize": {}
+  "anonymize": {
+    "modules.token.contractAddress": "0x0000000000000000000000000000000000000000"
+  },
+  "verify": {
+    "expected": [
+      {
+        "property": "line-height",
+        "selector": "^h1$",
+        "reason": "core.typography.lineHeightHeading is one token; the source authors h1 at 1.05 and h2/h3 at 1.1. h3's value won the last-write-wins collapse (see the substitutions review note), so h1 renders at 1.1 instead of its own 1.05. A single heading line-height token cannot represent two authored values — this is that limitation, not a mapping bug."
+      }
+    ]
+  }
 }

@@ -22,11 +22,6 @@
       "mode": "text"
     },
     {
-      "selector": "#launch .btn",
-      "path": "hero.ctas[0]",
-      "mode": "link"
-    },
-    {
       "selector": "#ipo .kicker",
       "path": "sections[0].kicker",
       "mode": "text"

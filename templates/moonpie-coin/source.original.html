@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en" prefix="og: https://ogp.me/ns#">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="assets/fontawesome/css/fontawesome.css" rel="stylesheet" />
+    <link href="assets/fontawesome/css/brands.css" rel="stylesheet" />
+    <link rel="icon" type="image/png" href="assets/favicon/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="assets/favicon/favicon.svg" />
+    <link rel="shortcut icon" href="assets/favicon/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/favicon/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="spacexipo.site" />
+    <link rel="manifest" href="assets/favicon/site.webmanifest" />
+    <title>SpaceX IPO</title>
+    <meta name="keywords" content="spacex, spacexipo, meme coin, dexscreener, pump.fun, social media links">
+    <meta name="description" content="The SpaceXIPO coin celebrates the launch of $SPCX.">
+
+    <!-- Open Graph / Social Media Meta Tags -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://www.spacexipo.site/">
+    <meta property="og:title" content="SpaceXIPO | Celebrating #SPCX">
+    <meta property="og:description" content="The SpaceXIPO coin celebrates the launch of $SPCX.">
+    <meta property="og:image" content="https://www.spacexipo.site/assets/card.jpg"
+        alt="Launch celebratory SpaceXIPO coin">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:site_name" content="SpaceXIPO">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="SpaceXIPO | Celebrating $SPCX">
+    <meta name="twitter:description" content="PThe SpaceXIPO coin celebrates the launch of $SPCX.">
+    <meta name="twitter:image" content="https://www.spacexipo.site/assets/card.jpg">
+
+    <!--<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700;800&display=swap" rel="stylesheet">-->
+
+    <style>
+        @import url('https://googleapis.com');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            background: #000;
+            color: #fff;
+            font-family: 'Manrope', Verdana, Geneva, Tahoma, sans-serif;
+        }
+
+        header {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            z-index: 1000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 25px 60px;
+            background: rgba(0, 0, 0, .2);
+            backdrop-filter: blur(8px);
+        }
+
+        .logo {
+            font-size: 28px;
+            font-weight: 800;
+            letter-spacing: 3px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 2rem;
+
+        }
+
+        .nav-links {
+            display: flex;
+            list-style: none;
+            gap: 1.5rem;
+        }
+
+        .nav-links a {
+            color: #fff;
+            text-decoration: none;
+        }
+
+        .menu-toggle {
+            display: none;
+            flex-direction: column;
+            gap: 5px;
+            background: none;
+            border: none;
+            cursor: pointer;
+        }
+
+        .bar {
+            width: 25px;
+            height: 3px;
+            background-color: #fff;
+        }
+
+        nav a {
+            color: white;
+            text-decoration: none;
+            margin-left: 30px;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .hero,
+        .section {
+            min-height: 100vh;
+            position: relative;
+            display: flex;
+            align-items: center;
+            padding: 80px 8%;
+            overflow: hidden;
+        }
+
+        .hero::before,
+        .section::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background-size: cover;
+            background-position: center;
+            z-index: -2;
+        }
+
+        .hero::after,
+        .section::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, .35);
+            z-index: -1;
+        }
+
+        .hero::before {
+            background-image: url('assets/banner.jpeg');
+        }
+
+        .starship::before {
+            background-image: url('assets/img1.jpeg');
+        }
+
+        .human::before {
+            background-image: url('assets/img2.jpeg');
+        }
+
+        .network::before {
+            background-image: url('assets/img3.jpeg');
+        }
+
+        .content {
+            max-width: 700px;
+        }
+
+        .hero .content,
+        .starship .content,
+        .human .content,
+        .network .content {
+            transform: translateY(-26%);
+        }
+
+        .kicker {
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-size: 15px;
+            margin-bottom: 15px;
+        }
+
+        h1 {
+            font-size: 72px;
+            line-height: 1.05;
+            text-transform: uppercase;
+            margin-bottom: 25px;
+        }
+
+        h2 {
+            font-size: 56px;
+            line-height: 1.1;
+            margin-bottom: 10px;
+        }
+
+        h3 {
+            font-size: 32px;
+            line-height: 1.1;
+            text-transform: uppercase;
+            margin-bottom: 2px;
+        }
+
+        p {
+            font-size: 18px;
+            line-height: 1.7;
+            color: #e0e0e0;
+            margin-bottom: 30px;
+        }
+
+        .btn {
+            display: inline-block;
+            border: 2px solid #fff;
+            padding: 14px 34px;
+            background-color: #fff;
+            color: #000;
+            text-decoration: none;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: .3s;
+        }
+
+        .btn:hover {
+            background: white;
+            color: black;
+        }
+
+        footer {
+            background: #000;
+            text-align: center;
+            padding: 40px;
+            border-top: 1px solid #222;
+        }
+
+        footer p {
+            margin: 0;
+            color: #888;
+        }
+
+        @media(max-width:768px) {
+
+            header {
+                padding: 20px;
+            }
+
+            nav {
+                display: none;
+            }
+
+            h1 {
+                font-size: 42px;
+            }
+
+            h2 {
+                font-size: 34px;
+            }
+
+            h3 {
+                font-size: 22px;
+            }
+
+            p {
+                font-size: 16px;
+            }
+
+            .menu-toggle {
+                display: flex;
+            }
+
+            /* Show Hamburger */
+            .nav-links {
+                display: none;
+                /* Hide Desktop Links */
+                position: absolute;
+                top: 60px;
+                left: 0;
+                width: 100%;
+                background: #333;
+                flex-direction: column;
+                padding: 1rem 0;
+                text-align: center;
+            }
+
+            .nav-links.active {
+                display: flex;
+                /* Show Menu when Toggled */
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <div class="logo">MOONPIE/SOL</div>
+        <nav class="navbar">
+            <!-- Mobile Menu Toggle (Hamburger) -->
+            <button class="menu-toggle" aria-label="Toggle Navigation">
+                <span class="bar"></span>
+                <span class="bar"></span>
+                <span class="bar"></span>
+            </button>
+
+            <!-- Navigation Links -->
+            <ul class="nav-links">
+                <li><a href="https://x.com/spacexipo_coin"><i class="fa-brands fa-xl fa-twitter"></i></a></li>
+                <li><a href="https://t.me/spacexipo_coin"><i class="fa-brands fa-xl fa-telegram"></i></a></li>
+                <li><a href=" #vision">IPO</a></li>
+                <li><a href="#offering">Offering</a></li>
+                <li><a href="#coin">Coin</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <section class="hero" id="launch">
+        <div class="content">
+            <div class="kicker">Love at First Bite</div>
+            <h2>Fuel for Liftoff</h2>
+            <p>There’s something unmistakably satisfying about a Moon Pie. Rich chocolate surrounds soft graham layers and a sweet marshmallow center, creating the kind of combination that makes one bite turn into another. It’s soft, chocolatey, marshmallowy, and just messy enough to remind you that the best snacks aren’t supposed to be boring. Whether you’ve loved them forever or you’re taking your first bite, it’s a little taste of happiness with a whole lot of history.
+            </p>
+
+            <!-- The text element to copy -->
+
+
+            <!-- The trigger button -->
+            <a onclick="copyText()" class="btn">
+                <h3>CA</h3>
+                <div>Click to copy:</div>
+                <div id="textToCopy">XXXXXX</div>
+            </a>
+            <div style="padding: 20px;">
+                Join us at:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<a href="#"><i style="color:#fff"
+                        class="fa-brands fa-3x fa-twitter"></i></a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                <a href="#"><i style="color:#fff" class="fa-brands fa-3x fa-telegram"></i></a>
+            </div>
+
+    </section>
+
+    <section class="section starship" id="vision">
+        <div class="content">
+            <div class="kicker">Snack. Suit Up. Launch.</div>
+            <h2>Fuel for Liftoff</h2>
+            <p>
+                Space travel takes preparation. Helmet? Check. Spacesuit? Check. Moon Pie? Absolutely. Before you blast into the unknown, fuel up with chocolate, graham, and marshmallow—the three essential food groups of intergalactic exploration. We can’t promise it’ll help you navigate an asteroid field or survive zero gravity, but every great mission needs a great snack. Grab one, buckle in, and prepare for liftoff. The moon is waiting.
+            </p>
+            <!--<a href="#" class="btn">Learn More</a>-->
+        </div>
+    </section>
+
+    <section class="section human" id="offering">
+        <div class="content">
+            <div class="kicker">Caution: Marshmallow Incoming</div>
+            <h2>Hot and Sticky</h2>
+            <p>Heat up a Moon Pie and things get serious. The chocolate gets softer, the marshmallow gets gooier, and suddenly your innocent little snack becomes a hot, sticky situation. Napkins are recommended. Restraint is optional. Give it a few seconds of warmth and watch those familiar layers transform into molten marshmallow goodness. Just remember: when the filling starts flowing, you’ve officially entered the sticky zone.
+            </p>
+            <!--<a href="#" class="btn">Join Mission</a>-->
+        </div>
+    </section>
+
+    <section class="section network" id="coin">
+        <div class="content">
+            <div class="kicker">Volatility Never Tasted Better</div>
+            <h2>Ride the Sugar Rush</h2>
+            <p>
+                Buy some Moon Pie. Buy more Moon Pie. Ride the volatility, feel the gains, and hang on when the stomach pains turn into a sugar high. One minute you’re cruising toward the moon, the next you’re holding your stomach through a wild correction.
+            </p>
+            <!--<a href="" class="btn"></a>-->
+        </div>
+    </section>
+
+    <footer>
+        <p>&copy;2026 <i>This $MOONPIE</i> meme coin has no affiliation with the Moon Pie brand, company, or ownership.  It has no intrinsic use, fundamental value,
+            or
+            known
+            future
+            yield. It is classified as
+            a digital
+            collectible meant for novelty and entertainment, rather than a traditional financial investments or
+            security.</p>
+    </footer>
+
+</body>
+
+</html>
+<script>
+    function copyText() {
+        // Get the text content from the target element
+        const textContent = document.getElementById("textToCopy").innerText;
+
+        // Use the Clipboard API to copy the text
+        navigator.clipboard.writeText(textContent)
+            .then(() => alert("Coin identifier copied to clipboard"))
+            .catch(err => console.error("Failed to copy text: ", err));
+    }
+    const toggleButton = document.querySelector('.menu-toggle');
+    const navLinks = document.querySelector('.nav-links');
+
+    toggleButton.addEventListener('click', () => {
+        navLinks.classList.toggle('active');
+    });
+
+</script>

@@ -98,6 +98,14 @@ export const CoreTokensSchema = z.object({
   shadows: z.object({
     sm: z.string().optional(), md: z.string().optional(), lg: z.string().optional(),
   }).optional(),
+  button: z.object({
+    textTransform: TextTransformSchema.default("none"),
+    paddingBlock: z.string().default("14px"),
+    paddingInline: z.string().default("28px"),
+    letterSpacing: z.string().optional(),
+    borderWidth: z.string().default("0px"),
+    borderColor: z.string().optional(), 
+  }).prefault({}),
 });
 export type CoreTokens = z.infer<typeof CoreTokensSchema>;
 

@@ -1,18 +1,1 @@
-[
-  {
-    "path": "sections[0].backgroundImage",
-    "sourceUrl": "assets/img1.jpeg"
-  },
-  {
-    "path": "sections[1].backgroundImage",
-    "sourceUrl": "assets/img2.jpeg"
-  },
-  {
-    "path": "sections[2].backgroundImage",
-    "sourceUrl": "assets/img3.jpeg"
-  },
-  {
-    "path": "hero.backgroundImage",
-    "sourceUrl": "assets/banner.jpeg"
-  }
-]
+[]

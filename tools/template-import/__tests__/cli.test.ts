@@ -8,6 +8,12 @@
 // the name presetDir's own usage string and header comment claim, fell into
 // the "not implemented yet" stub alongside emit/verify.
 //
+// "assets" is real now (step 6 landed after this test was written), and so is
+// "verify" (step 9) — nothing in the switch is a stub anymore. The "verify"
+// assertion below now checks verifyDir's own missing-prerequisite error
+// instead of a stub message; the point was always "the dispatch table sends
+// each command to the right place," not "some command stays unbuilt forever."
+//
 // Runs the real CLI as a child process rather than importing scripts/
 // import-template.ts directly: its top-level `switch` runs at import time and
 // calls process.exit(), which would kill the test runner rather than the
@@ -64,7 +70,7 @@ describe("CLI dispatch", () => {
     rmSync(SCRATCH, { recursive: true, force: true });
   });
 
-  it("preset authors a preset; assets exits non-zero as unimplemented", () => {
+  it("preset authors a preset; verify exits non-zero without a prior emit", () => {
     const templateDir = join(TEMPLATES_ROOT, templateId);
 
     expect(run(["init", FIXTURE, templateId, "--dir", TEMPLATES_ROOT]).status).toBe(0);
@@ -75,14 +81,19 @@ describe("CLI dispatch", () => {
     expect(preset.stdout).toContain("Wrote");
     expect(existsSync(join(PRESETS_ROOT, templateId, "presets", "original.ts"))).toBe(true);
 
-    const assets = run(["assets", templateDir]);
-    expect(assets.status).not.toBe(0);
-    expect(assets.stderr).toContain('"assets" is not implemented yet.');
-    // Only preset wrote a presets/ dir — assets must not have created its own.
+    // verify is real now — nothing left in the switch is stubbed. This test
+    // never runs `emit`, so there's no .generated/rendered.html for verify to
+    // diff against; asserting on verifyDir's own prerequisite check (rather
+    // than running emit here too) is enough to prove dispatch still sends
+    // "verify" to the right place without adding a fifth cold `npx tsx` start.
+    const verify = run(["verify", templateDir]);
+    expect(verify.status).not.toBe(0);
+    expect(verify.stderr).toContain("run `import-template emit` first");
+    // Only preset wrote a presets/ dir — verify must not have created its own.
     expect(existsSync(join(PRESETS_ROOT, templateId, "presets"))).toBe(true);
 
     // Nothing leaked into the real repo tree.
     expect(existsSync(join(REPO_ROOT, "templates", templateId))).toBe(false);
     expect(existsSync(join(REPO_ROOT, "site-platform", "renderer", "templates", templateId))).toBe(false);
-  }, 60_000);
+  }, 180_000); // 4 sequential `npx tsx` cold starts — generous headroom for a loaded dev machine.
 });

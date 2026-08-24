@@ -53,8 +53,24 @@ export const ImageAssetSchema = z.object({
   /** Supabase Storage object key for the original upload. */
   stagingKey: z.string(),
 
-  /** Resolvable URL for editor/preview use. Not what ships. */
-  url: field(z.string().url(), { label: "Image", widget: "image" }),
+  /**
+   * Resolvable URL for editor/preview use. Not what ships.
+   *
+   * Accepts an absolute URL (a real upload's staging URL) OR a root-relative
+   * path (a seed image's /seed/{seedPath}/... — there is no real CDN host to
+   * build an absolute URL from at import time, and nothing in this package
+   * ever reads `url` for actual render output regardless: templates resolve
+   * through TemplateContext.imageUrl(), never this field, directly).
+   * Deliberately not just z.string().min(1) — that would also accept a bare
+   * "TODO" or an empty-looking garbage string with no format signal at all.
+   */
+  url: field(
+    z.string().refine(
+      (v) => /^https?:\/\//i.test(v) || v.startsWith("/"),
+      { message: "Must be an absolute URL or a root-relative path" },
+    ),
+    { label: "Image", widget: "image" },
+  ),
 
   alt: field(z.string(), {
     label: "Alt text",

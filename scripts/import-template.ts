@@ -1,22 +1,26 @@
 // ============================================================================
 // scripts/import-template.ts
 //
-//   pnpm import-template init    <file.html> <template-id> [--dir <root>]
+//   pnpm import-template init    <file.html> <template-id> [--dir <root>] [--assets <dir>]
 //   pnpm import-template analyze <template-dir>
-//   pnpm import-template check   <template-dir>      # CI, no writes
-//
+//   pnpm import-template check   <template-dir> [--dir <root>]
+//   pnpm import-template assets  <template-dir>
 //   pnpm import-template preset  <template-dir> [--dir <root>]  # mint ids, assign slugs, parse PresetContentSchema
+//   pnpm import-template emit    <template-dir> [--dir <root>]  # rewriteCss, hash, write manifest
+//   pnpm import-template verify  <template-dir> [--dir <root>]  # diff .generated/rendered.html against source
 //
 // --dir overrides the repo-relative root a command would otherwise hardcode:
-// for init, where templates/{id} is created; for preset, where the authored
-// preset package is written. Without it, both commands can only ever act on
-// the real repo tree — there's no way to point either at a scratch directory,
-// which is exactly the friction a test suite around this CLI runs into.
+// for init, where templates/{id} is created; for preset/emit, where the
+// authored template package is written. Without it, these commands can only
+// ever act on the real repo tree — there's no way to point them at a scratch
+// directory, which is exactly the friction a test suite around this CLI runs
+// into.
 //
-// Not yet implemented — the stages that follow review:
-//   assets  <dir>   download source images, generate variants, upload to seed
-//   emit    <dir>   rewriteCss, hash, write manifest
-//   verify  <dir>   render the preset, diff against source.html
+// --assets (init only) points at the directory the source's own images,
+// fonts and stylesheets live in. Copied wholesale into the working directory
+// as _source/, so `assets` has real bytes to hash and copy without the
+// original path being re-supplied. Defaults to the directory the source HTML
+// file itself is in.
 //
 // ---------------------------------------------------------------------------
 // WORKING DIRECTORY — the unit of state. Flags don't accumulate across stages;
@@ -37,8 +41,9 @@
 // a draft is always wrong; the next run overwrites it.
 // ============================================================================
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
-import { join, basename, dirname } from "node:path";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, cpSync } from "node:fs";
+import { join, basename, dirname, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseHTML } from "linkedom";
 import { normalizeSource } from "../tools/template-import/normalize";
 
@@ -46,42 +51,63 @@ import { normalizeSource } from "../tools/template-import/normalize";
 import { authorPreset } from "../tools/template-import/author-preset";
 import { runImport, type Overrides, type ImportArtifacts, type ReviewItem } from '../tools/template-import/pipeline'
 import { emitTemplate, validateEmitInputs } from "../tools/template-import/emit";
-import type { TemplatePreset } from "@site/schema";
+import { prepareAssets, type PreparedAsset, type PreparedBundleAsset } from "../tools/template-import/assets";
+import type { TemplatePreset, TemplateManifest, SiteDefinition } from "@site/schema";
+import { materializePreset } from "@site/schema";
+import { planMedia, makeImageUrlResolver } from "@site/renderer";
+// Relative, not "@site/renderer/slotted" — see emit.ts's emitBundle() comment;
+// that subpath resolves nowhere in this repo.
+import { renderSlotted, computeCssBackgroundUrls } from "../site-platform/renderer/slotted/index";
+import { verifyRender, formatVerification, type ExpectedRule, type Target } from "@/tools/template-import/verify";
+import { computeRenderedMeta, writeRenderedMeta, assertRenderedFresh } from "../tools/template-import/rendered-meta";
+
 
 const EXIT = { ok: 0, usage: 1, failed: 2 } as const;0
 
 const [command, ...rest] = process.argv.slice(2);
-const { positional: args, dir: dirFlag } = parseArgs(rest);
+const { positional: args, dir: dirFlag, assets: assetsFlag } = parseArgs(rest);
 
-switch (command) {
-  case "init":    init(args[0], args[1], dirFlag); break;
-  case "analyze": analyzeDir(args[0], { write: true }); break;
-  case "check":   checkDir(args[0], dirFlag); break;
-  case "preset":  presetDir(args[0], dirFlag); break;
-  case "emit":    emitDir(args[0], dirFlag); break;
+// tsx transpiles this file to CJS (no top-level await), and emitDir is now
+// async — wrapping dispatch is the smallest change that lets one case await
+// without touching the others.
+async function main(): Promise<void> {
+  switch (command) {
+    case "init":    init(args[0], args[1], dirFlag, assetsFlag); break;
+    case "analyze": analyzeDir(args[0], { write: true }); break;
+    case "check":   await checkDir(args[0], dirFlag); break;
+    case "assets":  assetsDir(args[0]); break;
+    case "preset":  presetDir(args[0], dirFlag); break;
+    case "emit":    await emitDir(args[0], dirFlag); break;
 
-  case "assets":
-  case "verify":
-    console.error(`"${command}" is not implemented yet.`);
-    process.exit(EXIT.usage);
-    break;
+    case "verify": await verifyDir(args[0], dirFlag); break;
 
-  default:
-    console.error(
-      "usage:\n" +
-      "  import-template init    <file.html> <template-id> [--dir <root>]\n" +
-      "  import-template analyze <template-dir>\n" +
-      "  import-template check   <template-dir> [--dir <root>]\n" +
-      "  import-template preset  <template-dir> [--dir <root>]\n" +
-      "  import-template emit    <template-dir> [--dir <root>]",
-    );
-    process.exit(EXIT.usage);
+    default:
+      console.error(
+        "usage:\n" +
+        "  import-template init    <file.html> <template-id> [--dir <root>] [--assets <dir>]\n" +
+        "  import-template analyze <template-dir>\n" +
+        "  import-template check   <template-dir> [--dir <root>]\n" +
+        "  import-template preset  <template-dir> [--dir <root>]\n" +
+        "  import-template emit    <template-dir> [--dir <root>]\n" +
+        "  import-template verify  <template-dir> [--dir <root>]",
+      );
+      process.exit(EXIT.usage);
+  }
 }
 
-/** Pulls `--dir <value>` (or `--dir=<value>`) out of the raw args, wherever it appears. */
-function parseArgs(raw: string[]): { positional: string[]; dir?: string } {
+main().catch((error) => {
+  console.error(error);
+  process.exit(EXIT.failed);
+});
+
+/**
+ * Pulls `--dir <value>` and `--assets <value>` (or their `=`-joined forms)
+ * out of the raw args, wherever either appears.
+ */
+function parseArgs(raw: string[]): { positional: string[]; dir?: string; assets?: string } {
   const positional: string[] = [];
   let dir: string | undefined;
+  let assets: string | undefined;
 
   for (let i = 0; i < raw.length; i++) {
     const arg = raw[i]!;
@@ -94,10 +120,18 @@ function parseArgs(raw: string[]): { positional: string[]; dir?: string } {
       dir = arg.slice("--dir=".length);
       continue;
     }
+    if (arg === "--assets") {
+      assets = raw[++i];
+      continue;
+    }
+    if (arg.startsWith("--assets=")) {
+      assets = arg.slice("--assets=".length);
+      continue;
+    }
     positional.push(arg);
   }
 
-  return { positional, dir };
+  return { positional, dir, assets };
 }
 
 
@@ -114,9 +148,29 @@ function parseArgs(raw: string[]): { positional: string[]; dir?: string } {
  * single input, and a stylesheet that stays inline can't be diffed after
  * rewriting.
  */
-function init(file: string, id: string, dirRoot?: string): void {
+function init(file: string, id: string, dirRoot?: string, assetsFlag?: string): void {
   if (!file || !id) {
-    console.error("usage: import-template init <file.html> <template-id> [--dir <root>]");
+    console.error("usage: import-template init <file.html> <template-id> [--dir <root>] [--assets <dir>]");
+    process.exit(EXIT.usage);
+  }
+
+  // Every input validated before anything is written. A bad --file or
+  // --assets path used to fail AFTER mkdirSync had already created `dir` —
+  // the failed attempt left a stub directory behind, and every retry (even
+  // with the path fixed) then failed on "already exists" instead, pointing
+  // at the wrong problem.
+  if (!existsSync(file)) {
+    console.error(`file not found: ${file}`);
+    process.exit(EXIT.usage);
+  }
+
+  // Defaults to wherever the source HTML itself lives — the common case for a
+  // downloaded bundle, where assets/, css/, fonts/ etc. are siblings of
+  // index.html. --assets overrides it for a source file that was pulled out
+  // of its own tree.
+  const sourceTree = assetsFlag ?? dirname(file);
+  if (!existsSync(sourceTree)) {
+    console.error(`--assets tree not found: ${sourceTree}`);
     process.exit(EXIT.usage);
   }
 
@@ -127,6 +181,11 @@ function init(file: string, id: string, dirRoot?: string): void {
   }
 
   mkdirSync(dir, { recursive: true });
+
+  // Copied wholesale so the working directory is self-contained — every later
+  // stage has real bytes to hash, probe and resize without the original path
+  // being re-supplied.
+  cpSync(sourceTree, join(dir, "_source"), { recursive: true });
 
   const raw = readFileSync(file, "utf8");
   const result = normalizeSource(raw);
@@ -146,6 +205,8 @@ function init(file: string, id: string, dirRoot?: string): void {
     join(dir, "overrides.json"),
     `${JSON.stringify({ sections: {}, substitutions: {}, anonymize: {} }, null, 2)}\n`,
   );
+
+
 
   console.log(`Initialized ${dir} from ${basename(file)}`);
 
@@ -184,6 +245,22 @@ function analyzeDir(dir: string, options: { write: boolean }): ImportArtifacts {
     write(generated, "content.draft.json", artifacts.merged.content);
     write(generated, "theme.draft.json", artifacts.merged.theme);
     writeFileSync(join(generated, "IMPORT_REPORT.md"), report(dir, artifacts));
+    
+    // The CSS pass's own output. Previously only reachable as prose in the report,
+    // which is fine for reading and useless for working through systematically.
+    //
+    // orphanBackgrounds is a MERGE-time fact (it needs the DOM/section join,
+    // which the CSS pass alone can't do), not a css-pass one — included here
+    // anyway because `assets` (step 6) already reads this file and shouldn't
+    // need a second one just for this.
+    write(generated, "tokenize.report.json", {
+        substitutions: artifacts.css.substitutions,
+        unmapped: artifacts.css.unmapped,
+        assets: artifacts.css.assets,
+        typeScale: artifacts.css.typeScale,
+        findings: artifacts.css.findings,
+        orphanBackgrounds: artifacts.merged.orphanBackgrounds,
+    });
 
     console.log(`Wrote ${generated}/`);
   }
@@ -202,7 +279,83 @@ function analyzeDir(dir: string, options: { write: boolean }): ImportArtifacts {
  * The blocker that always fires until addressed is anonymisation — a preset
  * ships to every site created from the template.
  */
-function checkDir(dir: string, dirRoot?: string): void {
+/**
+ * Independently resolve every cssBackgrounds entry to its expected URL, by
+ * importing the REAL committed package and running its content through the
+ * SAME resolver renderSlotted uses — not by reading the render under test.
+ *
+ * Best-effort: returns undefined (never throws) when no package exists at
+ * the default location yet — the scratch-`--dir` CLI test writes its
+ * package elsewhere on purpose, and there's nothing to check identity
+ * against there. verify still runs its other checks either way; this only
+ * upgrades background-image from "some URL showed up" to "the RIGHT URL
+ * showed up" when a real package is available.
+ */
+async function loadExpectedBackgroundUrls(
+  templateId: string,
+  dirRoot?: string,
+): Promise<Map<string, string> | undefined> {
+  const indexPath = join(presetRoot(templateId, dirRoot), "index.ts");
+  if (!existsSync(indexPath)) return undefined;
+
+  try {
+    const mod = (await import(pathToFileURL(resolve(indexPath)).href)) as {
+      manifest: TemplateManifest;
+      preset: TemplatePreset;
+    };
+    if (!mod.manifest.slotted) return undefined;
+
+    const definition = materializePreset({ preset: mod.preset }) as SiteDefinition;
+    // build mode, matching emitDir's own render — verify validates the
+    // published artifact, and a preview render's staging URLs would never
+    // match this regardless of correctness.
+    const plan = planMedia(definition, mod.manifest, "verify-check/");
+    const imageUrl = makeImageUrlResolver("build", plan);
+
+    const resolved = computeCssBackgroundUrls(mod.manifest.slotted, definition.content, imageUrl);
+    return new Map(resolved.map((r) => [r.target, r.url]));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Path-resolution wrappers around rendered-meta.ts's CLI-agnostic functions
+ * — that module takes already-resolved paths so it can be unit-tested
+ * without this file's --dir handling or its process.exit()-on-import switch.
+ */
+function renderedMetaPaths(dir: string, dirRoot?: string) {
+  const templateId = basename(dir);
+  return {
+    metaPath: join(dir, ".generated", "rendered.meta.json"),
+    outIndexPath: resolve(presetRoot(templateId, dirRoot), "index.ts"),
+    sourceHtmlPath: resolve(dir, "source.html"),
+  };
+}
+
+/**
+ * cssBackgrounds selectors as extra verify probe targets.
+ *
+ * Without this, verify never actually probes ".starship::before" — its own
+ * targets come from analysis.sections[].selector, which for a source with
+ * both an id and a class on the same element (e.g. `<section id="ipo"
+ * class="starship">`) is the ID form ("#ipo"), not whatever selector the
+ * template's own background rule happens to use. Same element, same
+ * computed style either way, but expectedBackgroundUrls is keyed by the
+ * manifest's selector — without probing under that exact key too, the
+ * identity check's map lookup never hits, and every background silently
+ * falls through to the loose baseline rule that was just tightened.
+ */
+function backgroundTargets(expectedBackgroundUrls: Map<string, string> | undefined): Target[] {
+  if (!expectedBackgroundUrls) return [];
+
+  return [...expectedBackgroundUrls.keys()].map((key) => {
+    const [selector, pseudo] = key.split("::");
+    return { selector, pseudo: (pseudo || undefined) as "before" | "after" | undefined };
+  });
+}
+
+async function checkDir(dir: string, dirRoot?: string): Promise<void> {
   const artifacts = analyzeDir(dir, { write: false });
   const blockers = artifacts.review.filter((r) => r.severity === "blocker");
 
@@ -212,6 +365,58 @@ function checkDir(dir: string, dirRoot?: string): void {
 
   for (const item of blockers) console.error(`BLOCKER  ${item.at}  ${item.message}`);
   if (todos > 0) console.error(`BLOCKER  spec  ${todos} unresolved TODO path(s).`);
+
+  const renderedPath = join(dir, ".generated", "rendered.html");
+
+  if (existsSync(renderedPath)) {
+    // Non-blocking in CI by default: a mapping bug is worth failing on, but
+    // this needs a browser, and a CI runner without one should report rather
+    // than error. Flip to `failed = true` once Playwright is installed there.
+    //
+    // Same args verifyDir uses (source.original.html, overrides.verify.expected)
+    // — a diff `check` calls "unexpected" and `verify` calls "expected" would
+    // be confusing, not a feature.
+    try {
+      // Same exposure verifyDir has — this reads the persisted rendered.html
+      // too, so an edit made after the last `emit` would otherwise compare
+      // stale artifacts and report clean. Routed through the same catch as
+      // everything else here: "couldn't verify," not a mapping bug, so it's
+      // reported and skipped rather than failing `check`.
+      {
+        const { metaPath, outIndexPath, sourceHtmlPath } = renderedMetaPaths(dir, dirRoot);
+        await assertRenderedFresh(metaPath, outIndexPath, sourceHtmlPath);
+      }
+
+      const expectedBackgroundUrls = await loadExpectedBackgroundUrls(basename(dir), dirRoot);
+
+      const result = await verifyRender(
+        read(dir, "source.original.html"),
+        readFileSync(renderedPath, "utf8"),
+        artifacts.css.substitutions,
+        artifacts.analysis,
+        {
+          expected: expectedRules(readOverrides(dir)),
+          expectedBackgroundUrls,
+          extraTargets: backgroundTargets(expectedBackgroundUrls),
+        },
+      );
+      console.log(`  verify: compared ${result.probeCount} element(s) across ${result.targetCount} target selector(s)`);
+      for (const d of result.differences.filter((x) => x.classification === "unexpected")) {
+        console.error(`DIFF  ${d.selector} { ${d.property} }  ${d.source} → ${d.rendered}`);
+      }
+      if (result.untokenized.length > 0) {
+        console.error(`  ${result.untokenized.length} untokenized substitution(s):`);
+        for (const u of result.untokenized) {
+          console.error(`    ${u.selector} { ${u.property} } -> ${u.token}`);
+        }
+      }
+    } catch (error) {
+      // assertTokensPresent, or Playwright missing/failing to launch — either
+      // way this is "couldn't verify," not "found a mapping bug."
+      console.error(`  ! verify skipped — ${(error as Error).message}`);
+    }
+  }
+
 
   // Only meaningful once a preset exists — check runs on fresh imports too,
   // where the count it would compare against doesn't exist yet.
@@ -232,6 +437,57 @@ function checkDir(dir: string, dirRoot?: string): void {
 
   process.exit(EXIT.failed);
 }
+
+// ============================================================================
+// ASSETS
+// ============================================================================
+
+/**
+ * Step 6. Resolves the source's local images and linked files against the
+ * _source/ tree `init --assets` copied in — writes what step 7 (author-preset,
+ * real ImageAssets instead of pending placeholders) and step 8 (emit, real
+ * bundleAssets integrity hashes) each need.
+ */
+function assetsDir(dir: string): void {
+  if (!dir) {
+    console.error("usage: import-template assets <template-dir>");
+    process.exit(EXIT.usage);
+  }
+
+  const sourceDir = join(dir, "_source");
+  if (!existsSync(sourceDir)) {
+    console.error(
+      `${sourceDir} does not exist — re-run \`import-template init\` with ` +
+      `--assets pointed at the source's own asset tree before running assets.`,
+    );
+    process.exit(EXIT.usage);
+  }
+
+  const html = read(dir, "source.html");
+  const tokenizeReport = json<{
+    assets: Array<{ selector: string; url: string }>;
+    orphanBackgrounds: Array<{ selector: string; url: string }>;
+  }>(dir, ".generated/tokenize.report.json");
+
+  const generated = join(dir, ".generated");
+  const outDir = join(generated, "assets");
+  // ?? [] covers a .generated/ written by `analyze` before orphanBackgrounds
+  // existed — re-running analyze regenerates it, but this avoids a confusing
+  // crash on a stale draft in the meantime.
+  const orphanUrls = new Set((tokenizeReport.orphanBackgrounds ?? []).map((o) => o.url));
+  const result = prepareAssets(html, tokenizeReport.assets, orphanUrls, sourceDir, outDir);
+
+  write(generated, "assets.json", { content: result.content, bundleAssets: result.bundleAssets });
+
+  console.log(`Wrote ${join(generated, "assets.json")}`);
+  console.log(`  ${Object.keys(result.content).length} image(s), ${result.bundleAssets.length} bundle file(s)`);
+
+  for (const warning of result.warnings) console.log(`  ! ${warning}`);
+}
+
+
+
+
 
 // ============================================================================
 // PRESET
@@ -291,6 +547,7 @@ function presetDir(dir: string, dirRoot?: string): void {
     contentDraft: json(dir, ".generated/content.draft.json"),
     html: read(dir, "source.html"),
     overrides: readOverrides(dir),
+    assets: readAssets(dir),
   });
 
   mkdirSync(outDir, { recursive: true });
@@ -338,7 +595,7 @@ function loadPreset(tsPath: string): TemplatePreset {
  * and `index.ts` are skipped when present — they hold reviewed selector work
  * and hand-wiring, and regenerating them discards it.
  */
-function emitDir(dir: string, dirRoot?: string): void {
+async function emitDir(dir: string, dirRoot?: string): Promise<void> {
   if (!dir) {
     console.error("usage: import-template emit <template-dir> [--dir <root>]");
     process.exit(EXIT.usage);
@@ -360,6 +617,10 @@ function emitDir(dir: string, dirRoot?: string): void {
     process.exit(EXIT.usage);
   }
 
+  // Loaded once, reused below for the preview render — materializePreset
+  // needs the same object emitTemplate consumes.
+  const preset = loadPreset(presetPath);
+
   const result = emitTemplate({
     templateId,
     templateVersion: "1.0.0",
@@ -367,10 +628,11 @@ function emitDir(dir: string, dirRoot?: string): void {
     css,
     tokenize: artifacts.css,
     spec: artifacts.spec,
-    preset: loadPreset(presetPath),
+    preset,
     analysis: artifacts.analysis,
     linkedStylesheets: artifacts.analysis.linkedStylesheets,
     merged: artifacts.merged,
+    bundleAssets: readAssets(dir).bundleAssets,
   });
 
   // Nothing is written when the map can't be trusted. A misaligned
@@ -399,6 +661,171 @@ function emitDir(dir: string, dirRoot?: string): void {
 
   console.log(`\ncss hash ${result.cssHash.slice(0, 12)}`);
   for (const warning of result.warnings) console.log(`  ! ${warning}`);
+
+  // ---- Build render ----
+  // A smoke test at emit time rather than only at review time: `verify`
+  // (step 9) reads .generated/rendered.html rather than rendering itself, so
+  // a template that cannot actually render needs to fail HERE — in the same
+  // command that already checks blockers and hashes — not three steps later
+  // against a file nothing wrote.
+  //
+  // Imports the package just written (dynamic, from outDir), not the
+  // in-memory `result.manifest`/`preset` — those reflect what THIS emit
+  // computed, but manifest.ts/index.ts are writeOnlyIfAbsent, so a template
+  // with hand-added slots (module fields, anything buildSpecDraft can't
+  // generate on its own) would silently render as if those edits didn't
+  // exist. Reading back what's actually on disk — via the module's own
+  // "./bundle.generated" side-effect import — is what production loads too,
+  // and registers the source for us in the process.
+  //
+  // mode: "build", not "preview" — verify's identity check
+  // (tools/template-import/verify.ts) independently resolves the SAME
+  // cssBackgrounds through the SAME resolver and compares exactly. A preview
+  // render's staging URLs would never match a build render's /media/ paths,
+  // even for a perfectly correct template.
+  try {
+    const outFile = pathToFileURL(resolve(outDir, "index.ts")).href;
+    const mod = (await import(outFile)) as { manifest: TemplateManifest; preset: TemplatePreset };
+    const definition = materializePreset({ preset: mod.preset }) as SiteDefinition;
+
+    const rendered = await renderSlotted({
+      definition,
+      manifest: mod.manifest,
+      vendor: [],
+      rendererKey: mod.manifest.rendererKey,
+      mode: "build",
+      // Text only affects the S3 copy destKey, which nothing downstream of
+      // this render reads — the rendered URLs it produces don't depend on it.
+      s3Prefix: "emit-preview/",
+    });
+
+    const generatedDir = join(dir, ".generated");
+    mkdirSync(generatedDir, { recursive: true });
+    const renderedPath = join(generatedDir, "rendered.html");
+    writeFileSync(renderedPath, rendered.html);
+    console.log(`\nWrote ${renderedPath}`);
+
+    // Provenance for the staleness guard — verify/check refuse to run
+    // against rendered.html once any of these three no longer match current
+    // disk state. computeRenderedMeta re-imports outDir/index.ts rather than
+    // reusing `mod`/`html` from this scope directly: it's the exact function
+    // verify/check call to recompute "current," so writing through anything
+    // else here risks the two quietly disagreeing on what a hash covers.
+    const { metaPath, outIndexPath, sourceHtmlPath } = renderedMetaPaths(dir, dirRoot);
+    writeRenderedMeta(metaPath, await computeRenderedMeta(outIndexPath, sourceHtmlPath));
+    console.log(`Wrote ${metaPath}`);
+  } catch (error) {
+    console.error(`\n  ! Build render failed — ${join(dir, ".generated", "rendered.html")} not written.`);
+    console.error(`    ${(error as Error).message}`);
+  }
+}
+
+
+
+// ============================================================================
+// VERIFY
+// ============================================================================
+ 
+/**
+ * Compare the rendered template against the page it was imported from.
+ *
+ * Diffs against source.original.html — the verbatim input — not source.html.
+ * Original is what we're claiming to reproduce; normalization's own changes
+ * (closed tags, assigned ids, trimmed hrefs) then surface as structural count
+ * differences, which is correct and worth seeing rather than hiding.
+ */
+async function verifyDir(dir: string, dirRoot?: string): Promise<void> {
+  if (!dir) {
+    console.error("usage: import-template verify <template-dir> [--dir <root>]");
+    process.exit(EXIT.usage);
+  }
+
+  const renderedPath = join(dir, ".generated", "rendered.html");
+
+  if (!existsSync(renderedPath)) {
+    console.error(
+      `No ${renderedPath} — run \`import-template emit\` first; it writes the render.`,
+    );
+    process.exit(EXIT.usage);
+  }
+
+  // Refuses on a preset/source/stylesheet edit made after the last `emit` —
+  // otherwise this compares source.original.html against a rendered.html
+  // that reflects inputs nobody re-rendered, agrees for the wrong reason
+  // (both sides frozen at the OLD state), and reports clean.
+  try {
+    const { metaPath, outIndexPath, sourceHtmlPath } = renderedMetaPaths(dir, dirRoot);
+    await assertRenderedFresh(metaPath, outIndexPath, sourceHtmlPath);
+  } catch (error) {
+    console.error(`\n${(error as Error).message}\n`);
+    process.exit(EXIT.failed);
+  }
+
+  const source = read(dir, "source.original.html");
+  const rendered = readFileSync(renderedPath, "utf8");
+
+  const tokenize = json(dir, ".generated/tokenize.report.json");
+  const analysis = json(dir, ".generated/analysis.json");
+  const overrides = readOverrides(dir);
+
+  let result;
+
+  try {
+    const expectedBackgroundUrls = await loadExpectedBackgroundUrls(basename(dir), dirRoot);
+
+    result = await verifyRender(source, rendered, tokenize.substitutions, analysis, {
+      expected: expectedRules(overrides),
+      expectedBackgroundUrls,
+      extraTargets: backgroundTargets(expectedBackgroundUrls),
+    });
+  } catch (error) {
+    // assertTokensPresent throws here when the render carries no --st- block.
+    // That is not a diff failure — it means the comparison would have been
+    // meaningless, since every rewritten rule falls back to its source literal
+    // and the two documents agree for the wrong reason.
+    console.error(`\n${(error as Error).message}\n`);
+    process.exit(EXIT.failed);
+  }
+ 
+  console.log(formatVerification(result));
+
+  if (result.unexpected > 0) {
+    console.error(
+      `\n${result.unexpected} unexpected difference(s). Each is a mapping bug, or ` +
+      `an intentional change that belongs in overrides.verify.expected.`,
+    );
+    process.exit(EXIT.failed);
+  }
+
+  if (result.untokenized.length > 0) {
+    console.error(
+      `\n${result.untokenized.length} untokenized substitution(s). tokenize-css mapped ` +
+      `these but they never made it into the rendered CSS as var(--st-…) — the source's ` +
+      `own literal is still in place, which is why the diff above shows no difference for them.`,
+    );
+    process.exit(EXIT.failed);
+  }
+
+  console.log("\nOK — no unexpected differences.");
+}
+ 
+/**
+ * Per-template expectations, from overrides.json.
+ *
+ * Intentional differences are a per-import judgement — whether a type-scale
+ * residual is acceptable is decided at review, not by the tool — so they live
+ * with the other corrections rather than in the code.
+ *
+ * Patterns are anchored: an unanchored `color` would also match
+ * `background-color` and `border-top-color`, quietly excusing three properties
+ * when one was meant.
+ */
+function expectedRules(overrides: Overrides): ExpectedRule[] {
+  return (overrides.verify?.expected ?? []).map((rule) => ({
+    property: new RegExp(`^${rule.property}$`),
+    selector: rule.selector ? new RegExp(rule.selector) : undefined,
+    reason: rule.reason,
+  }));
 }
 
 
@@ -474,6 +901,20 @@ function readOverrides(dir: string): Overrides {
     console.error(`overrides.json is not valid JSON: ${(error as Error).message}`);
     process.exit(EXIT.usage);
   }
+}
+
+/**
+ * .generated/assets.json, from step 6. Missing is normal — not every run has
+ * gotten to `assets` yet — and means every image is still pending and no
+ * bundle files are seeded, same as before step 6 existed at all.
+ */
+function readAssets(dir: string): { content: Record<string, PreparedAsset>; bundleAssets: PreparedBundleAsset[] } {
+  const path = join(dir, ".generated", "assets.json");
+  if (!existsSync(path)) return { content: {}, bundleAssets: [] };
+
+  return json<{ content: Record<string, PreparedAsset>; bundleAssets: PreparedBundleAsset[] }>(
+    join(dir, ".generated"), "assets.json",
+  );
 }
 
 function write(dir: string, name: string, data: unknown): void {

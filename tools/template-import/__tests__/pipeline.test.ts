@@ -71,3 +71,70 @@ describe("applySectionOverrides", () => {
     expect(item!.severity).toBe("confirm");
   });
 });
+
+// ============================================================================
+// Token collision findings (detectTokenCollisions, tokenize-css.ts)
+//
+// Real case: h1{line-height:1.05} and h2{line-height:1.1} both map to
+// core.typography.lineHeightHeading. Which one survives buildThemeDraft's
+// last-write-wins loop depends on stylesheet order, and until this finding
+// existed nothing said so — it stayed invisible until verify's computed-style
+// diff caught the losing value rendering wrong, several steps later than
+// analyze, where the same fact was already knowable.
+// ============================================================================
+
+const COLLISION_HTML = `<!DOCTYPE html><html><head><title>t</title></head><body>
+<section id="hero"><h1>Hero</h1><h2>Sub</h2></section>
+</body></html>`;
+
+const COLLISION_CSS = `h1{line-height:1.05}h2{line-height:1.1}`;
+
+function importCollisionFixture(overrides?: Parameters<typeof runImport>[0]["overrides"]) {
+  const { html, css } = normalizeSource(`${COLLISION_HTML}<style>${COLLISION_CSS}</style>`);
+  return runImport({ html, css, templateName: "collision-test", overrides });
+}
+
+describe("detectTokenCollisions (via runImport)", () => {
+  it("surfaces a colliding token as a css finding AND a review note, at analyze time", () => {
+    const artifacts = importCollisionFixture();
+
+    const finding = artifacts.css.findings.find((f) => f.includes("core.typography.lineHeightHeading"));
+    expect(finding).toBeDefined();
+    expect(finding).toContain("h1 { line-height: 1.05 }");
+    expect(finding).toContain("h2 { line-height: 1.1 }");
+
+    // buildReview folds every css.findings entry into a review item — this is
+    // what makes it visible during `analyze`/`check`, not only at `verify`.
+    const reviewItem = artifacts.review.find(
+      (r) => r.at === "substitutions" && r.message.includes("core.typography.lineHeightHeading"),
+    );
+    expect(reviewItem).toBeDefined();
+    expect(reviewItem!.severity).toBe("note");
+  });
+
+  it("clears the stale collision finding once a retoken override resolves it, without leaving a duplicate", () => {
+    const resolved = importCollisionFixture({
+      substitutions: { retoken: { "h1|line-height": "templates.$.h1LineHeight" } },
+    });
+
+    // h1 no longer competes for core.typography.lineHeightHeading — h2 is the
+    // only substitution left on that token, so there's nothing to collide with.
+    const stale = resolved.css.findings.find((f) => f.includes("core.typography.lineHeightHeading"));
+    expect(stale).toBeUndefined();
+
+    // And no finding invents a NEW collision for h1's new token either — it's
+    // the only substitution mapped to templates.$.h1LineHeight.
+    const newCollision = resolved.css.findings.find((f) => f.includes("templates.$.h1LineHeight"));
+    expect(newCollision).toBeUndefined();
+  });
+
+  it("does not clear the finding when the retoken leaves the collision in place", () => {
+    // Retokenizes something unrelated — h1/h2 line-height still collide.
+    const stillColliding = importCollisionFixture({
+      substitutions: { retoken: { "h1|line-height": "core.typography.lineHeightHeading" } },
+    });
+
+    const finding = stillColliding.css.findings.find((f) => f.includes("core.typography.lineHeightHeading"));
+    expect(finding).toBeDefined();
+  });
+});

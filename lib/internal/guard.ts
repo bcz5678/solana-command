@@ -70,8 +70,13 @@ export function adminClient(): SupabaseClient {
  * Constant-time comparison. A plain `===` on a secret leaks length and prefix
  * information through timing, which is cheap to exploit against an endpoint
  * that can be hit repeatedly.
+ *
+ * Underlies requireInternalAuth() below. No route calls this directly
+ * anymore — app/api/internal/vendor/ingest/[jobId]/result/route.ts, the last
+ * holdout with its own local comparison, moved under /api/internal/ and now
+ * goes through requireInternalAuth() like everything else here.
  */
-function secretMatches(provided: string, expected: string): boolean {
+export function secretMatches(provided: string, expected: string): boolean {
   const a = Buffer.from(provided, "utf8");
   const b = Buffer.from(expected, "utf8");
 

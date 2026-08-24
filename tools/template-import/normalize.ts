@@ -43,6 +43,7 @@ export function normalizeSource(raw: string): NormalizeResult {
   const warnings: string[] = [];
 
   trimHrefs(document, changes);
+  assignSectionIds(document, changes);
   const css = extractStyles(document, changes);
   const linkedStylesheets = collectLinkedStylesheets(document, warnings);
   const strippedScripts = noteScripts(document, warnings);
@@ -235,4 +236,56 @@ function serialize(document: Document): string {
   if (!root) throw new Error("Source has no <html> element after parsing.");
 
   return `<!DOCTYPE html>\n${root.outerHTML}\n`;
+}
+
+
+/**
+ * Give every section-like element an id.
+ *
+ * A section with no id cannot be targeted by sectionNodes, so it cannot be
+ * switched off in the wizard. Assigning here — the one stage permitted to alter
+ * the source — makes `sourceId` reliably present downstream rather than an
+ * optionality every consumer has to handle.
+ *
+ * Derived from the section's own heading where possible, so the generated id
+ * reads like the source's own and is recognisable in a selector. Falls back to
+ * position. Existing ids are never touched: they may already be nav targets.
+ */
+function assignSectionIds(document: Document, changes: string[]): void {
+  const taken = new Set(
+    Array.from(document.querySelectorAll("[id]"))
+      .map((el) => el.getAttribute("id") ?? "")
+      .filter(Boolean),
+  );
+
+  const sections = Array.from(document.querySelectorAll("section"));
+
+  sections.forEach((section, index) => {
+    if (section.getAttribute("id")) return;
+
+    const heading = section.querySelector("h1, h2, h3, h4, h5, h6");
+    const base = slug(heading?.textContent ?? "") || `section-${index + 1}`;
+
+    let id = base;
+    let n = 2;
+    while (taken.has(id)) id = `${base}-${n++}`;
+
+    taken.add(id);
+    section.setAttribute("id", id);
+    changes.push(`assigned id="${id}" to section ${index + 1} (had none)`);
+  });
+}
+
+/** Local, deliberately. schema's slugify() operates on nav labels; this is for
+ *  DOM ids and must not drift if that one changes. */
+function slug(input: string): string {
+  return input
+    .toLowerCase()
+    .trim()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/[\s_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
 }

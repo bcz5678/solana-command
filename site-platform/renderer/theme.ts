@@ -273,6 +273,19 @@ export function resolveTheme(input: ResolveThemeInput): ResolvedTheme {
     [tokenToVar("core.shadows.md")]: cssValue(theme.core.shadows?.md ?? "none"),
     [tokenToVar("core.shadows.lg")]: cssValue(theme.core.shadows?.lg ?? "none"),
 
+    // ---- Button ---- 
+    [tokenToVar("core.button.textTransform")]: cssValue(theme.core.button.textTransform),
+    [tokenToVar("core.button.paddingBlock")]: cssValue(theme.core.button.paddingBlock),
+    [tokenToVar("core.button.paddingInline")]: cssValue(theme.core.button.paddingInline),
+    // letterSpacingWide when set, "normal" otherwise — BASE_CORE deliberately
+    // leaves letterSpacingWide unset, so a base-theme uppercase button must
+    // not get tracking nobody authored. A template that wants it says so.
+    [tokenToVar("core.button.letterSpacing")]: cssValue(theme.core.button.letterSpacing ?? (theme.core.button.textTransform === "uppercase" ? theme.core.typography.letterSpacingWide ?? "normal" : "normal")),
+    [tokenToVar("core.button.borderWidth")]: cssValue(theme.core.button.borderWidth),
+    [tokenToVar("core.button.borderColor")]: cssValue(theme.core.button.borderColor ?? c.primary),
+
+
+
     // ---- Type scale ----
     // Computed from baseFontSize + scaleRatio, not a 1:1 token — these six
     // names have no VAR_NAMES entry, only a listing in token-vars.ts's

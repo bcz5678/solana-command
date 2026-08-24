@@ -30,6 +30,7 @@ import {
   type SiteSection,
 } from "@site/schema";
 import { mergeCore } from "@site/schema";
+import type { PreparedAsset } from "./assets.js";
 
 // ============================================================================
 // INPUT
@@ -51,6 +52,12 @@ export interface AuthorInput {
     anonymize?: Record<string, string>;
     mustReplace?: string[];
   };
+  /**
+   * .generated/assets.json, from step 6. Absent on a run before `assets` has
+   * executed — every image reference is then pending, same as before step 6
+   * existed at all.
+   */
+  assets?: { content: Record<string, PreparedAsset> };
   uuid?: () => string;
 }
 
@@ -75,6 +82,12 @@ export interface AuthorResult {
 export function authorPreset(input: AuthorInput): AuthorResult {
   const uuid = input.uuid ?? randomUUID;
   const warnings: string[] = [];
+  const imageCtx: ImageContext = {
+    assets: input.assets,
+    templateId: input.templateId,
+    templateVersion: input.templateVersion,
+    uuid,
+  };
 
   // --- Theme ---------------------------------------------------------------
   // Extracted values merged OVER the standard base, so a source that never
@@ -100,7 +113,7 @@ export function authorPreset(input: AuthorInput): AuthorResult {
 
   const sections = assignSlugs(
     (draft.sections ?? []).map((entry: any, index: number) =>
-      buildSection(entry, index, uuid, warnings, pendingBySection),
+      buildSection(entry, index, uuid, warnings, pendingBySection, imageCtx),
     ),
   );
 
@@ -111,7 +124,7 @@ export function authorPreset(input: AuthorInput): AuthorResult {
   });
 
   const heroPending: { sourceUrl?: string } = {};
-  const hero = buildHero(draft.hero, warnings, heroPending);
+  const hero = buildHero(draft.hero, warnings, heroPending, imageCtx);
   if (heroPending.sourceUrl) {
     pendingAssets.push({ path: "hero.backgroundImage", sourceUrl: heroPending.sourceUrl });
   }
@@ -174,13 +187,12 @@ function buildSection(
   uuid: () => string,
   warnings: string[],
   pendingBySection: Map<string, string>,
+  imageCtx: ImageContext,
 ): SiteSection {
   const id = uuid();
 
-  // Not an ImageAsset yet — the source referenced it, nothing has fetched it.
-  // Recorded for the assets stage rather than forced into the shape early.
-  const sourceUrl: string | undefined = entry.backgroundImage?._sourceUrl;
-  if (sourceUrl) pendingBySection.set(id, sourceUrl);
+  const { image, pendingSourceUrl } = resolveImage(entry.backgroundImage, imageCtx);
+  if (pendingSourceUrl) pendingBySection.set(id, pendingSourceUrl);
 
   const base = {
     id,
@@ -191,7 +203,7 @@ function buildSection(
     showInNav: true,
     kicker: entry.kicker || undefined,
     title: entry.title ?? "TODO",
-    backgroundImage: undefined,
+    backgroundImage: image,
     overlayOpacity: entry.overlayOpacity ?? undefined,
     overlayDirection: entry.overlayDirection ?? "uniform",
     crossAlign: "start" as const,
@@ -244,7 +256,7 @@ function buildSection(
   }
 }
 
-function buildHero(hero: any, warnings: string[], pending: { sourceUrl?: string }) {
+function buildHero(hero: any, warnings: string[], pending: { sourceUrl?: string }, imageCtx: ImageContext) {
   if (!hero) {
     warnings.push("No hero found — the preset will not render without one.");
     return { title: "TODO", body: [], ctas: [] };
@@ -261,16 +273,15 @@ function buildHero(hero: any, warnings: string[], pending: { sourceUrl?: string 
     );
   }
 
-  // Not an ImageAsset yet — the source referenced it, nothing has fetched it.
-  // Recorded for the assets stage rather than forced into the shape early.
-  pending.sourceUrl = hero.backgroundImage?._sourceUrl;
+  const { image, pendingSourceUrl } = resolveImage(hero.backgroundImage, imageCtx);
+  pending.sourceUrl = pendingSourceUrl;
 
   return {
     kicker: hero.kicker || undefined,
     title: hero.title ?? "TODO",
     body: hero.body ?? [],
     ctas: (hero.ctas ?? []).filter((c: any) => c.label).map(cta),
-    backgroundImage: undefined,
+    backgroundImage: image,
     overlayOpacity: hero.overlayOpacity ?? undefined,
     overlayDirection: hero.overlayDirection ?? "uniform",
     crossAlign: "start" as const,
@@ -283,6 +294,60 @@ const cta = (c: any) => ({
   external: /^https?:/.test(c.href ?? ""),
   variant: "primary" as const,
 });
+
+// ============================================================================
+// IMAGES
+// ============================================================================
+
+interface ImageContext {
+  /** .generated/assets.json's content map, from step 6. */
+  assets?: AuthorInput["assets"];
+  templateId: string;
+  templateVersion: string;
+  uuid: () => string;
+}
+
+/**
+ * Resolve a draft's `{ _sourceUrl }` placeholder against step 6's output.
+ *
+ * Two outcomes, never both: `image` when assets.json already has it (step 6
+ * ran and fetched it), `pendingSourceUrl` when it hasn't — the caller records
+ * that against its own path (`hero.backgroundImage`, `sections[N].backgroundImage`)
+ * since this function has no way to know which one it's being called for.
+ */
+function resolveImage(
+  ref: { _sourceUrl?: string } | undefined,
+  ctx: ImageContext,
+): { image?: ReturnType<typeof buildImageAsset>; pendingSourceUrl?: string } {
+  const sourceUrl = ref?._sourceUrl;
+  if (!sourceUrl) return {};
+
+  const asset = ctx.assets?.content[sourceUrl];
+  if (!asset) return { pendingSourceUrl: sourceUrl };
+
+  return { image: buildImageAsset(asset, ctx) };
+}
+
+function buildImageAsset(asset: PreparedAsset, ctx: ImageContext) {
+  // "1200" is the real sharp output's preferred width once that lands; the
+  // stub variant is keyed "original", which falls through to the same
+  // Object.values() fallback rather than needing its own branch.
+  const variantFile = asset.variants["1200"] ?? Object.values(asset.variants)[0]!;
+
+  return {
+    id: ctx.uuid(),
+    seedPath: asset.seedPath,
+    stagingKey: `_templates/${ctx.templateId}@${ctx.templateVersion}/seed/${asset.seedPath}/`,
+    url: `/seed/${asset.seedPath}/${variantFile}`,
+    alt: "",
+    decorative: false,
+    focalX: 0.5,
+    focalY: 0.5,
+    variants: Object.fromEntries(
+      Object.entries(asset.variants).map(([w, f]) => [w, `/seed/${asset.seedPath}/${f}`]),
+    ),
+  };
+}
 
 // ============================================================================
 // MUST REPLACE

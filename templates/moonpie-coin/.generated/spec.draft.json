@@ -1,0 +1,78 @@
+{
+  "sourceKey": "moonpie-coin@1",
+  "slots": [
+    {
+      "selector": "#launch .kicker",
+      "path": "hero.kicker",
+      "mode": "text"
+    },
+    {
+      "selector": "#launch .content h2",
+      "path": "hero.title",
+      "mode": "text"
+    },
+    {
+      "selector": "#launch .content p",
+      "path": "hero.body[0]",
+      "mode": "text"
+    },
+    {
+      "selector": "#launch .btn",
+      "path": "hero.ctas[0]",
+      "mode": "link"
+    },
+    {
+      "selector": "#vision .kicker",
+      "path": "sections[0].kicker",
+      "mode": "text"
+    },
+    {
+      "selector": "#vision .content h2",
+      "path": "sections[0].title",
+      "mode": "text"
+    },
+    {
+      "selector": "#vision .content p",
+      "path": "sections[0].body[0]",
+      "mode": "text"
+    },
+    {
+      "selector": "#offering .kicker",
+      "path": "sections[1].kicker",
+      "mode": "text"
+    },
+    {
+      "selector": "#offering .content h2",
+      "path": "sections[1].title",
+      "mode": "text"
+    },
+    {
+      "selector": "#offering .content p",
+      "path": "sections[1].body[0]",
+      "mode": "text"
+    },
+    {
+      "selector": "#coin .kicker",
+      "path": "sections[2].kicker",
+      "mode": "text"
+    },
+    {
+      "selector": "#coin .content h2",
+      "path": "sections[2].title",
+      "mode": "text"
+    },
+    {
+      "selector": "#coin .content p",
+      "path": "sections[2].body[0]",
+      "mode": "text"
+    }
+  ],
+  "repeaters": [],
+  "sanitize": {
+    "approvedScripts": [],
+    "allowedOrigins": [],
+    "stripSelectors": []
+  },
+  "metaInsertSelector": "head",
+  "rewriteAnchors": true
+}

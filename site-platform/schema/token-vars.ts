@@ -74,6 +74,14 @@ const VAR_NAMES: Record<string, string> = {
   "core.shadows.md": "--st-shadow-md",
   "core.shadows.lg": "--st-shadow-lg",
 
+  // ---- core.button ----
+  "core.button.textTransform": "--st-button-transform",
+  "core.button.paddingBlock": "--st-button-padding-block",
+  "core.button.paddingInline": "--st-button-padding-inline",
+  "core.button.letterSpacing": "--st-button-letter-spacing",
+  "core.button.borderWidth": "--st-button-border-width",
+  "core.button.borderColor": "--st-button-border-color",
+
   // ---- semantic ----
   "semantic.textOnImage": "--st-color-text-on-image",
   "semantic.surfaceElevated": "--st-color-surface-elevated",

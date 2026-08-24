@@ -93,6 +93,12 @@ export const BASE_CORE: CoreTokens = {
   breakpoints: {
     md: "768px",
   },
+  button: {
+    textTransform: "none",
+    paddingBlock: "14px",
+    paddingInline: "28px",
+    borderWidth: "0px",
+  },
 };
 
 /**
@@ -123,3 +129,13 @@ export function mergeCore(partial: DeepPartial<CoreTokens> | undefined): CoreTok
 }
 
 type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? Partial<T[K]> : T[K] };
+
+/**
+ * Exported so callers building partial cores — the token editor especially —
+ * type against the same shape mergeCore consumes rather than mirroring it. A
+ * hand-mirrored copy drifts the moment a group is added to CoreTokens: the
+ * generic version here picks it up automatically, a separate redeclaration
+ * doesn't, and that's exactly how core.button reached the editor boundary
+ * unpopulated in the first place.
+ */
+export type PartialCore = DeepPartial<CoreTokens>;

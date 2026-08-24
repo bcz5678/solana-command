@@ -15,13 +15,15 @@ import type { SlottedSpec, TemplateManifest, SiteDefinition, ImageAsset, SiteCon
 import type { RenderInput, RenderOutput, TemplateContext, AssetManifest }
   from "../types";
 import { sanitizeDocument, type StripReport } from "./sanitize";
-import { applySlot, applyRepeater, rewriteBundleAssets, resolvePath, type ApplyResult }
+import { applySlot, applyRepeater, rewriteBundleAssets, rewriteCssAssetUrls, resolvePath, type ApplyResult }
   from "./apply";
 import { resolveTheme } from "../theme";
+import type { ResolvedTheme } from "../types";
 import { buildMetaTags } from "../document";
 import { scriptHash, sha256Hex, invalidationPaths, planMedia, makeImageUrlResolver }
   from "../assets";
 import { cssIdent, cssValue } from "../escape";
+import { tokenToVar } from "@site/schema";
 
 import { SlottedDocument, SlottedElement } from './dom';
 
@@ -41,24 +43,37 @@ import { SlottedDocument, SlottedElement } from './dom';
  *   import source from "./source.html?raw";        // bundler
  *   registerSource("neon-launch@1", source);
  */
-const SOURCES = new Map<string, string>();
+interface RegisteredSource {
+  html: string;
+  /**
+   * Rewritten stylesheet, for cssTokenized templates only.
+   *
+   * Separate from `html` because normalizeSource extracts <style> out at init.
+   * For a tokenized template this IS the page's styling, not an addition to it
+   * — an untokenized bundle keeps its own <style>/<link> inside `html` and
+   * registers no css here.
+   */
+  css?: string;
+}
 
-export function registerSource(sourceKey: string, html: string): void {
+const SOURCES = new Map<string, RegisteredSource>();
+
+export function registerSource(sourceKey: string, html: string, css?: string): void {
   if (SOURCES.has(sourceKey)) {
     throw new Error(`Source "${sourceKey}" is already registered.`);
   }
-  SOURCES.set(sourceKey, html);
+  SOURCES.set(sourceKey, { html, css });
 }
 
-export function getSource(sourceKey: string): string {
-  const html = SOURCES.get(sourceKey);
-  if (!html) {
+export function getSource(sourceKey: string): RegisteredSource {
+  const source = SOURCES.get(sourceKey);
+  if (!source) {
     throw new Error(
       `No source registered for "${sourceKey}". ` +
       `Known: ${[...SOURCES.keys()].join(", ") || "(none)"}`,
     );
   }
-  return html;
+  return source;
 }
 
 // ============================================================================
@@ -85,10 +100,8 @@ export async function renderSlotted(input: RenderInput): Promise<SlottedRenderRe
   // ---- 1. Parse ----
   const source = getSource(spec.sourceKey);
 
-  // Integrity check against the committed hash. A bundle edited in place
-  // without a version bump silently changes every site built from it.
   if (spec.sourceHash) {
-    const actual = sha256Hex(source);
+    const actual = sha256Hex(source.html);
     if (actual !== spec.sourceHash) {
       throw new Error(
         `Source for "${spec.sourceKey}" does not match the committed hash. ` +
@@ -97,7 +110,27 @@ export async function renderSlotted(input: RenderInput): Promise<SlottedRenderRe
     }
   }
 
-  const { document } = parseHTML(source);
+  // A tokenized template whose stylesheet never arrived renders unstyled while
+  // every var() falls back to its source literal — the page looks plausible and
+  // no theme control does anything. Loud, not silent.
+  if (spec.cssTokenized) {
+    if (!source.css) {
+      throw new Error(
+        `Template "${spec.sourceKey}" declares cssTokenized but no stylesheet was ` +
+        `registered. Re-run \`import-template emit\` and check that ` +
+        `registerSlottedTemplate is called with three arguments.`,
+      );
+    }
+
+    if (sha256Hex(source.css) !== spec.cssTokenized.cssHash) {
+      throw new Error(
+        `Stylesheet for "${spec.sourceKey}" does not match the committed hash. ` +
+        `Re-run emit and bump the template version.`,
+      );
+    }
+  }
+
+  const { document } = parseHTML(source.html);
   const doc = document as unknown as SlottedDocument;
 
   // ---- 2. Sanitize ----
@@ -188,16 +221,42 @@ export async function renderSlotted(input: RenderInput): Promise<SlottedRenderRe
   // ---- 8. Head ----
   replaceMetaTags(doc as never, definition, imageUrl);
 
-  // ---- 8.5. CSS-only backgrounds ----
-  // Appended, not prepended: the bundle's own <link>/<style> is never wrapped
-  // in @layer for a slotted template (the look is the source's own), so
-  // whichever rule comes LAST in source order wins an equal-specificity
-  // match. Landing this before the bundle's stylesheet would mean every
-  // per-site background silently loses to the bundle's original literal.
+  // ---- 8.5. Styles ----
+  //
+  // Order matters for the LAST entry only. Custom properties resolve at
+  // computed-value time regardless of declaration order, so tokens-first is
+  // readability — but the per-site background rules must follow SOURCE_CSS,
+  // which still carries the source's own background-image url()s at equal
+  // specificity. Source order decides that one.
   const cssBackgrounds = emitCssBackgrounds(spec, definition.content, imageUrl);
-  if (cssBackgrounds) {
+  const cssScrims = emitCssScrims(spec, definition.content);
+
+  // Bundle-asset url()s in source.css (an orphaned background-image, or any
+  // other file promoted to bundleAssets) only have a published path in build
+  // mode — mirrors step 6's DOM attribute rewrite, gated the same way, since
+  // the mapping doesn't exist until then. Left as the source's own relative
+  // reference in preview, exactly like every other bundle asset.
+  const sourceCss = mode === "build"
+    ? rewriteCssAssetUrls(source.css ?? "", spec.bundleAssets)
+    : (source.css ?? "");
+
+  const styles = [
+    emitTokenBlock(theme),
+    sourceCss,
+    cssBackgrounds,
+    cssScrims,
+  ].filter(Boolean).join("\n");
+
+  if (styles) {
     const head = doc.querySelector("head");
-    if (head) head.innerHTML += `<style>${cssBackgrounds}</style>`;
+    if (head) {
+      // createElement + appendChild, not innerHTML +=: the latter reparses the
+      // whole head and can normalize attribute quoting, shifting artifactHash
+      // for reasons unrelated to content.
+      const style = doc.createElement("style");
+      style.textContent = styles;
+      head.appendChild(style);
+    }
   }
 
   // ---- 9. Approved scripts ----
@@ -235,7 +294,7 @@ export async function renderSlotted(input: RenderInput): Promise<SlottedRenderRe
   return {
     html,
     body: html,      // no separate fragment; the source is the document
-    css: cssBackgrounds, // the source owns its own styling; this is the per-site override on top
+    css: cssBackgrounds + cssScrims, // the source owns its own styling; this is the per-site override on top
     inlineScriptHashes,
     assetManifest,
     stripReport,
@@ -340,11 +399,28 @@ function rewriteAnchors(
  * pseudo-element's own generated box, so a ::before/::after background can't
  * go through applySlot at all — this is the other half of that gap.
  */
-function emitCssBackgrounds(
+export interface CssBackgroundResolution {
+  /** Selector + pseudo, e.g. ".starship::before" — matches a verify Difference's `${selector}::${pseudo}`. */
+  target: string;
+  url: string;
+  position: string;
+}
+
+/**
+ * Resolve every cssBackgrounds entry to the concrete URL it will render.
+ *
+ * Exported so verify (tools/template-import/verify.ts) can compute the SAME
+ * expected value independently — from preset.content, through the identical
+ * resolver — rather than trusting that "some /media/ URL showed up" means
+ * the RIGHT one did. A wrong sectionPath (the pathFor() bug) still produces
+ * a real, well-formed URL; only comparing against an independent
+ * recomputation catches that it's the wrong section's.
+ */
+export function computeCssBackgroundUrls(
   spec: SlottedSpec,
   content: SiteContent,
   imageUrl: (asset: ImageAsset | undefined) => string,
-): string {
+): CssBackgroundResolution[] {
   return spec.cssBackgrounds.flatMap((bg) => {
     const image = resolvePath(content, bg.path) as ImageAsset | undefined;
     if (!image) return [];
@@ -356,8 +432,76 @@ function emitCssBackgrounds(
     const position =
       `${((image.focalX ?? 0.5) * 100).toFixed(1)}% ${((image.focalY ?? 0.5) * 100).toFixed(1)}%`;
 
-    return [`${target}{background-image:url(${cssValue(url)});background-position:${position}}`];
-  }).join("");
+    return [{ target, url, position }];
+  });
+}
+
+function emitCssBackgrounds(
+  spec: SlottedSpec,
+  content: SiteContent,
+  imageUrl: (asset: ImageAsset | undefined) => string,
+): string {
+  return computeCssBackgroundUrls(spec, content, imageUrl)
+    .map(({ target, url, position }) =>
+      `${target}{background-image:url(${cssValue(url)});background-position:${position}}`,
+    )
+    .join("");
+}
+
+/**
+ * Per-section scrim alpha, resolved the same independent way
+ * computeCssBackgroundUrls is — from content, through cssScrims, with nothing
+ * assumed about what the theme block already emitted.
+ *
+ * core.colors.overlay (theme, global, alpha-less) and overlayOpacity
+ * (content, per-section) have no property that can hold both at once; this
+ * is the per-site rule that recombines them, the same job a tokenized
+ * template's section renderer does with a --section-overlay custom property.
+ * Slotted has no section renderer, so it's done once here instead of per-render.
+ */
+export interface CssScrimResolution {
+  /** Selector + pseudo, e.g. ".hero::after" — matches a verify Difference's `${selector}::${pseudo}`. */
+  target: string;
+  opacity: number;
+}
+
+export function computeCssScrimRules(
+  spec: SlottedSpec,
+  content: SiteContent,
+): CssScrimResolution[] {
+  return spec.cssScrims.flatMap((scrim) => {
+    const opacity = resolvePath(content, scrim.path);
+    if (typeof opacity !== "number") return [];
+
+    const target = scrim.pseudo ? `${scrim.selector}::${scrim.pseudo}` : scrim.selector;
+    return [{ target, opacity }];
+  });
+}
+
+function emitCssScrims(spec: SlottedSpec, content: SiteContent): string {
+  const overlayVar = tokenToVar("core.colors.overlay");
+
+  return computeCssScrimRules(spec, content)
+    .map(({ target, opacity }) =>
+      `${target}{background-color:color-mix(in srgb, var(${overlayVar}) ${(opacity * 100).toFixed(1)}%, transparent)}`,
+    )
+    .join("");
+}
+
+/**
+ * Serialize the resolved theme as custom properties.
+ *
+ * Both maps in one block: `vars` is the shared surface, `custom` is Tier 3 for
+ * this template only. Names can't collide — Tier 3 is `--st-tpl-` prefixed —
+ * so a single :root is correct and keeps the output readable.
+ */
+function emitTokenBlock(theme: ResolvedTheme): string {
+  const declarations = [
+    ...Object.entries(theme.vars),
+    ...Object.entries(theme.custom),
+  ].map(([name, value]) => `${name}:${cssValue(String(value))}`);
+
+  return declarations.length > 0 ? `:root{${declarations.join(";")}}` : "";
 }
 
 // ============================================================================
@@ -367,14 +511,20 @@ function emitCssBackgrounds(
 /**
  * Register a slotted template.
  *
- *   registerSlottedTemplate("neon-launch@1", sourceHtml);
+ *   registerSlottedTemplate("neon-launch@1", sourceHtml);              // untokenized
+ *   registerSlottedTemplate("neon-launch@1", sourceHtml, rewrittenCss); // tokenized
  *
- * The mapping itself lives in the manifest, so it can be edited and re-synced
- * without touching code — which is the point: re-importing an updated bundle
- * means replacing source.html and adjusting selectors, not rewriting a renderer.
+ * `css` is required for a cssTokenized template and absent otherwise. It was
+ * previously missing entirely while emitBundle passed it as a third argument —
+ * JS drops extra arguments silently, so every tokenized template rendered with
+ * no stylesheet at all and nothing reported it.
  */
-export function registerSlottedTemplate(sourceKey: string, html: string): void {
-  registerSource(sourceKey, html);
+export function registerSlottedTemplate(
+  sourceKey: string,
+  html: string,
+  css?: string,
+): void {
+  registerSource(sourceKey, html, css);
 }
 
 export { formatReport } from "./sanitize";

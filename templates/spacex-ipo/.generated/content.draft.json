@@ -12,12 +12,7 @@
       "In 2020, SpaceX returned America's ability to fly NASA astronauts to and from the International Space Station on American vehicles.",
       "The SpaceXIPO coin celebrates the launch of $SPCX."
     ],
-    "ctas": [
-      {
-        "label": "CA Click to copy: 0xXXd5934Ce90228B9B7cE03999b81069ab629XXXX",
-        "href": "TODO"
-      }
-    ],
+    "ctas": [],
     "overlayOpacity": 0.35,
     "overlayDirection": "uniform",
     "backgroundImage": {
@@ -88,6 +83,12 @@
   ],
   "social": [
     {
+      "platform": "x-twitter",
+      "label": "x-twitter",
+      "url": "https://x.com/spacexipo_coin",
+      "showInNav": true
+    },
+    {
       "platform": "telegram",
       "label": "telegram",
       "url": "https://t.me/spacexipo_coin",
@@ -98,6 +99,11 @@
     "disclaimer": "TODO",
     "legal": {
       "copyrightYear": "auto"
+    }
+  },
+  "modules": {
+    "token": {
+      "contractAddress": "0x0000000000000000000000000000000000000000"
     }
   }
 }

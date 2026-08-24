@@ -20,7 +20,7 @@
 import { parseHTML } from "linkedom";
 
 import type { El } from "./dom.js";
-import { text } from "./dom.js";
+import { text, tag, classesOf } from "./dom.js";
 import {
   detectSections,
   readRoles,
@@ -55,14 +55,14 @@ export interface TemplateAnalysis {
    */
   pendingBackgrounds: Array<{ section: string; from: string }>;
   /** Feeds tokenizeCss's type-scale fit. A tag used once is usually a label. */
-  headingUsage: Record<string, number>;
-  /**
+  headingUsage: Record<string, HeadingUsage>;
+    /**
    * `<link rel="stylesheet">` hrefs found in source.html. Re-derived here
    * rather than threaded through from normalize.ts's NormalizeResult — init
    * only ever logged that field, so it was lost the moment the run ended.
    * emit needs it to warn when a linked sheet was never tokenized.
    */
-  linkedStylesheets: string[];
+  linkedStylesheets?: string[];
   warnings: string[];
 }
 
@@ -75,6 +75,69 @@ export interface AnalyzeOptions {
    * than the duplicate slots it was meant to prevent.
    */
   ignoreRepeatersIn?: string[];
+}
+
+export interface HeadingUsage {
+  /** Every occurrence of the tag. */
+  total: number;
+  /**
+   * Occurrences used AS headings — in a section's content flow rather than as
+   * decorative text inside a control. This is the count the type-scale fit
+   * cares about.
+   */
+  structural: number;
+}
+
+/**
+ * Count heading tags, separating structural uses from decorative ones.
+ *
+ * Feeds tokenizeCss's type-scale fit. The distinction matters because a tag
+ * used only as a label carries a hand-picked size that no scale will fit: in
+ * the reference template the sole <h3> is the "CA" text inside a copy button,
+ * and including its 32px moves the fit error from ~1.5% to ~32%.
+ *
+ * An earlier version used occurrence count as the proxy — "used once, so
+ * probably a label" — which was wrong: it excluded h1, legitimately singular on
+ * almost every page. Checking the ancestry directly is both narrower and
+ * correct.
+ */
+function countHeadings(doc: El): Record<string, HeadingUsage> {
+  const counts: Record<string, HeadingUsage> = {};
+
+  for (const name of ["h1", "h2", "h3", "h4", "h5", "h6"]) {
+    const elements = Array.from(doc.querySelectorAll(name));
+    if (elements.length === 0) continue;
+
+    counts[name] = {
+      total: elements.length,
+      structural: elements.filter(isStructuralHeading).length,
+    };
+  }
+
+  return counts;
+}
+
+/**
+ * True when a heading sits in content flow rather than inside a control.
+ *
+ * Walks ancestors rather than checking the immediate parent: sources wrap
+ * headings in spans and divs inside buttons, so the nearest parent is often
+ * uninformative.
+ */
+function isStructuralHeading(el: El): boolean {
+  let cursor = el.parentElement;
+
+  while (cursor) {
+    const name = tag(cursor);
+    if (name === "a" || name === "button") return false;
+
+    const classes = [...classesOf(cursor)].join(" ");
+    if (/\b(btn|button|cta|badge|pill|chip|label)\b/i.test(classes)) return false;
+
+    cursor = cursor.parentElement;
+  }
+
+  return true;
 }
 
 export function analyze(html: string, options: AnalyzeOptions = {}): TemplateAnalysis {
@@ -139,7 +202,6 @@ export function analyze(html: string, options: AnalyzeOptions = {}): TemplateAna
     sections: analyzed,
     pendingBackgrounds,
     headingUsage: countHeadings(doc),
-    linkedStylesheets: linkedStylesheetsOf(doc),
     warnings,
   };
 }
@@ -166,28 +228,6 @@ function sampleRoles(section: El, roles: SectionRoles): Record<string, string> {
   return out;
 }
 
-/**
- * Heading counts across the whole document.
- *
- * Returned here rather than computed separately in merge, because the CSS pass
- * needs it and duplicating the count is how the two drift.
- */
-function countHeadings(doc: El): Record<string, number> {
-  const counts: Record<string, number> = {};
-
-  for (const tag of ["h1", "h2", "h3", "h4", "h5", "h6"]) {
-    const n = doc.querySelectorAll(tag).length;
-    if (n > 0) counts[tag] = n;
-  }
-
-  return counts;
-}
-
-function linkedStylesheetsOf(doc: El): string[] {
-  return Array.from(doc.querySelectorAll('link[rel="stylesheet"]'))
-    .map((el) => el.getAttribute("href"))
-    .filter((href): href is string => Boolean(href));
-}
 
 // ============================================================================
 // REPORT

@@ -317,6 +317,23 @@ export const SlottedSpecSchema = z.object({
     /** Pseudo-element carrying it in the source, if any. */
     pseudo: z.enum(["before", "after"]).optional(),
   })).default([]),
+
+  /**
+   * Per-section scrim alpha, from the same split merge.ts's splitScrim does on
+   * a source's `rgba(0,0,0,.35)`: the colour becomes core.colors.overlay
+   * (theme, global), the alpha becomes overlayOpacity (content, per-section).
+   * background-color alone has nowhere to recombine them — a tokenized
+   * template's section renderer emits a --section-overlay custom property per
+   * section; slotted has no section renderer, so this is the same job done
+   * once, structurally, as its own per-site rule instead of per-render.
+   */
+  cssScrims: z.array(z.object({
+    /** Content path to the numeric opacity, e.g. "sections[0].overlayOpacity". */
+    path: z.string().min(1),
+    /** Element to set the scrim on, WITHOUT the pseudo. */
+    selector: z.string().min(1),
+    pseudo: z.enum(["before", "after"]).optional(),
+  })).default([]),
 });
 export type SlottedSpec = z.infer<typeof SlottedSpecSchema>;
 

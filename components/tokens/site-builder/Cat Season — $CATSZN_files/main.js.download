@@ -1,0 +1,425 @@
+(() => {
+  const cfg = window.CATSZN_CONFIG || {};
+  const token = (cfg.tokenAddress || "").trim();
+
+  /* —— Loader —— */
+  const loader = document.getElementById("loader");
+  const LOADER_MS = 2400;
+
+  function finishLoader() {
+    if (!loader || loader.classList.contains("is-done")) return;
+    loader.classList.add("is-done");
+    loader.setAttribute("aria-busy", "false");
+    document.body.classList.add("is-ready");
+    setTimeout(() => loader.remove(), 800);
+  }
+
+  window.addEventListener("load", () => setTimeout(finishLoader, LOADER_MS));
+  setTimeout(finishLoader, LOADER_MS + 4000);
+
+  /* —— Touch / reduced motion —— */
+  const isTouch =
+    window.matchMedia("(hover: none), (pointer: coarse)").matches ||
+    "ontouchstart" in window;
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (isTouch) document.body.classList.add("is-touch");
+
+  /* —— 3D paw particle background —— */
+  const canvas = document.getElementById("bg-canvas");
+  const mouse = { x: -9999, y: -9999 };
+
+  if (canvas && !reduceMotion && !isTouch) {
+    const ctx = canvas.getContext("2d");
+    let particles = [];
+    let w = 0;
+    let h = 0;
+    let rafId = 0;
+
+    const PAW_PATH = (() => {
+      const p = new Path2D();
+      p.ellipse(0, 4, 5.5, 4.5, 0, 0, Math.PI * 2);
+      [[-6.5, -7.5, 2.4], [-2, -10.5, 2.5], [2.5, -10.5, 2.5], [6.5, -7.5, 2.4]].forEach(([x, y, r]) => {
+        p.moveTo(x + r, y);
+        p.arc(x, y, r, 0, Math.PI * 2);
+      });
+      return p;
+    })();
+
+    function resize() {
+      w = canvas.width = window.innerWidth;
+      h = canvas.height = window.innerHeight;
+    }
+
+    function initParticles() {
+      const count = Math.min(55, Math.floor((w * h) / 22000));
+      particles = Array.from({ length: count }, (_, i) => ({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        z: 0.25 + Math.random() * 0.75,
+        vx: (Math.random() - 0.5) * 0.2,
+        vy: (Math.random() - 0.5) * 0.2,
+        rot: Math.random() * Math.PI * 2,
+        rotSpeed: (Math.random() - 0.5) * 0.008,
+        purple: i % 2 === 0,
+        phase: Math.random() * Math.PI * 2,
+      }));
+    }
+
+    function drawPaw(x, y, scale, rotation, alpha, purple) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rotation);
+      ctx.scale(scale, scale);
+      ctx.fillStyle = purple
+        ? `rgba(153, 69, 255, ${alpha})`
+        : `rgba(20, 241, 149, ${alpha})`;
+      ctx.fill(PAW_PATH);
+      ctx.restore();
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, w, h);
+
+      const parallaxX = (mouse.x - w * 0.5) * 0.018;
+      const parallaxY = (mouse.y - h * 0.5) * 0.018;
+      const time = performance.now() * 0.001;
+
+      const sorted = particles
+        .map((p) => {
+          const floatX = Math.sin(time * 0.4 + p.phase) * 6 * p.z;
+          const floatY = Math.cos(time * 0.35 + p.phase) * 5 * p.z;
+          let sx = p.x + parallaxX * p.z + floatX;
+          let sy = p.y + parallaxY * p.z + floatY;
+
+          const dx = sx - mouse.x;
+          const dy = sy - mouse.y;
+          const dist = Math.hypot(dx, dy);
+          const radius = 90 + p.z * 60;
+
+          if (dist < radius && dist > 0) {
+            const force = (1 - dist / radius) ** 2;
+            p.vx += (dx / dist) * force * 1.8;
+            p.vy += (dy / dist) * force * 1.8;
+            p.rot += force * 0.06 * (dx > 0 ? 1 : -1);
+          }
+
+          p.vx *= 0.94;
+          p.vy *= 0.94;
+          p.x += p.vx;
+          p.y += p.vy;
+          p.rot += p.rotSpeed;
+
+          if (p.x < -40) p.x = w + 40;
+          if (p.x > w + 40) p.x = -40;
+          if (p.y < -40) p.y = h + 40;
+          if (p.y > h + 40) p.y = -40;
+
+          sx = p.x + parallaxX * p.z + floatX;
+          sy = p.y + parallaxY * p.z + floatY;
+
+          return { ...p, sx, sy, scale: 0.35 + p.z * 0.55, alpha: 0.12 + p.z * 0.28 };
+        })
+        .sort((a, b) => a.z - b.z);
+
+      sorted.forEach((p, i) => {
+        drawPaw(p.sx, p.sy, p.scale, p.rot, p.alpha, p.purple);
+
+        for (let j = i + 1; j < sorted.length; j++) {
+          const q = sorted[j];
+          const dx = p.sx - q.sx;
+          const dy = p.sy - q.sy;
+          const dist = Math.hypot(dx, dy);
+          if (dist < 100) {
+            ctx.beginPath();
+            ctx.moveTo(p.sx, p.sy);
+            ctx.lineTo(q.sx, q.sy);
+            ctx.strokeStyle = `rgba(153, 69, 255, ${0.08 * (1 - dist / 100) * ((p.z + q.z) * 0.5)})`;
+            ctx.lineWidth = 0.4;
+            ctx.stroke();
+          }
+        }
+      });
+
+      rafId = requestAnimationFrame(draw);
+    }
+
+    document.addEventListener("mousemove", (e) => {
+      mouse.x = e.clientX;
+      mouse.y = e.clientY;
+    });
+
+    document.addEventListener("mouseleave", () => {
+      mouse.x = -9999;
+      mouse.y = -9999;
+    });
+
+    resize();
+    initParticles();
+    draw();
+
+    window.addEventListener("resize", () => {
+      resize();
+      initParticles();
+    });
+
+    window.addEventListener("beforeunload", () => cancelAnimationFrame(rafId));
+  }
+
+  /* —— Paw cursor —— */
+  const cursor = document.getElementById("paw-cursor");
+  const trail = document.getElementById("paw-trail");
+  let lastTrail = 0;
+
+  if (cursor && trail && !isTouch && !reduceMotion) {
+    let visible = false;
+
+    document.addEventListener("mousemove", (e) => {
+      cursor.style.left = `${e.clientX}px`;
+      cursor.style.top = `${e.clientY}px`;
+      if (!visible) {
+        cursor.classList.add("is-visible");
+        visible = true;
+      }
+      const now = performance.now();
+      if (now - lastTrail > 55) {
+        lastTrail = now;
+        const el = document.createElement("span");
+        el.className = "trail-paw";
+        el.style.left = `${e.clientX}px`;
+        el.style.top = `${e.clientY}px`;
+        el.style.setProperty("--rot", `${(Math.random() * 50 - 25).toFixed(1)}deg`);
+        trail.appendChild(el);
+        setTimeout(() => el.remove(), 900);
+      }
+    });
+
+    document.addEventListener("mousedown", () => cursor.classList.add("is-click"));
+    document.addEventListener("mouseup", () => cursor.classList.remove("is-click"));
+    document.addEventListener("mouseleave", () => {
+      cursor.classList.remove("is-visible");
+      visible = false;
+    });
+    document.addEventListener("mouseenter", () => {
+      cursor.classList.add("is-visible");
+      visible = true;
+    });
+  }
+
+  /* —— Dropdowns —— */
+  document.querySelectorAll(".dropdown").forEach((dd) => {
+    const btn = dd.querySelector(".dropdown__btn");
+    btn?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = dd.classList.toggle("is-open");
+      btn.setAttribute("aria-expanded", String(open));
+      document.querySelectorAll(".dropdown").forEach((other) => {
+        if (other !== dd) {
+          other.classList.remove("is-open");
+          other.querySelector(".dropdown__btn")?.setAttribute("aria-expanded", "false");
+        }
+      });
+    });
+  });
+
+  document.addEventListener("click", () => {
+    document.querySelectorAll(".dropdown.is-open").forEach((dd) => {
+      dd.classList.remove("is-open");
+      dd.querySelector(".dropdown__btn")?.setAttribute("aria-expanded", "false");
+    });
+  });
+
+  /* —— Mobile nav —— */
+  const toggle = document.getElementById("nav-toggle");
+  const mobileMenu = document.getElementById("mobile-menu");
+
+  if (toggle && mobileMenu) {
+    toggle.addEventListener("click", () => {
+      const open = mobileMenu.classList.toggle("is-open");
+      toggle.classList.toggle("is-open", open);
+      toggle.setAttribute("aria-expanded", String(open));
+    });
+    mobileMenu.querySelectorAll("a").forEach((link) => {
+      link.addEventListener("click", () => {
+        mobileMenu.classList.remove("is-open");
+        toggle.classList.remove("is-open");
+        toggle.setAttribute("aria-expanded", "false");
+      });
+    });
+  }
+
+  /* —— Links from config —— */
+  const pair = (cfg.pairAddress || "").trim();
+  const pumpBase = cfg.pumpFunBase || "https://pump.fun/coin/";
+  const dexBase = cfg.dexScreenerBase || "https://dexscreener.com/solana/";
+
+  const pumpUrl = token ? `${pumpBase}${token}` : "https://pump.fun";
+  const dexPage = pair
+    ? `${dexBase}${pair}`
+    : token
+      ? `${dexBase}${token}`
+      : "https://dexscreener.com/solana";
+  const solscanUrl = token ? `https://solscan.io/token/${token}` : "https://solscan.io";
+  const dexEmbed =
+    (cfg.dexEmbedUrl || "").trim() ||
+    (pair
+      ? `${dexBase}${pair}?embed=1&theme=dark&trades=0&info=0&chartLeftToolbar=0`
+      : token
+        ? `${dexBase}${token}?embed=1&theme=dark&trades=0&info=0&chartLeftToolbar=0`
+        : "");
+
+  ["buy-nav", "buy-hero", "buy-finale", "buy-mobile", "link-pump"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.href = pumpUrl;
+  });
+
+  ["link-dex", "link-dex-nav", "link-dex-footer"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.href = dexPage;
+  });
+
+  const linkSolscan = document.getElementById("link-solscan");
+  if (linkSolscan) linkSolscan.href = solscanUrl;
+
+  /* —— DexScreener embed + CA —— */
+  const iframe = document.getElementById("dex-iframe");
+  const placeholder = document.getElementById("chart-placeholder");
+  const caBar = document.getElementById("ca-bar");
+  const caDisplay = document.getElementById("ca-display");
+  const caDisplayFinale = document.getElementById("ca-display-finale");
+  const finaleCa = document.getElementById("finale-ca");
+
+  if (token || pair) {
+    if (iframe && dexEmbed) {
+      iframe.src = dexEmbed;
+      iframe.removeAttribute("hidden");
+      iframe.addEventListener("load", () => {
+        if (placeholder) placeholder.classList.add("is-hidden");
+      });
+      // Fallback: hide placeholder after timeout even if load event doesn't fire
+      setTimeout(() => {
+        if (placeholder) placeholder.classList.add("is-hidden");
+      }, 3000);
+    }
+    if (token) {
+      if (caBar) caBar.hidden = false;
+      if (caDisplay) caDisplay.textContent = token;
+      if (caDisplayFinale) caDisplayFinale.textContent = token;
+      if (finaleCa) finaleCa.hidden = false;
+    }
+  }
+
+  async function copyText(text, btn, ok = "Copied!", fail = "Failed") {
+    try {
+      await navigator.clipboard.writeText(text);
+      const orig = btn.textContent;
+      btn.textContent = ok;
+      setTimeout(() => { btn.textContent = orig; }, 1600);
+    } catch {
+      const orig = btn.textContent;
+      btn.textContent = fail;
+      setTimeout(() => { btn.textContent = orig; }, 1600);
+    }
+  }
+
+  document.getElementById("copy-ca")?.addEventListener("click", (e) => {
+    if (token) copyText(token, e.currentTarget, "Copied!", "Failed");
+  });
+
+  document.getElementById("copy-ca-finale")?.addEventListener("click", (e) => {
+    if (token) copyText(token, e.currentTarget, "Copied!", "Failed");
+  });
+
+  /* —— Live stats from DexScreener —— */
+  function fmtUsd(n) {
+    if (n == null || isNaN(n)) return "—";
+    if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
+    if (n >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
+    if (n >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
+    if (n >= 1) return `$${n.toFixed(2)}`;
+    if (n >= 0.0001) return `$${n.toFixed(6)}`;
+    return `$${n.toExponential(2)}`;
+  }
+
+  async function fetchStats() {
+    if (!token) return;
+    try {
+      const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${token}`);
+      const data = await res.json();
+      const pairData =
+        (pair && data.pairs?.find((p) => p.pairAddress?.toLowerCase() === pair.toLowerCase())) ||
+        data.pairs?.[0];
+      if (!pairData) return;
+
+      const mcap = pairData.marketCap ?? pairData.fdv;
+      const change = pairData.priceChange?.h24;
+      const price = parseFloat(pairData.priceUsd);
+      const liq = pairData.liquidity?.usd;
+      const vol = pairData.volume?.h24;
+
+      const elMcap = document.getElementById("stat-mcap");
+      const elChange = document.getElementById("stat-change");
+      const elPrice = document.getElementById("stat-price");
+      const elLiq = document.getElementById("stat-liq");
+      const elVol = document.getElementById("stat-vol");
+
+      if (elMcap) elMcap.textContent = fmtUsd(mcap);
+      if (elPrice) elPrice.textContent = fmtUsd(price);
+      if (elLiq) elLiq.textContent = fmtUsd(liq);
+      if (elVol) elVol.textContent = fmtUsd(vol);
+
+      if (elChange && change != null) {
+        const sign = change >= 0 ? "+" : "";
+        elChange.textContent = `${sign}${change.toFixed(1)}%`;
+        elChange.classList.toggle("positive", change >= 0);
+        elChange.classList.toggle("negative", change < 0);
+      }
+    } catch {
+      /* keep placeholders */
+    }
+  }
+
+  if (token) {
+    fetchStats();
+    setInterval(fetchStats, 60000);
+  }
+
+  /* —— Scroll reveals —— */
+  const revealEls = document.querySelectorAll(".reveal");
+  if (revealEls.length && "IntersectionObserver" in window) {
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("is-in");
+            io.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15, rootMargin: "0px 0px -30px 0px" }
+    );
+    revealEls.forEach((el) => io.observe(el));
+  } else {
+    revealEls.forEach((el) => el.classList.add("is-in"));
+  }
+
+  /* —— Chapter nav highlight —— */
+  const chapters = document.querySelectorAll(".chapter[data-chapter]");
+  const navLinks = document.querySelectorAll(".nav__chapters a");
+
+  if (chapters.length && navLinks.length && "IntersectionObserver" in window) {
+    const chapterIo = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const ch = entry.target.dataset.chapter;
+            navLinks.forEach((a) => {
+              a.classList.toggle("is-active", a.dataset.ch === ch);
+            });
+          }
+        });
+      },
+      { threshold: 0.35, rootMargin: "-120px 0px -40% 0px" }
+    );
+    chapters.forEach((ch) => chapterIo.observe(ch));
+  }
+})();

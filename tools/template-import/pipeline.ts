@@ -13,8 +13,8 @@
 // inference regardless of which pass produced it.
 // ============================================================================
 
-import { analyze, type TemplateAnalysis, type AnalyzedSection } from "./analyze.js";
-import { tokenizeCss, normalizeValue, type TokenizeResult, type Substitution } from "./css/tokenize-css.js";
+import { analyze, type TemplateAnalysis, type AnalyzedSection, type HeadingUsage } from "./analyze.js";
+import { tokenizeCss, normalizeValue, detectTokenCollisions, MOBILE_SCOPED, type TokenizeResult, type Substitution } from "./css/tokenize-css.js";
 import { merge, type MergedImport } from "./merge.js";
 
 // ============================================================================
@@ -43,6 +43,15 @@ export interface Overrides {
      * duplicating — worse than the problem the exclusion solves.
      */
     ignoreRepeaters?: boolean;
+    /**
+     * The section's "button" isn't a CTA — it's a widget (a copy-to-clipboard
+     * address, say) that a generic link slot would flatten if it were mapped
+     * as one. Clears roles.cta and samples.cta so buildSpecDraft never
+     * generates the slot in the first place; the durable fix, since the
+     * alternative is deleting the slot from spec.draft.json by hand on every
+     * re-run. Generalizes to any source whose "button" isn't really a link.
+     */
+    ignoreCta?: boolean;
   }>;
 
   substitutions?: {
@@ -67,6 +76,24 @@ export interface Overrides {
 
   /** Origins permitted in @import and url(). */
   allowedOrigins?: string[];
+    /**
+    * Differences the reviewer has accepted as intentional. Downgrades a
+    * verify difference from "unexpected" to "expected", with the reason shown
+    * in the report.
+    *
+    * `property` is matched anchored; `selector` is not, so a partial selector
+    * covers every element it appears in.
+    */
+   verify?: {
+     expected?: Array<{
+              /** Exact property name, e.g. "letter-spacing". */
+      property: string;
+       /** Optional selector constraint, matched unanchored. */
+       selector?: string;
+       /** Why this difference is acceptable. Shown grouped in the report. */
+       reason: string;
+     }>;
+   };
 }
 
 // ============================================================================
@@ -153,11 +180,20 @@ function applySectionOverrides(analysis: TemplateAnalysis, overrides: Overrides)
       const patch = bySource[section.sourceId];
       if (!patch) return section;
 
+      const samples = { ...section.samples };
+      if (patch.ignoreCta) delete samples.cta;
+
       return {
         ...section,
         type: (patch.type ?? section.type) as AnalyzedSection["type"],
         navLabel: patch.navLabel ?? section.navLabel,
         isHero: patch.isHero ?? section.isHero,
+        // Cleared together: roles.cta drives buildSpecDraft's slot, samples.cta
+        // drives merge.ts's content draft. Leaving samples.cta behind would
+        // still seed a `{ label, href: "TODO" }` placeholder with no slot to
+        // ever fill it.
+        roles: patch.ignoreCta ? { ...section.roles, cta: undefined } : section.roles,
+        samples,
         // A confirmed section is no longer an inference — but only an explicit
         // type correction confirms it. A patch that sets only ignoreRepeaters
         // or navLabel must not silently drop the section from the "confirm
@@ -172,16 +208,18 @@ function applySectionOverrides(analysis: TemplateAnalysis, overrides: Overrides)
 }
 
 function withExclusions(
-  usage: Record<string, number>,
+  usage: Record<string, HeadingUsage>,
   overrides: Overrides,
-): Record<string, number> {
+): Record<string, HeadingUsage> {
   const excluded = overrides.typeScale?.excludeHeadings ?? [];
   if (excluded.length === 0) return usage;
 
-  // fitTypeScale drops any tag used exactly once. Forcing the count to 1 is
-  // how an explicit exclusion reaches it without a second mechanism.
+  // fitTypeScale drops any tag with zero structural uses, so an explicit
+  // exclusion reaches it through that same mechanism rather than a second one.
   const out = { ...usage };
-  for (const tag of excluded) if (tag in out) out[tag] = 1;
+  for (const tag of excluded) {
+    if (tag in out) out[tag] = { ...out[tag], structural: 0 };
+  }
   return out;
 }
 
@@ -208,9 +246,22 @@ function applySubstitutionOverrides(
     substitutions.push({ ...added, confidence: 1, note: "Added by override." });
   }
 
+  // Collision findings are derived from substitutions too, and a retoken can
+  // both create a new collision and resolve an old one — appending fresh
+  // findings on top of result.findings would leave a resolved collision's
+  // finding sitting there stale. detectTokenCollisions is pure and
+  // deterministic, so recomputing it against the ORIGINAL substitutions
+  // reproduces exactly the strings tokenizeCss pushed, safe to filter out by
+  // equality before adding the current ones.
+  const staleCollisions = new Set(detectTokenCollisions(result.substitutions));
+  const findings = [
+    ...result.findings.filter((f) => !staleCollisions.has(f)),
+    ...detectTokenCollisions(substitutions),
+  ];
+
   // The theme draft is derived from substitutions, so it has to be rebuilt
   // rather than patched — otherwise a retoken leaves the old path populated.
-  return { ...result, substitutions, theme: rebuildTheme(substitutions, result) };
+  return { ...result, substitutions, findings, theme: rebuildTheme(substitutions, result) };
 }
 
 function rebuildTheme(
@@ -225,7 +276,13 @@ function rebuildTheme(
   // gets this right; skipping it here is how a retoken override — or just the
   // `substitutions: {}` init always seeds overrides.json with, which is enough
   // to make this path run every time — reintroduced the exact type mismatch.
-  for (const sub of substitutions) setPath(theme, sub.token, normalizeValue(sub.token, sub.property, sub.original));
+
+  // Shared with buildThemeDraft (tokenize-css.ts) rather than a second copy —
+  // two independently maintained sets is exactly how they'd quietly disagree.
+  for (const sub of substitutions) {
+    if (sub.media && !MOBILE_SCOPED.has(sub.token)) continue;
+    setPath(theme, sub.token, normalizeValue(sub.token, sub.property, sub.original));
+  }
 
   // Type-scale and breakpoint values aren't substitutions, so carry them over.
   for (const path of [

@@ -1,0 +1,103 @@
+{
+  "_review": [
+    "Section `type` values are inferred — confirm each.",
+    "Section ids and slugs are minted by the authoring script, not here.",
+    "ANONYMIZE before this becomes a preset: names, addresses, socials, legal entity.",
+    "Background images are source URLs pending download and variant generation."
+  ],
+  "hero": {
+    "kicker": "Love at First Bite",
+    "title": "Fuel for Liftoff",
+    "body": [
+      "There’s something unmistakably satisfying about a Moon Pie. Rich chocolate surrounds soft graham layers and a sweet marshmallow center, creating the kind of combination that makes one bite turn into another. It’s soft, chocolatey, marshmallowy, and just messy enough to remind you that the best snacks aren’t supposed to be boring. Whether you’ve loved them forever or you’re taking your first bite, it’s a little taste of happiness with a whole lot of history."
+    ],
+    "ctas": [
+      {
+        "label": "CA Click to copy: XXXXXX",
+        "href": "TODO"
+      }
+    ],
+    "overlayOpacity": 0.35,
+    "overlayDirection": "uniform",
+    "backgroundImage": {
+      "_sourceUrl": "assets/banner.jpeg",
+      "_pending": "download + variants"
+    }
+  },
+  "sections": [
+    {
+      "_sourceId": "vision",
+      "_confidence": 0.95,
+      "order": 0,
+      "type": "prose",
+      "navLabel": "IPO",
+      "kicker": "Snack. Suit Up. Launch.",
+      "title": "Fuel for Liftoff",
+      "body": [
+        "Space travel takes preparation. Helmet? Check. Spacesuit? Check. Moon Pie? Absolutely. Before you blast into the unknown, fuel up with chocolate, graham, and marshmallow—the three essential food groups of intergalactic exploration. We can’t promise it’ll help you navigate an asteroid field or survive zero gravity, but every great mission needs a great snack. Grab one, buckle in, and prepare for liftoff. The moon is waiting."
+      ],
+      "overlayOpacity": 0.35,
+      "overlayDirection": "uniform",
+      "backgroundImage": {
+        "_sourceUrl": "assets/img1.jpeg",
+        "_pending": "download + variants"
+      }
+    },
+    {
+      "_sourceId": "offering",
+      "_confidence": 0.95,
+      "order": 1,
+      "type": "prose",
+      "navLabel": "Offering",
+      "kicker": "Caution: Marshmallow Incoming",
+      "title": "Hot and Sticky",
+      "body": [
+        "Heat up a Moon Pie and things get serious. The chocolate gets softer, the marshmallow gets gooier, and suddenly your innocent little snack becomes a hot, sticky situation. Napkins are recommended. Restraint is optional. Give it a few seconds of warmth and watch those familiar layers transform into molten marshmallow goodness. Just remember: when the filling starts flowing, you’ve officially entered the sticky zone."
+      ],
+      "overlayOpacity": 0.35,
+      "overlayDirection": "uniform",
+      "backgroundImage": {
+        "_sourceUrl": "assets/img2.jpeg",
+        "_pending": "download + variants"
+      }
+    },
+    {
+      "_sourceId": "coin",
+      "_confidence": 0.95,
+      "order": 2,
+      "type": "prose",
+      "navLabel": "Coin",
+      "kicker": "Volatility Never Tasted Better",
+      "title": "Ride the Sugar Rush",
+      "body": [
+        "Buy some Moon Pie. Buy more Moon Pie. Ride the volatility, feel the gains, and hang on when the stomach pains turn into a sugar high. One minute you’re cruising toward the moon, the next you’re holding your stomach through a wild correction."
+      ],
+      "overlayOpacity": 0.35,
+      "overlayDirection": "uniform",
+      "backgroundImage": {
+        "_sourceUrl": "assets/img3.jpeg",
+        "_pending": "download + variants"
+      }
+    }
+  ],
+  "social": [
+    {
+      "platform": "x-twitter",
+      "label": "x-twitter",
+      "url": "https://x.com/spacexipo_coin",
+      "showInNav": true
+    },
+    {
+      "platform": "telegram",
+      "label": "telegram",
+      "url": "https://t.me/spacexipo_coin",
+      "showInNav": true
+    }
+  ],
+  "footer": {
+    "disclaimer": "TODO",
+    "legal": {
+      "copyrightYear": "auto"
+    }
+  }
+}

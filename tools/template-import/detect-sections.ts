@@ -57,7 +57,17 @@ export interface NavCandidate {
 }
 
 const SOCIAL_HOSTS: Array<[RegExp, string]> = [
-  [/(^|\.)x\.com|twitter\.com/i, "x-twitter"],
+  // Two fixes layered on the original (^|\.)x\.com|twitter\.com:
+  //  - grouped, so the boundary applies to both domains, not just x.com
+  //    ("|" is lowest-precedence — twitter.com was an unanchored bare
+  //    substring test, which happened to work; x.com wasn't, and didn't).
+  //  - "." replaced with "[./]", because neither branch matched a REAL href
+  //    at all: "https://x.com/..." has "/" immediately before the hostname,
+  //    not ".", so even correctly grouped this still matched nothing.
+  //  - trailing \b so "x.com" doesn't match inside an unrelated host like
+  //    "x.commerce.com"; "fex.com" was already excluded by the boundary
+  //    requiring "." or "/" immediately before, not any character.
+  [/(^|[./])(x\.com|twitter\.com)\b/i, "x-twitter"],
   [/t\.me|telegram/i, "telegram"],
   [/discord/i, "discord"],
   [/instagram/i, "instagram"],
@@ -238,6 +248,19 @@ export function readRoles(section: El, excluded: El[] = []): SectionRoles {
     const name = tag(node);
     const value = text(node);
     if (!value) continue;
+
+
+    // Checked before the <p> branch: a <p class="kicker"> is common markup, and
+    // routing every <p> to body first makes it unreachable.
+    if (!roles.kicker && headingIndex >= 0 && i < headingIndex) {
+      const isLeaf = Array.from(node.children ?? []).length === 0;
+      const named = /\b(kicker|eyebrow|overline|tagline|pretitle)\b/i.test([...classesOf(node)].join(" "));
+
+      if ((isLeaf || named) && value.length <= 60) {
+        roles.kicker = relativeSelector(node, section);
+        continue;
+      }
+    }
 
     // A CTA is a link that looks like a button. Checked before the text rules
     // so a short button label isn't mistaken for a kicker, and `continue`d so

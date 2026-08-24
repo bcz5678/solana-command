@@ -13,15 +13,26 @@
 // TypeScript rather than JSON deliberately: the fixtures are type-checked
 // against the schema, so a schema change that invalidates them fails `tsc`
 // rather than surfacing as a confusing runtime parse error.
+//
+// `theme` is run through LayeredThemeSchema.parse() rather than just typed as
+// a LayeredTheme literal — a .prefault()/.default() field's OUTPUT type is
+// still required (tsc does catch an omitted one), but only if tsc actually
+// gets to check it. An object literal that skips parsing means the render
+// path sees whatever the literal happened to include, not what the schema
+// guarantees; core.button (added after this fixture was written) was
+// missing from the literal and undefined at render time until this changed —
+// resolveTheme() read core.button.textTransform unconditionally and threw.
+// Parsing here means every future defaulted field is populated by
+// construction, not by whoever edits this file remembering to add it.
 // ============================================================================
 
-import type { SiteDefinition, LayeredTheme } from "@site/schema";
+import { LayeredThemeSchema, type SiteDefinition, type LayeredTheme } from "@site/schema";
 
 // ============================================================================
 // SHARED THEME
 // ============================================================================
 
-const theme: LayeredTheme = {
+const theme: LayeredTheme = LayeredThemeSchema.parse({
   id: "fixture-dark",
   name: "Fixture Dark",
   schemaVersion: 1,
@@ -67,7 +78,7 @@ const theme: LayeredTheme = {
   templates: {
     "hero-onepager": { headerBlur: "12px", sectionMinHeight: "100vh" },
   },
-};
+});
 
 // ============================================================================
 // HELPERS

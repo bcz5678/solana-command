@@ -19,7 +19,7 @@
 import { describe, it, expect } from "vitest";
 import { renderTemplate } from "../render";
 import { resolveTheme } from "../theme";
-import { assignSlugs, validateAgainstManifest, ALL_VAR_NAMES } from "@site/schema";
+import { assignSlugs, validateAgainstManifest, ALL_VAR_NAMES, LayeredThemeSchema } from "@site/schema";
 import { heroOnepagerManifest } from "../templates/hero-onepager/manifest";
 import { golden, stress, hostileTheme } from "../__fixtures__/index";
 import "../templates/index";   // side-effect: registers templates
@@ -240,6 +240,84 @@ describe("theming", () => {
 
     expect([...table].filter((v) => !declared.has(v))).toEqual([]);
     expect([...declared].filter((v) => !table.has(v))).toEqual([]);
+  });
+
+  /**
+   * The standing guard for the whole class of bug core.button was: a token in
+   * the rule table with no variable, a variable with no declaration, a schema
+   * field with no emission. The test above uses `golden.theme`, which supplies
+   * nearly every field explicitly — so a defaulted/prefaulted field going
+   * unpopulated wouldn't show up there even though it's exactly the failure
+   * mode that matters (a source that never specifies core.button is the
+   * COMMON case, not the exception). This one builds a theme from only the
+   * fields LayeredThemeSchema actually requires, parses it — so every
+   * .default()/.prefault() runs — and checks the same completeness property.
+   * ALL_VAR_NAMES never includes --st-tpl-*: Tier 3 is generated from
+   * `templates.{id}.{key}`, never statically listed, so it's excluded here by
+   * construction rather than by a filter.
+   */
+  it("emits every declared variable from a theme built with only the required fields", () => {
+    const minimal = LayeredThemeSchema.parse({
+      id: "minimal",
+      name: "Minimal",
+      core: {
+        colors: {
+          background: "#000", surface: "#000", primary: "#000", onPrimary: "#000",
+          secondary: "#000", text: "#000", textMuted: "#000", border: "#000",
+          overlay: "#000", success: "#000", warning: "#000", error: "#000",
+        },
+        typography: { fontFamilyBase: "sans-serif" },
+        spacing: {},
+        motion: {},
+        breakpoints: {},
+      },
+    });
+
+    const declared = new Set(Object.keys(resolveTheme({ theme: minimal, manifest }).vars));
+
+    for (const name of ALL_VAR_NAMES) {
+      expect(declared.has(name), `${name} missing from vars for a minimally-parsed theme`).toBe(true);
+    }
+  });
+
+  // The branch that just changed: BASE_CORE deliberately leaves
+  // letterSpacingWide unset, so an uppercase button on a base theme must not
+  // get 1px of tracking nobody authored. Unexercised until now — nothing else
+  // in this file builds a theme with core.button.textTransform: "uppercase".
+  describe("button letter-spacing", () => {
+    const REQUIRED_COLORS = {
+      background: "#000", surface: "#000", primary: "#000", onPrimary: "#000",
+      secondary: "#000", text: "#000", textMuted: "#000", border: "#000",
+      overlay: "#000", success: "#000", warning: "#000", error: "#000",
+    };
+
+    it("falls back to normal when letterSpacingWide is unset", () => {
+      const theme = LayeredThemeSchema.parse({
+        id: "uppercase-button", name: "Uppercase Button",
+        core: {
+          colors: REQUIRED_COLORS,
+          typography: { fontFamilyBase: "sans-serif" },
+          spacing: {}, motion: {}, breakpoints: {},
+          button: { textTransform: "uppercase" },
+        },
+      });
+
+      expect(resolveTheme({ theme, manifest }).vars["--st-button-letter-spacing"]).toBe("normal");
+    });
+
+    it("inherits letterSpacingWide when the template sets one", () => {
+      const theme = LayeredThemeSchema.parse({
+        id: "uppercase-button-wide", name: "Uppercase Button Wide",
+        core: {
+          colors: REQUIRED_COLORS,
+          typography: { fontFamilyBase: "sans-serif", letterSpacingWide: "2px" },
+          spacing: {}, motion: {}, breakpoints: {},
+          button: { textTransform: "uppercase" },
+        },
+      });
+
+      expect(resolveTheme({ theme, manifest }).vars["--st-button-letter-spacing"]).toBe("2px");
+    });
   });
 });
 

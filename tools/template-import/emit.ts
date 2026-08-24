@@ -19,10 +19,15 @@
 import { createHash } from "node:crypto";
 
 import { tokenToVar } from "@site/schema";
-import { rewriteCss,  type Substitution, type TokenizeResult } from "./css/tokenize-css.js";
+import { rewriteCss, neutralizeCoveredBackgrounds, neutralizeCoveredScrims, type Substitution, type TokenizeResult } from "./css/tokenize-css.js";
 import { TemplateAnalysis } from "./analyze.js";
 import type { MergedImport } from "./merge.js";
-import type { TemplatePreset } from "@site/schema";
+import type { PreparedBundleAsset } from "./assets.js";
+import type { TemplatePreset, TemplateManifest } from "@site/schema";
+// Reused rather than reimplemented: this is the exact resolver renderSlotted
+// runs cssBackgrounds paths through at render time, so "does this path
+// resolve" is asked the identical way here and there.
+import { resolvePath } from "../../site-platform/renderer/slotted/apply.js";
 
 // ============================================================================
 // TYPES
@@ -46,12 +51,21 @@ export interface EmitInput {
   /** Supplies cssBackgrounds — merge.ts already joined markup and CSS to find
    *  section backgrounds that live only in a ::before rule. */
   merged: MergedImport;
+  /** .generated/assets.json's bundleAssets, from step 6. Empty on a run
+   *  before `assets` has executed. */
+  bundleAssets: PreparedBundleAsset[];
 }
 
 export interface EmitResult {
   /** The stylesheet that ships. */
   css: string;
   cssHash: string;
+  /**
+   * The same object serialized into manifest.ts, before JSON.stringify. Lets
+   * a caller (emitDir's preview render) use exactly what was just computed
+   * without re-parsing the file it wrote or importing a module for it.
+   */
+  manifest: TemplateManifest;
   /** File contents, keyed by path relative to the template directory. */
   files: Record<string, string>;
   /** Paths that must not overwrite an existing file. */
@@ -89,7 +103,78 @@ export function emitTemplate(input: EmitInput): EmitResult {
     }
   }
 
-  const rewritten = rewriteCss(input.css, usable, tokenToVar);
+  // Computed once, before the manifest section builds it a second time
+  // below — the neutralization pass needs it too, and the two must agree on
+  // exactly the same covered set or SOURCE_CSS and the per-site rules could
+  // disagree about which selectors own which background.
+  const cssBackgrounds = buildCssBackgrounds(input.merged);
+  const cssScrims = buildCssScrims(input.merged);
+
+  // A cssBackgrounds path that doesn't resolve renders no background at all —
+  // silently, since renderSlotted's emitCssBackgrounds just treats a missing
+  // image as "nothing to show" (see its own `if (!image) return []`). That's
+  // correct behaviour for content genuinely left blank; it's a blocker when
+  // the path itself is wrong, because nothing distinguishes the two cases
+  // downstream. Caught the hard way on spacex-ipo: a pathFor() indexing bug
+  // sent three of four backgrounds to a neighboring section's image and the
+  // fourth off the end of the array, and every one of them rendered "as
+  // designed" until someone diffed the actual page against the source.
+  for (const bg of cssBackgrounds) {
+    if (resolvePath(input.preset.content, bg.path) === undefined) {
+      blockers.push(
+        `cssBackgrounds: "${bg.path}" (for selector "${bg.selector}") resolves to ` +
+        `undefined against the preset content — that background will render as ` +
+        `nothing, or worse, may indicate every other cssBackgrounds path is also ` +
+        `miscounted. Check pathFor()'s section indexing against preset.content.sections.`,
+      );
+    }
+  }
+
+  // Same invariant as cssBackgrounds, same pathFor() dependency, same failure
+  // mode if it drifts: a wrong index still resolves to SOME number, so a
+  // scrim silently renders at the wrong section's opacity rather than failing.
+  for (const scrim of cssScrims) {
+    const opacity = resolvePath(input.preset.content, scrim.path);
+    if (typeof opacity !== "number") {
+      blockers.push(
+        `cssScrims: "${scrim.path}" (for selector "${scrim.selector}") resolves to ` +
+        `${JSON.stringify(opacity)}, not a number — that scrim will render fully ` +
+        `opaque or not at all. Check pathFor()'s section indexing against ` +
+        `preset.content.sections.`,
+      );
+    }
+  }
+
+  // Keyed identically to what the classify pass put in AssetRef.selector —
+  // selectorsOf() produces the full selector INCLUDING any pseudo
+  // (".starship::before"), but cssBackgrounds stores selector/pseudo split
+  // (see buildCssBackgrounds below), so recovering that key is a join, not
+  // a lookup. Built from cssBackgrounds specifically, not from every asset
+  // tokenize-css classified minus orphans — orphans are path-preserved into
+  // bundleAssets and must keep resolving, and cssBackgrounds already
+  // excludes them by construction (attachBackgrounds only pushes here on a
+  // section match).
+  const covered = new Set(
+    cssBackgrounds.map((bg) => (bg.pseudo ? `${bg.selector}::${bg.pseudo}` : bg.selector)),
+  );
+
+  // NOT built from cssScrims's own selector/pseudo — those are the per-section
+  // id-based targets the per-site rule paints on (#launch::after, #ipo::after…),
+  // deliberately different from what SOURCE_CSS actually wrote (routinely a
+  // single shared rule, ".hero::after, .section::after"). Neutralizing has to
+  // match the LATTER or it silently no-ops — the exact selector-namespace trap
+  // neutralizeCoveredBackgrounds's own doc comment already warns about, hit
+  // for real here: covered from cssScrims's selectors matched nothing on the
+  // first pass through this fix, and the css hash didn't move.
+  const coveredScrims = new Set(input.merged.cssScrims.map((s) => s.sourceSelector));
+
+  const rewritten = neutralizeCoveredScrims(
+    neutralizeCoveredBackgrounds(
+      rewriteCss(input.css, usable, tokenToVar),
+      covered,
+    ),
+    coveredScrims,
+  );
   const cssHash = sha256(rewritten);
 
   // --- 2. Theme surface ----------------------------------------------------
@@ -146,8 +231,18 @@ export function emitTemplate(input: EmitInput): EmitResult {
     kind: "slotted",
     slotted: {
       ...input.spec,
+      // Overrides the draft's placeholder ("{name}@1", written at analyze
+      // time before a version exists). registerSlottedTemplate always
+      // registers under "{id}@{version}" (see emitBundle below) — leaving the
+      // draft's key in place means this manifest's sourceKey never matches
+      // what's actually registered, and getSource() throws on every render.
+      // Caught the hard way: spacex-ipo shipped with sourceKey "spacex-ipo@1"
+      // against a registration of "spacex-ipo@1.0.0".
+      sourceKey: `${input.templateId}@${input.templateVersion}`,
       sectionNodes: buildSectionNodes(input.analysis, input.preset, warnings, blockers),
-      cssBackgrounds: buildCssBackgrounds(input.merged),
+      cssBackgrounds,
+      cssScrims,
+      bundleAssets: input.bundleAssets,
       sourceHash: sha256(input.html),
 
       // Presence of this is what lifts the "usesThemeKeys must be empty"
@@ -167,6 +262,10 @@ export function emitTemplate(input: EmitInput): EmitResult {
   return {
     css: rewritten,
     cssHash,
+    // Same loose-then-cast trust the generated file itself relies on
+    // (emitManifest writes it with `as TemplateManifest`) — this isn't a
+    // stricter guarantee, just the identical object instead of a re-parse.
+    manifest: manifest as unknown as TemplateManifest,
     files: {
       "bundle.generated.ts": emitBundle(input.templateId, input.templateVersion, input.html, rewritten),
       "manifest.ts": emitManifest(manifest),
@@ -233,8 +332,13 @@ function emitBundle(id: string, version: string, html: string, css: string): str
     "//",
     "// Registered at module load so the render path stays pure: no filesystem,",
     "// no network, identical in preview and build.",
+    "//",
+    "// Relative, not \"@site/renderer/slotted\": that subpath has no entry in",
+    "// tsconfig's paths, vitest's aliases, or any package.json exports map —",
+    "// only the bare \"@site/renderer\" specifier resolves anywhere in this repo.",
+    "// The prior generated form was an import no bundler could resolve.",
     "",
-    'import { registerSlottedTemplate } from "@site/renderer/slotted";',
+    'import { registerSlottedTemplate } from "../../slotted/index";',
     "",
     `export const SOURCE_HTML = \`${escapeTemplate(html)}\`;`,
     "",
@@ -348,6 +452,25 @@ function buildCssBackgrounds(
     return {
       path: `${bg.sectionPath}.backgroundImage`,
       selector: match ? match[1]! : bg.selector,
+      pseudo: match ? (match[2] as "before" | "after") : undefined,
+    };
+  });
+}
+
+/**
+ * Same split as buildCssBackgrounds, for merge.ts's `cssScrims` — the section
+ * whose overlayOpacity this scrim rule needs, and the selector (pseudo
+ * included) to paint it on.
+ */
+function buildCssScrims(
+  merged: MergedImport,
+): Array<{ path: string; selector: string; pseudo?: "before" | "after" }> {
+  return merged.cssScrims.map((s) => {
+    const match = s.selector.match(/^(.*?)::?(before|after)$/);
+
+    return {
+      path: `${s.sectionPath}.overlayOpacity`,
+      selector: match ? match[1]! : s.selector,
       pseudo: match ? (match[2] as "before" | "after") : undefined,
     };
   });

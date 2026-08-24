@@ -43,6 +43,20 @@ export interface MergedImport {
    * instead of a slot. The tokenized path just reads content.
    */
   cssBackgrounds: Array<{ sectionPath: string; selector: string; sourceUrl: string }>;
+  /**
+   * Backgrounds whose selector matched no section — decorative, not content.
+   * Can't become an ImageAsset (nothing to attach it to), but the url() still
+   * has to resolve at render time, so step 6 promotes these to bundleAssets
+   * instead of dropping them.
+   */
+  orphanBackgrounds: Array<{ selector: string; url: string }>;
+  /**
+   * Sections whose scrim alpha (content.sections[].overlayOpacity) needs a
+   * per-site CSS rule to actually apply — see splitScrim's doc comment. Same
+   * shape as cssBackgrounds minus sourceUrl: there's no asset to download,
+   * the alpha is already in content by the time this runs.
+   */
+  cssScrims: Array<{ sectionPath: string; selector: string; sourceSelector: string }>;
   /** Every image the template needs, for the download-and-variant step. */
   pendingAssets: Array<{ sectionPath: string; sourceUrl: string }>;
   warnings: string[];
@@ -77,16 +91,36 @@ export function merge(
 
   if (overlay.color) setPath(theme, "core.colors.overlay", overlay.color);
 
-  const backgrounds = attachBackgrounds(css, doc, sectionOf, warnings);
+  // Single source of truth for analysis-order -> content-array index. Hero is
+  // excluded from content.sections[], so the two index spaces differ by one —
+  // anything that builds a `sections[N]` path has to go through this map
+  // rather than recomputing its own, which is exactly how pathFor() went
+  // wrong the first time: it was the one place deriving the index
+  // independently instead of sharing this.
+  const nonHero = analysis.sections.filter((s) => !s.isHero);
+  const contentIndexByOrder = new Map(nonHero.map((section, index) => [section.order, index]));
+
+  const backgrounds = attachBackgrounds(css, doc, sectionOf, contentIndexByOrder, warnings);
+
+  // Same join as cssBackgrounds — attach each scrim rule to the section it
+  // covers via the shared pathFor(), rather than deriving sections[N] a
+  // second, independent way.
+  const cssScrims = overlay.entries.map(({ section, selector, sourceSelector }) => ({
+    sectionPath: pathFor(section, contentIndexByOrder),
+    selector,
+    sourceSelector,
+  }));
 
   checkMediaScoped(css.substitutions, warnings);
 
-  const content = buildContent(analysis, overlay.alphaBySection, backgrounds.bySection);
+  const content = buildContent(analysis, nonHero, overlay.alphaBySection, backgrounds.bySection);
 
   return {
     theme,
     content,
     cssBackgrounds: backgrounds.cssBackgrounds,
+    orphanBackgrounds: backgrounds.orphanBackgrounds,
+    cssScrims,
     pendingAssets: backgrounds.cssBackgrounds.map(({ sectionPath, sourceUrl }) => ({
       sectionPath,
       sourceUrl,
@@ -102,6 +136,28 @@ export function merge(
 interface ScrimResult {
   color?: string;
   alphaBySection: Map<AnalyzedSection, number>;
+  /**
+   * Section + a selector that reaches ONLY that section, pseudo included, for
+   * cssScrims. Deliberately NOT the scrim rule's own selector: sources
+   * routinely group the scrim under one shared rule
+   * (`.hero::after, .section::after { background: rgba(...) }`) because
+   * visually it's one treatment — but a per-site rule needs to set each
+   * section's OWN opacity, and a shared class can't express that; every
+   * section sharing it would collide on the same CSS rule. `section.selector`
+   * is guaranteed unique (it's how sectionOf maps one element to one
+   * section), which a background-image rule usually already is because
+   * images differ per section — scrims need the same guarantee restated
+   * explicitly rather than borrowed from the source's own selector.
+   *
+   * `sourceSelector` is kept alongside it for the OTHER consumer: neutralizing
+   * SOURCE_CSS's own scrim declaration needs the selector text as CSS
+   * actually wrote it (".hero::after" / ".section::after", shared across
+   * every section using it), not the per-section one — a covered set built
+   * from `selector` would never match the shared rule and neutralization
+   * would silently no-op, exactly the failure mode neutralizeCoveredBackgrounds's
+   * own doc comment warns about.
+   */
+  entries: Array<{ section: AnalyzedSection; selector: string; sourceSelector: string }>;
 }
 
 /**
@@ -120,6 +176,7 @@ function splitScrim(
 ): ScrimResult {
   const scrims = substitutions.filter((s) => s.token === "core.colors.overlay");
   const alphaBySection = new Map<AnalyzedSection, number>();
+  const entries: ScrimResult["entries"] = [];
 
   let color: string | undefined;
 
@@ -140,8 +197,15 @@ function splitScrim(
     }
     color ??= parsed.color;
 
+    const pseudo = scrim.selector.match(/::(before|after)$/)?.[1];
+
     for (const section of sectionsFor(scrim.selector, doc, sectionOf)) {
       alphaBySection.set(section, parsed.alpha);
+      entries.push({
+        section,
+        selector: pseudo ? `${section.selector}::${pseudo}` : section.selector,
+        sourceSelector: scrim.selector,
+      });
     }
   }
 
@@ -152,7 +216,7 @@ function splitScrim(
     );
   }
 
-  return { color, alphaBySection };
+  return { color, alphaBySection, entries };
 }
 
 /**
@@ -211,6 +275,7 @@ const toHex = (r: number, g: number, b: number): string =>
 interface BackgroundResult {
   bySection: Map<AnalyzedSection, string>;
   cssBackgrounds: MergedImport["cssBackgrounds"];
+  orphanBackgrounds: MergedImport["orphanBackgrounds"];
 }
 
 /**
@@ -225,10 +290,12 @@ function attachBackgrounds(
   css: TokenizeResult,
   doc: El,
   sectionOf: Map<El, AnalyzedSection>,
+  contentIndexByOrder: Map<number, number>,
   warnings: string[],
 ): BackgroundResult {
   const bySection = new Map<AnalyzedSection, string>();
   const cssBackgrounds: MergedImport["cssBackgrounds"] = [];
+  const orphanBackgrounds: MergedImport["orphanBackgrounds"] = [];
 
   for (const asset of css.assets) {
     const sections = sectionsFor(asset.selector, doc, sectionOf);
@@ -236,10 +303,14 @@ function attachBackgrounds(
     if (sections.length === 0) {
       // Not necessarily an error — a decorative background on a non-section
       // element is legitimate — but it won't be editable, so it's worth saying.
+      // It still needs to resolve at render time, though: step 6 promotes it
+      // to a bundleAsset rather than leaving the source's relative url() as a
+      // dead reference.
       warnings.push(
         `Background "${asset.url}" at ${asset.selector} matched no section; ` +
-        `it will ship as part of the stylesheet and won't be customisable.`,
+        `it will be bundled as a static asset and won't be customisable.`,
       );
+      orphanBackgrounds.push({ selector: asset.selector, url: asset.url });
       continue;
     }
 
@@ -254,7 +325,7 @@ function attachBackgrounds(
 
       bySection.set(section, asset.url);
       cssBackgrounds.push({
-        sectionPath: pathFor(section),
+        sectionPath: pathFor(section, contentIndexByOrder),
         selector: asset.selector,
         sourceUrl: asset.url,
       });
@@ -276,7 +347,7 @@ function attachBackgrounds(
     void el;
   }
 
-  return { bySection, cssBackgrounds };
+  return { bySection, cssBackgrounds, orphanBackgrounds };
 }
 
 // ============================================================================
@@ -292,11 +363,16 @@ function attachBackgrounds(
  */
 function buildContent(
   analysis: TemplateAnalysis,
+  nonHero: AnalyzedSection[],
   alphaBySection: Map<AnalyzedSection, number>,
   backgroundBySection: Map<AnalyzedSection, string>,
 ): Record<string, unknown> {
   const hero = analysis.sections.find((s) => s.isHero);
-  const rest = analysis.sections.filter((s) => !s.isHero);
+  // Passed in rather than re-filtered: this array's iteration order IS the
+  // content.sections[] index space — pathFor() builds cssBackgrounds paths
+  // against the identical array (via contentIndexByOrder) so the two can't
+  // silently disagree the way pathFor() and this used to.
+  const rest = nonHero;
 
   const appearance = (section: AnalyzedSection) => ({
     overlayOpacity: alphaBySection.get(section) ?? null,
@@ -422,9 +498,36 @@ function sectionsFor(
   return out;
 }
 
-/** Content path, with the hero excluded from `sections` numbering. */
-function pathFor(section: AnalyzedSection): string {
-  return section.isHero ? "hero" : `sections[${section.order}]`;
+/**
+ * Content path, with the hero excluded from `sections` numbering.
+ *
+ * `section.order` is the analysis-level index and counts the hero section
+ * (hero=0, first real section=1, ...), but `content.sections[]` excludes the
+ * hero and restarts at 0 — so `sections[${section.order}]` is off by one for
+ * every non-hero section, and out of bounds for the last one.
+ *
+ * `contentIndexByOrder` is merge()'s single computation of that mapping —
+ * built once from the same `nonHero` filter buildContent() consumes, so
+ * every `sections[N]` path in this file's output agrees with every other.
+ * This function does not re-derive the index itself, on purpose: that's
+ * exactly how it went wrong the first time.
+ */
+function pathFor(section: AnalyzedSection, contentIndexByOrder: Map<number, number>): string {
+  if (section.isHero) return "hero";
+
+  const index = contentIndexByOrder.get(section.order);
+  if (index === undefined) {
+    // A section pathFor() is asked about but that never made it into
+    // content.sections[] — fail loudly. The alternative is a path that
+    // resolves to undefined at render time and ships silently, which is
+    // exactly the bug this replaced.
+    throw new Error(
+      `No content index for section order=${section.order} (${section.selector}) — ` +
+      `it isn't hero and isn't in the non-hero content list.`,
+    );
+  }
+
+  return `sections[${index}]`;
 }
 
 function setPath(root: Record<string, unknown>, path: string, value: unknown): void {

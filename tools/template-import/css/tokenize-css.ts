@@ -18,6 +18,7 @@
 // ============================================================================
 
 import * as csstree from "css-tree";
+import { HeadingUsage } from "../analyze";
 
 // ============================================================================
 // TYPES
@@ -79,7 +80,7 @@ export interface TokenizeOptions {
    * reference template `h3` appears only as a button label, and including it
    * throws the fit off by 24%.
    */
-  headingUsage?: Record<string, number>;
+  headingUsage?: Record<string, HeadingUsage>;
   /** Origins permitted in @import and url(). Empty means same-origin only. */
   allowedOrigins?: string[];
 }
@@ -166,6 +167,18 @@ const STRUCTURAL = new Set([
   "background-size", "background-position", "border", "padding",
 ]);
 
+/**
+ * Tokens whose value legitimately comes from inside a media query. Everything
+ * else, media-scoped, describes a breakpoint override that has no token — and
+ * writing it to the desktop token silently replaces the desktop value.
+ *
+ * Exported so buildThemeDraft (this file) and rebuildTheme (pipeline.ts,
+ * the retoken-override path) share one set rather than two independently
+ * maintained copies — the same shape the classify/rewrite property mismatch
+ * was, just for a filter instead of a lookup.
+ */
+export const MOBILE_SCOPED = new Set(["semantic.mobileMenuBackground"]);
+
 // ============================================================================
 // ENTRY POINT
 // ============================================================================
@@ -185,7 +198,7 @@ export function tokenizeCss(css: string, options: TokenizeOptions = {}): Tokeniz
   let mobileBaseFontSize: number | undefined;
   let breakpointMd: string | undefined;
 
-  const seenSelectors = new Map<string, number>();
+  const seenDeclarations = new Map<string, number>();
 
   csstree.walk(ast, {
     visit: "Rule",
@@ -199,10 +212,15 @@ export function tokenizeCss(css: string, options: TokenizeOptions = {}): Tokeniz
       }
 
       for (const selector of selectorsOf(rule)) {
-        seenSelectors.set(selector, (seenSelectors.get(selector) ?? 0) + 1);
-
         for (const decl of declarationsOf(rule)) {
-          for (const { property, value } of expand(decl)) {
+            for (const { property, value } of expand(decl).parts) {
+
+            // Keyed on selector + media + property. Keying on selector alone counts
+            // a desktop rule and its mobile override as a duplicate, which is just
+            // ordinary responsive CSS — on the reference template that produced eight
+            // false findings out of twelve.
+            const declKey = `${selector}|${media ?? ""}|${property}`;
+            seenDeclarations.set(declKey, (seenDeclarations.get(declKey) ?? 0) + 1);
             // --- background images are assets, not tokens ---
             const url = property === "background-image"
               ? value.match(/url\(\s*['"]?([^'")]+)/)?.[1]
@@ -257,11 +275,16 @@ export function tokenizeCss(css: string, options: TokenizeOptions = {}): Tokeniz
   findings.push(...checkImports(ast, options.allowedOrigins ?? []));
   findings.push(...checkNoOpHover(substitutions));
   findings.push(...checkMissingFonts(substitutions, ast));
+  findings.push(...detectTokenCollisions(substitutions));
 
-  for (const [selector, count] of seenSelectors) {
-    if (count > 1) {
-      findings.push(`"${selector}" is declared ${count} times — later rules may be dead or contradictory.`);
-    }
+  for (const [key, count] of seenDeclarations) {
+    if (count === 1) continue;
+
+    const [selector, media, property] = key.split("|");
+    findings.push(
+        `${selector}${media ? ` @media ${media}` : ""} declares "${property}" ` +
+        `${count} times — the earlier one is dead.`,
+    );
   }
 
   const typeScale = fitTypeScale(headingSizes, baseFontSize ?? 16, options.headingUsage);
@@ -296,7 +319,7 @@ export function tokenizeCss(css: string, options: TokenizeOptions = {}): Tokeniz
 function fitTypeScale(
   sizes: Map<string, number>,
   base: number,
-  usage?: Record<string, number>,
+  usage?: Record<string, HeadingUsage>,
 ): TypeScaleFit | undefined {
   if (sizes.size === 0) return undefined;
 
@@ -305,9 +328,12 @@ function fitTypeScale(
   // from ~24% to ~1.5%.
   const excluded: string[] = [];
   const entries = [...sizes.entries()].filter(([tag]) => {
-    if (usage && (usage[tag] ?? 0) === 1) { excluded.push(tag); return false; }
-    return true;
-  });
+    if (usage && (usage[tag]?.structural ?? 1) === 0) {
+      excluded.push(tag);
+      return false;
+    }
+  return true;
+});
 
   if (entries.length === 0) return undefined;
 
@@ -367,11 +393,10 @@ function buildThemeDraft(
 ): Record<string, unknown> {
   const draft: Record<string, unknown> = {};
 
-  for (const sub of substitutions) {
-    // Tier 3 paths carry a `$` placeholder for the template id; the authoring
-    // script substitutes it once the template is named.
+    for (const sub of substitutions) {
+    if (sub.media && !MOBILE_SCOPED.has(sub.token)) continue;
     setPath(draft, sub.token, normalizeValue(sub.token, sub.property, sub.original));
-  }
+    }
 
   if (typeScale) {
     setPath(draft, "core.typography.baseFontSize", typeScale.baseFontSize);
@@ -385,6 +410,57 @@ function buildThemeDraft(
   }
 
   return draft;
+}
+
+/**
+ * Two or more substitutions writing the SAME token with DIFFERING values.
+ * buildThemeDraft's (and rebuildTheme's, in pipeline.ts) last-write-wins loop
+ * resolves this silently, by stylesheet order — which is arbitrary. This is
+ * how the h1/h2 lineHeightHeading collapse (source authored 1.05 and 1.1)
+ * stayed invisible: whichever declaration happened to come last in source
+ * order won, and nothing said so.
+ *
+ * Filtered the same way buildThemeDraft's loop is (media-scoped, non-
+ * MOBILE_SCOPED substitutions never get written at all) — otherwise this
+ * would flag pairs that were never actually competing for the token.
+ *
+ * A collapse isn't inherently wrong — three arbitrary letter-spacing values
+ * legitimately reducing to one token is fine, sources do this constantly —
+ * the point is making the collapse visible for a reviewer to accept or
+ * reject, not deciding it silently by rule order.
+ */
+export function detectTokenCollisions(substitutions: Substitution[]): string[] {
+  const applicable = substitutions.filter((sub) => !sub.media || MOBILE_SCOPED.has(sub.token));
+
+  const byToken = new Map<string, Substitution[]>();
+  for (const sub of applicable) {
+    const list = byToken.get(sub.token) ?? [];
+    list.push(sub);
+    byToken.set(sub.token, list);
+  }
+
+  const findings: string[] = [];
+
+  for (const [token, subs] of byToken) {
+    const distinctValues = new Set(subs.map((s) => s.original.trim()));
+    if (distinctValues.size <= 1) continue;
+
+    // Order matches buildThemeDraft's iteration order (substitutions, as
+    // classified) — the last one in that order is the one setPath leaves
+    // standing.
+    const winner = subs[subs.length - 1];
+    const competitors = subs
+      .map((s) => `${s.selector} { ${s.property}: ${s.original} }`)
+      .join(", ");
+
+    findings.push(
+      `${token} is written by ${subs.length} declarations with different values ` +
+      `— ${competitors}. Resolution is stylesheet order, not intent: ` +
+      `"${winner.original}" (${winner.selector}) was kept, the rest were discarded.`,
+    );
+  }
+
+  return findings;
 }
 
 /**
@@ -502,6 +578,24 @@ function checkMissingFonts(substitutions: Substitution[], ast: csstree.CssNode):
  * `tokenToVar` must agree exactly with the emission in resolveTheme; import it
  * from the renderer rather than reimplementing, or a rename silently produces
  * CSS referencing variables nothing declares.
+ *
+ * classify() (tokenizeCss, above) keys substitutions by the property `expand()`
+ * produces, which for a shorthand is the LONGHAND (`background: #000` becomes
+ * a substitution under `background-color`). This walk looks declarations up by
+ * that same expansion, or a substitution built from shorthand silently never
+ * matches — the bug findUnrewritten below exists to catch.
+ *
+ * Rewriting the shorthand declaration itself would mean splicing a var() into
+ * one slot of a multi-part value (`background: url(x) center/cover no-repeat`)
+ * without disturbing the rest — fragile, and wrong the moment a source pairs a
+ * color with anything expand() doesn't also capture. So this only ever
+ * replaces a declaration outright when `expand()` accounts for the ENTIRE
+ * value (`complete`): then it's safe to drop the shorthand and emit the
+ * longhand(s) instead, each var()-wrapped where a substitution exists and left
+ * as its literal otherwise. Anything incomplete (`border: 2px solid #fff` —
+ * expand only ever captures the color) is left untouched; the substitution
+ * stays classified but unapplied, and findUnrewritten / verify's untokenized
+ * gate is what surfaces that rather than this function pretending otherwise.
  */
 export function rewriteCss(
   css: string,
@@ -519,13 +613,191 @@ export function rewriteCss(
       for (const selector of selectorsOf(rule)) {
         csstree.walk(rule.block, {
           visit: "Declaration",
-          enter(decl: csstree.Declaration) {
-            const sub = index.get(`${selector}|${decl.property}`);
-            if (!sub) return;
+          enter(decl: csstree.Declaration, item, list) {
+            const raw = { property: decl.property, value: csstree.generate(decl.value).trim() };
+            const { parts, complete } = expand(raw);
 
-            decl.value = csstree.parse(`var(${tokenToVar(sub.token)}, ${sub.original})`, {
-              context: "value",
-            }) as csstree.Value;
+            // Not a shorthand expand() recognises — same single-property
+            // lookup as before expand() existed.
+            if (parts.length === 1 && parts[0].property === decl.property) {
+              const sub = index.get(`${selector}|${decl.property}`);
+              if (!sub) return;
+
+              decl.value = csstree.parse(`var(${tokenToVar(sub.token)}, ${sub.original})`, {
+                context: "value",
+              }) as csstree.Value;
+              return;
+            }
+
+            if (!complete) return;
+
+            const subs = parts.map((p) => index.get(`${selector}|${p.property}`));
+            if (subs.every((s) => s === undefined)) return;
+
+            const declText = parts
+              .map((p, i) => {
+                const sub = subs[i];
+                const value = sub ? `var(${tokenToVar(sub.token)}, ${sub.original})` : p.value;
+                return `${p.property}: ${value}`;
+              })
+              .join("; ");
+
+            const replacement = (
+              csstree.parse(declText, { context: "declarationList" }) as csstree.DeclarationList
+            ).children;
+
+            list.replace(item, replacement);
+          },
+        });
+      }
+    },
+  });
+
+  return csstree.generate(ast);
+}
+
+/**
+ * Substitutions classify() produced that `rewritten` doesn't actually apply —
+ * declared where classify (expand + RULES) and rewrite (rewriteCss, above)
+ * both live, so the two are checked against each other directly rather than
+ * only discovered downstream by rendering the page and diffing computed
+ * styles (verify.ts's checkTokenizationCoverage, which delegates here after
+ * pulling the <style> blocks out of a rendered document).
+ *
+ * A non-empty result is not automatically a bug: a shorthand expand() can't
+ * fully account for (`border: 2px solid #fff` — width and style have nowhere
+ * to go) is correctly classified but deliberately left unrewritten by design,
+ * see rewriteCss's comment. This function doesn't distinguish that case from
+ * a genuine regression — it reports disagreement; the caller (verify's
+ * untokenized gate) decides whether disagreement here is acceptable.
+ *
+ * `exemptTokens` covers the OTHER deliberate case: a covered scrim
+ * (core.colors.overlay) is neutralized to `transparent` on purpose — see
+ * neutralizeCoveredScrims — because the real value comes from a per-site
+ * color-mix() rule (slotted/index.ts's computeCssScrimRules), not a var().
+ * That mechanism has its own, separate proof (the computed-style diff
+ * against source), so a substitution whose token is exempt here isn't
+ * unchecked — it's checked somewhere else, the same way a covered
+ * background-image is validated by backgroundIdentityRule rather than by
+ * this function.
+ */
+export function findUnrewritten(
+  rewritten: string,
+  substitutions: Substitution[],
+  exemptTokens: ReadonlySet<string> = new Set(),
+): Substitution[] {
+  const declared = new Map<string, string>();
+
+  csstree.walk(csstree.parse(rewritten), {
+    visit: "Rule",
+    enter(rule: csstree.Rule) {
+      for (const selector of selectorsOf(rule)) {
+        csstree.walk(rule.block, {
+          visit: "Declaration",
+          enter(decl: csstree.Declaration) {
+            declared.set(`${selector}|${decl.property}`, csstree.generate(decl.value));
+          },
+        });
+      }
+    },
+  });
+
+  return substitutions.filter((sub) => {
+    if (exemptTokens.has(sub.token)) return false;
+
+    const value = declared.get(`${sub.selector}|${sub.property}`);
+    return !value?.includes("var(--st-");
+  });
+}
+
+/**
+ * Replace `background-image` with `none` for every selector whose background
+ * is now covered by a per-site cssBackgrounds rule.
+ *
+ * SOURCE_CSS's own url() was never actually winning — the per-site rule
+ * already outranks it (same specificity, later in source order, see
+ * slotted/index.ts's "8.5. Styles" comment) — so this doesn't change what
+ * renders. It stops shipping a literal that only worked by accident of
+ * cascade order and would silently reappear the moment the override didn't
+ * land where expected.
+ *
+ * `covered` must be keyed identically to what classify() put in `AssetRef.selector`
+ * — the FULL selector text including any pseudo (".starship::before"), from
+ * the same selectorsOf() both passes share. A bare-selector key matches
+ * nothing here and this becomes a silent no-op.
+ *
+ * Orphan backgrounds (no section match) must never appear in `covered` —
+ * they're path-preserved into bundleAssets and still need their literal
+ * url() to resolve. Callers should build `covered` from cssBackgrounds
+ * specifically (which excludes orphans by construction), not from every
+ * asset minus orphans.
+ */
+export function neutralizeCoveredBackgrounds(css: string, covered: Set<string>): string {
+  if (covered.size === 0) return css;
+
+  const ast = csstree.parse(css);
+
+  csstree.walk(ast, {
+    visit: "Rule",
+    enter(rule: csstree.Rule) {
+      for (const selector of selectorsOf(rule)) {
+        if (!covered.has(selector)) continue;
+
+        csstree.walk(rule.block, {
+          visit: "Declaration",
+          enter(decl: csstree.Declaration) {
+            if (decl.property !== "background-image") return;
+
+            decl.value = csstree.parse("none", { context: "value" }) as csstree.Value;
+          },
+        });
+      }
+    },
+  });
+
+  return csstree.generate(ast);
+}
+
+/**
+ * Replace `background-color` with `transparent` for every scrim selector now
+ * covered by a per-site cssScrims rule (see slotted/index.ts's
+ * computeCssScrimRules) — the same "dead weight" argument as
+ * neutralizeCoveredBackgrounds, for the same reason: rewriteCss's var()
+ * substitution for a scrim resolves to a flat, alpha-less colour
+ * (core.colors.overlay carries no opacity — see splitScrim in merge.ts), so
+ * once the per-site color-mix() rule is authoritative for a selector, the
+ * rewritten declaration underneath it is not just redundant but WRONG if
+ * anything ever reads it directly (a browser dev tool, a screenshot diff
+ * against the tokenized declaration instead of the cascade's winner).
+ *
+ * `transparent`, not `none` — background-color has no `none` keyword in its
+ * grammar; unlike background-image, "empty" here means the colour underneath
+ * shows through unmodified, which for a covered scrim is exactly the source
+ * document's own background, correct until the per-site rule paints over it.
+ *
+ * Orphan scrims (no section match, so no cssScrims entry) must never appear
+ * in `covered` — same reasoning as orphan backgrounds, though slotted has no
+ * fallback story for one yet: an orphan scrim's alpha was never captured by
+ * splitScrim (nothing to attach it to), so rewriteCss's var() substitution
+ * is the only rendering it gets, flat colour and all.
+ */
+export function neutralizeCoveredScrims(css: string, covered: Set<string>): string {
+  if (covered.size === 0) return css;
+
+  const ast = csstree.parse(css);
+
+  csstree.walk(ast, {
+    visit: "Rule",
+    enter(rule: csstree.Rule) {
+      for (const selector of selectorsOf(rule)) {
+        if (!covered.has(selector)) continue;
+
+        csstree.walk(rule.block, {
+          visit: "Declaration",
+          enter(decl: csstree.Declaration) {
+            if (decl.property !== "background-color") return;
+
+            decl.value = csstree.parse("transparent", { context: "value" }) as csstree.Value;
           },
         });
       }
@@ -539,7 +811,11 @@ export function rewriteCss(
 // HELPERS
 // ============================================================================
 
-function selectorsOf(rule: csstree.Rule): string[] {
+// Exported so verify.ts's tokenization-coverage check walks CSS with the
+// identical selector normalization the classify pass and rewriteCss already
+// share — a second implementation could disagree on formatting and silently
+// stop matching, the same class of bug pathFor() had.
+export function selectorsOf(rule: csstree.Rule): string[] {
   return csstree
     .generate(rule.prelude)
     .split(",")
@@ -560,6 +836,23 @@ function declarationsOf(rule: csstree.Rule): Array<{ property: string; value: st
   return out;
 }
 
+interface ExpandedPart {
+  property: string;
+  value: string;
+}
+
+interface ExpandResult {
+  parts: ExpandedPart[];
+  /**
+   * Whether `parts` accounts for the entire source value, with nothing left
+   * over. Only when this is true is it safe for rewriteCss to drop the
+   * shorthand and emit `parts` as standalone longhands — otherwise whatever
+   * expand() didn't capture (a border's width and style, a background's
+   * position/size/repeat...) would be silently discarded.
+   */
+  complete: boolean;
+}
+
 /**
  * Minimal shorthand expansion — only the longhands the rule table names.
  *
@@ -567,34 +860,54 @@ function declarationsOf(rule: csstree.Rule): Array<{ property: string; value: st
  * matches; `border-top: 1px solid #222` must yield `border-top-color` or the
  * footer divider is missed.
  */
-function expand(decl: { property: string; value: string }): Array<{ property: string; value: string }> {
+function expand(decl: { property: string; value: string }): ExpandResult {
   const { property, value } = decl;
 
   if (property === "background") {
-    const color = value.match(/(#[0-9a-f]{3,8}|rgba?\([^)]+\)|hsla?\([^)]+\)|\b(?:transparent|white|black)\b)/i)?.[1];
-    const url = value.match(/url\([^)]+\)/)?.[0];
-    return [
-      ...(color ? [{ property: "background-color", value: color }] : []),
-      ...(url ? [{ property: "background-image", value: url }] : []),
+    const colorMatch = value.match(/(#[0-9a-f]{3,8}|rgba?\([^)]+\)|hsla?\([^)]+\)|\b(?:transparent|white|black)\b)/i);
+    const urlMatch = value.match(/url\([^)]+\)/);
+    const parts: ExpandedPart[] = [
+      ...(colorMatch ? [{ property: "background-color", value: colorMatch[1] }] : []),
+      ...(urlMatch ? [{ property: "background-image", value: urlMatch[0] }] : []),
     ];
+    if (parts.length === 0) return { parts: [decl], complete: false };
+
+    const leftover = [colorMatch?.[0], urlMatch?.[0]]
+      .filter((m): m is string => Boolean(m))
+      .reduce((v, m) => v.replace(m, ""), value)
+      .trim();
+    return { parts, complete: leftover.length === 0 };
   }
 
   if (/^border(-top|-right|-bottom|-left)?$/.test(property)) {
-    const color = value.match(/(#[0-9a-f]{3,8}|rgba?\([^)]+\)|\b(?:transparent|white|black)\b)/i)?.[1];
-    return color ? [{ property: `${property}-color`, value: color }] : [];
+    const colorMatch = value.match(/(#[0-9a-f]{3,8}|rgba?\([^)]+\)|\b(?:transparent|white|black)\b)/i);
+    if (!colorMatch) return { parts: [decl], complete: false };
+
+    const leftover = value.replace(colorMatch[0], "").trim();
+    return {
+      parts: [{ property: `${property}-color`, value: colorMatch[1] }],
+      complete: leftover.length === 0,
+    };
   }
 
   if (property === "padding" || property === "margin") {
     const parts = value.split(/\s+/);
     if (parts.length === 2) {
-      return [
-        { property: `${property}-block`, value: parts[0] },
-        { property: `${property}-inline`, value: parts[1] },
-      ];
+      // A 2-value shorthand IS exactly its two longhands (top/bottom,
+      // left/right) — nothing is left over by construction.
+      return {
+        parts: [
+          { property: `${property}-block`, value: parts[0] },
+          { property: `${property}-inline`, value: parts[1] },
+        ],
+        complete: true,
+      };
     }
   }
 
-  return [decl];
+  // Not a shorthand this function decomposes — already at whatever property
+  // name it's going to be looked up under, so "complete" is moot.
+  return { parts: [decl], complete: true };
 }
 
 const matches = (pattern: string | RegExp, selector: string): boolean =>

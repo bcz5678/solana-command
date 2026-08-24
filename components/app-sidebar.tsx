@@ -38,7 +38,8 @@ import {
     KeyRound,
     Repeat,
     GitBranch,
-    FileBracesCornerIcon
+    FileBracesCornerIcon,
+    PackagePlus
 } from "lucide-react"
 import { RelayStatusIndicator } from "@/components/wss/relay-status-indicator"
 
@@ -183,7 +184,18 @@ export function AppSidebar() {
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-               <SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
+                  asChild
+                >
+                  <Link href="/protected/tokens/grapesjs">
+                    <FileBracesCornerIcon />
+                    <span>GrapesJS</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
                 <SidebarMenuButton
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
@@ -191,6 +203,17 @@ export function AppSidebar() {
                   <Link href="/protected/dev/sites">
                     <FileBracesCornerIcon />
                     <span>Site Admin</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+               <SidebarMenuItem>
+                <SidebarMenuButton
+                  className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
+                  asChild
+                >
+                  <Link href="/protected/tokens/vendor-registry">
+                    <PackagePlus />
+                    <span>Vendor Registry</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
