@@ -2,19 +2,18 @@
 
 import { useState, useEffect, useMemo, Fragment } from "react";
 import type { WalletRecord } from "@/lib/types/wallet";
-import { lamportsStringToBN, lamportsBNToSolDisplay } from "@/lib/lamports";
+import { lamportsStringToBN, lamportsBNToSolDisplay, lamportsBNToSolNumber } from "@/lib/lamports";
 import { Button } from "@/components/ui/button";
 import { FieldLabel } from "@/components/ui/field";
 import {
-    Select,
-    SelectContent,
-    SelectGroup,
-    SelectItem,
-    SelectLabel,
-    SelectSeparator,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
+    DropdownMenu,
+    DropdownMenuCheckboxItem,
+    DropdownMenuContent,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ChevronDown } from "lucide-react";
 import {
     Dialog,
     DialogContent,
@@ -34,6 +33,18 @@ import { Copy, ExternalLink } from "lucide-react";
 
 type WalletTypeRow = { id: string; name: string };
 
+const usdFormatter = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+})
+
+function formatUsd(sol: number, solUsdPrice: number | null): string | null {
+    if (solUsdPrice == null) return null
+    return usdFormatter.format(sol * solUsdPrice)
+}
+
 type WalletGroup = {
     id: string
     name: string
@@ -43,15 +54,146 @@ type WalletGroup = {
 
 type TransferStatus = 'pending' | 'loading' | 'success' | 'error'
 
-type PendingTransfer = {
-    senderWalletId:  string
-    senderPublicKey: string
-    senderLabel:     string | null
-    receivers:       { walletId: string; publicKey: string; label: string | null; amount: string }[]
+type PreviewPhase = 'calculating' | 'ready' | 'executing' | 'done'
+
+type FundingLeg = {
+    id:                string // `${senderWalletId}:${receiverWalletId}` — unique per (sender, receiver) pair
+    senderWalletId:    string
+    senderPublicKey:   string
+    senderLabel:       string | null
+    receiverWalletId:  string
+    receiverPublicKey: string
+    receiverLabel:     string | null
+    amountSOL:         number
+}
+
+// A small SOL buffer reserved per sender per potential leg, so the plan doesn't
+// assume a sender's entire balance is spendable (base tx fees eat into it).
+const RESERVE_PER_LEG_SOL = 0.00001
+
+/**
+ * Assigns each receiver to exactly ONE sender wherever a single sender can
+ * actually cover it — never split across multiple senders. Splitting every
+ * receiver across every sender would create a complete bipartite link
+ * between all senders and all receivers, which is the clearest possible
+ * clustering signal (co-spend / common-recipient heuristics) and would
+ * prove the senders are related — worse than a single funding wallet, not
+ * better.
+ *
+ * This does balance-aware greedy load-balancing (largest-amount receivers
+ * placed first): each receiver goes whole to whichever eligible sender is
+ * currently least utilized relative to its own capacity, where "eligible"
+ * means that sender has enough REMAINING balance left to cover it — a
+ * sender that's low on SOL is excluded from receivers it can't actually
+ * afford, not just deprioritized. Only when no single sender has enough
+ * left for a given receiver does it fall back to splitting that one
+ * receiver across the senders with the most remaining capacity.
+ */
+function computeBalancedFundingAssignment(
+    senders: WalletRecord[],
+    receivers: { wallet: WalletRecord; amountSOL: number }[],
+): { legs: FundingLeg[]; totalNeededSol: number; totalCapacitySol: number } {
+    const totalNeededSol = receivers.reduce((s, r) => s + r.amountSOL, 0)
+    if (senders.length === 0 || receivers.length === 0) {
+        return { legs: [], totalNeededSol, totalCapacitySol: 0 }
+    }
+
+    const reservePerSender = receivers.length * RESERVE_PER_LEG_SOL
+    const capacities = senders.map((s) => {
+        const balSol = s.solana_balance_in_lamports ? lamportsBNToSolNumber(s.solana_balance_in_lamports) : 0
+        return Math.max(balSol - reservePerSender, 0)
+    })
+    const totalCapacitySol = capacities.reduce((a, b) => a + b, 0)
+    // No balance data for any sender at all — weight everyone equally by count instead.
+    const weights = totalCapacitySol > 0 ? capacities : senders.map(() => 1)
+
+    const assigned  = senders.map(() => 0) // for the utilization ratio (balancing signal)
+    const remaining = [...capacities]       // actual spendable SOL left per sender
+    // Largest-first (LPT heuristic) keeps the final per-sender totals close to balanced,
+    // and means any receiver too big for a single sender gets caught early, while capacity
+    // still remains elsewhere to split it.
+    const sortedReceivers = [...receivers].sort((a, b) => b.amountSOL - a.amountSOL)
+
+    function makeLeg(senderIdx: number, r: { wallet: WalletRecord; amountSOL: number }, amountSOL: number): FundingLeg {
+        const s = senders[senderIdx]
+        return {
+            id: `${s.id}:${r.wallet.id}`,
+            senderWalletId: s.id,
+            senderPublicKey: s.public_key,
+            senderLabel: s.label,
+            receiverWalletId: r.wallet.id,
+            receiverPublicKey: r.wallet.public_key,
+            receiverLabel: r.wallet.label,
+            amountSOL,
+        }
+    }
+
+    const legs: FundingLeg[] = []
+    for (const r of sortedReceivers) {
+        // Prefer a single sender that can fully cover this receiver, picking the
+        // least-utilized one among those actually able to afford it.
+        let pick = -1
+        let pickRatio = Infinity
+        for (let i = 0; i < senders.length; i++) {
+            if (remaining[i] < r.amountSOL) continue
+            const ratio = weights[i] > 0 ? assigned[i] / weights[i] : Infinity
+            if (ratio < pickRatio) {
+                pickRatio = ratio
+                pick = i
+            }
+        }
+
+        if (pick !== -1) {
+            assigned[pick]  += r.amountSOL
+            remaining[pick] -= r.amountSOL
+            legs.push(makeLeg(pick, r, r.amountSOL))
+            continue
+        }
+
+        // No single sender can cover it — split just this receiver across whichever
+        // senders have the most remaining capacity, filling largest-first. Tracks the
+        // leg index per sender so a later top-up (see below) merges into it instead of
+        // pushing a second leg with the same sender+receiver id.
+        const order = senders.map((_, i) => i).sort((a, b) => remaining[b] - remaining[a])
+        const legIndexForSender = new Map<number, number>()
+        let amountLeft = r.amountSOL
+        for (const i of order) {
+            if (amountLeft <= 0) break
+            const take = Math.min(remaining[i], amountLeft)
+            if (take <= 0) continue
+            assigned[i]  += take
+            remaining[i] -= take
+            legs.push(makeLeg(i, r, take))
+            legIndexForSender.set(i, legs.length - 1)
+            amountLeft -= take
+        }
+        if (amountLeft > 0) {
+            // Combined capacity genuinely can't cover this receiver — pile the shortfall
+            // onto whichever sender already took the biggest slice above (merged, not a
+            // duplicate leg) so it's visible in the preview rather than silently dropped;
+            // totalCapacitySol < totalNeededSol also warns on this case.
+            const fallbackIdx = order[0]
+            const existingLegIdx = legIndexForSender.get(fallbackIdx)
+            if (existingLegIdx !== undefined) {
+                legs[existingLegIdx].amountSOL += amountLeft
+            } else {
+                legs.push(makeLeg(fallbackIdx, r, amountLeft))
+            }
+        }
+    }
+    return { legs, totalNeededSol, totalCapacitySol }
 }
 
 function maskPubKey(key: string) {
     return `${key.slice(0, 7)}....${key.slice(-7)}`
+}
+
+// Wallets are named like "DOLLYPARTED_Trading_1" — pulls the trailing "_<n>" for ordering.
+function parseWalletNumber(label: string | null): number | null {
+    if (!label) return null
+    // Trailing digits, with or without a separator before them — "..._1", "...-1", "...1".
+    const m = label.match(/(\d+)\s*$/)
+    return m ? parseInt(m[1], 10) : null
 }
 
 function Checkmark() {
@@ -71,16 +213,20 @@ export default function TransferForm() {
     const [walletTypes, setWalletTypes]           = useState<WalletTypeRow[]>([])
     const [loading, setLoading]                   = useState(true)
     const [activeFilters, setActiveFilters]       = useState<string[]>([])
-    const [senderWalletId, setSenderWalletId]     = useState('')
+    const [senderWalletIds, setSenderWalletIds]   = useState<Set<string>>(new Set())
     const [selectedReceivers, setSelectedReceivers] = useState<Set<string>>(new Set())
     const [receiverAmounts, setReceiverAmounts]   = useState<Record<string, string>>({})
-    const [pending, setPending]                   = useState<PendingTransfer | null>(null)
-    const [activeTransfer, setActiveTransfer]     = useState<PendingTransfer | null>(null)
-    const [showProgress, setShowProgress]         = useState(false)
-    const [receiverStatuses, setReceiverStatuses] = useState<Record<string, TransferStatus>>({})
-    const [transfersDone, setTransfersDone]       = useState(false)
+    const [previewOpen, setPreviewOpen]           = useState(false)
+    const [previewPhase, setPreviewPhase]         = useState<PreviewPhase>('calculating')
+    const [legs, setLegs]                         = useState<FundingLeg[]>([])
+    const [legStatuses, setLegStatuses]           = useState<Record<string, TransferStatus>>({})
+    const [distributionWarning, setDistributionWarning] = useState('')
     const [validationError, setValidationError]   = useState('')
     const [copiedId, setCopiedId]                  = useState<string | null>(null)
+    const [bondingCurveLoading, setBondingCurveLoading] = useState(false)
+    const [bondingCurveMsg, setBondingCurveMsg]         = useState('')
+    const [bufferPct, setBufferPct]                     = useState('10')
+    const [solUsdPrice, setSolUsdPrice]                 = useState<number | null>(null)
 
     useEffect(() => {
         fetch('/api/wallets/explorer')
@@ -98,13 +244,18 @@ export default function TransferForm() {
             })
             .catch(err => console.error('[wallets] fetch failed', err))
             .finally(() => setLoading(false))
+
+        fetch('/api/price/sol-usd')
+            .then((r) => r.json())
+            .then(({ solUsd }) => setSolUsdPrice(typeof solUsd === 'number' ? solUsd : null))
+            .catch(() => setSolUsdPrice(null))
     }, [])
 
-    // Clear receiver selection when sender changes
+    // Clear receiver selection when sender selection changes
     useEffect(() => {
         setSelectedReceivers(new Set())
         setReceiverAmounts({})
-    }, [senderWalletId])
+    }, [senderWalletIds])
 
     // Sender dropdown — all wallets grouped by type
     const senderGroups = useMemo<[string, WalletRecord[]][]>(() => {
@@ -116,12 +267,28 @@ export default function TransferForm() {
         return Object.entries(map)
     }, [wallets])
 
-    // Receiver table — all wallets except the sender, filtered by type
+    function toggleSender(id: string) {
+        setSenderWalletIds((prev) => {
+            const next = new Set(prev)
+            next.has(id) ? next.delete(id) : next.add(id)
+            return next
+        })
+    }
+
+    // Dev wallets — surfaced separately above the receiver table so they're easy to
+    // spot when funding a fresh launch. Not required: a dev wallet may already be funded.
+    const devWallets = useMemo(
+        () => wallets.filter((w) => !senderWalletIds.has(w.id) && (w.wallet_type ?? '').toLowerCase().includes('dev')),
+        [wallets, senderWalletIds],
+    )
+
+    // Receiver table — all wallets except the selected senders and dev wallets (shown above), filtered by type
     const visibleWallets = useMemo(() => {
-        const withoutSender = wallets.filter((w) => w.id !== senderWalletId)
-        if (activeFilters.length === 0) return withoutSender
-        return withoutSender.filter((w) => w.wallet_type_id != null && activeFilters.includes(w.wallet_type_id))
-    }, [wallets, senderWalletId, activeFilters])
+        const devIds = new Set(devWallets.map((w) => w.id))
+        const withoutSenders = wallets.filter((w) => !senderWalletIds.has(w.id) && !devIds.has(w.id))
+        if (activeFilters.length === 0) return withoutSenders
+        return withoutSenders.filter((w) => w.wallet_type_id != null && activeFilters.includes(w.wallet_type_id))
+    }, [wallets, senderWalletIds, devWallets, activeFilters])
 
     const walletGroups = useMemo<WalletGroup[]>(() => {
         const map = new Map<string, WalletGroup>()
@@ -188,83 +355,200 @@ export default function TransferForm() {
         setSelectedReceivers(next)
     }
 
-    function handleSubmit() {
+    async function applyBondingCurveFunding() {
+        setBondingCurveMsg('')
+
+        const checkedVisible = visibleWallets.filter((w) => selectedReceivers.has(w.id))
+        const checkedTrading = checkedVisible
+            .map((w) => ({ wallet: w, num: parseWalletNumber(w.label) }))
+            .filter((x): x is { wallet: WalletRecord; num: number } => x.num !== null)
+            .sort((a, b) => a.num - b.num)
+
+        if (checkedVisible.length === 0) {
+            setBondingCurveMsg('No receiver wallets are checked below — check the ones you want funded, then Calculate.')
+            return
+        }
+        if (checkedTrading.length === 0) {
+            const sample = checkedVisible.slice(0, 3).map((w) => w.label ?? maskPubKey(w.public_key)).join(', ')
+            setBondingCurveMsg(
+                `${checkedVisible.length} wallet${checkedVisible.length !== 1 ? 's are' : ' is'} checked, but none have a trailing number ` +
+                `in their name (e.g. "..._1") to order by — got: ${sample}${checkedVisible.length > 3 ? ', …' : ''}.`
+            )
+            return
+        }
+
+        const checkedDev = devWallets.filter((w) => selectedReceivers.has(w.id))
+        const includeDevCreationCost = checkedDev.length > 0
+        const sequence = includeDevCreationCost
+            ? [checkedDev[0], ...checkedTrading.map((x) => x.wallet)]
+            : checkedTrading.map((x) => x.wallet)
+
+        const parsedBufferPct = parseFloat(bufferPct)
+        if (isNaN(parsedBufferPct) || parsedBufferPct < 0) {
+            setBondingCurveMsg('Enter a buffer percentage of 0 or greater.')
+            return
+        }
+
+        setBondingCurveLoading(true)
+        try {
+            const res = await fetch('/api/wallet/transfer/bonding-curve-funding', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ walletCount: sequence.length, includeDevCreationCost, bufferPct: parsedBufferPct }),
+            })
+            const data = await res.json()
+            if (!res.ok) throw new Error(data.error ?? 'Calculation failed')
+
+            const wallets: { bufferedSol: number }[] = data.wallets
+            let totalBufferedSol = 0
+            setReceiverAmounts((prev) => {
+                const next = { ...prev }
+                sequence.forEach((w, i) => {
+                    if (wallets[i]) {
+                        next[w.id] = wallets[i].bufferedSol.toFixed(9)
+                        totalBufferedSol += wallets[i].bufferedSol
+                    }
+                })
+                return next
+            })
+
+            const usd = formatUsd(totalBufferedSol, solUsdPrice)
+            const extraDev = checkedDev.length > 1 ? ` (${checkedDev.length - 1} extra checked dev wallet${checkedDev.length - 1 !== 1 ? 's' : ''} left as-is — set manually)` : ''
+            setBondingCurveMsg(
+                `Filled ${sequence.length} wallet${sequence.length !== 1 ? 's' : ''} — ${totalBufferedSol.toFixed(4)} SOL total` +
+                (usd ? ` (~${usd})` : '') +
+                ` — 1% of supply each, sequential, +${parsedBufferPct}% buffer` +
+                (includeDevCreationCost ? ', dev creation cost on the first wallet' : '') + `.${extraDev}`
+            )
+        } catch (err) {
+            setBondingCurveMsg(err instanceof Error ? err.message : 'Calculation failed')
+        } finally {
+            setBondingCurveLoading(false)
+        }
+    }
+
+    function openPreview() {
         setValidationError('')
-        if (!senderWalletId) { setValidationError('Select a sender wallet.'); return }
+        if (senderWalletIds.size === 0) { setValidationError('Select at least one sender wallet.'); return }
         if (selectedReceivers.size === 0) { setValidationError('Select at least one receiver wallet.'); return }
 
         const receivers = [...selectedReceivers].map((id) => {
-            const w = wallets.find((w) => w.id === id)!
-            return { walletId: id, publicKey: w.public_key, label: w.label, amount: receiverAmounts[id] ?? '' }
+            const wallet = wallets.find((w) => w.id === id)!
+            return { wallet, amountSOL: parseFloat(receiverAmounts[id] ?? '') }
         })
 
-        const missing = receivers.filter((r) => !r.amount || parseFloat(r.amount) <= 0)
+        const missing = receivers.filter((r) => !r.amountSOL || r.amountSOL <= 0)
         if (missing.length > 0) {
             setValidationError(`Enter an amount greater than 0 for all selected wallets.`)
             return
         }
 
-        const sender = wallets.find((w) => w.id === senderWalletId)!
-        setPending({ senderWalletId, senderPublicKey: sender.public_key, senderLabel: sender.label, receivers })
+        const senders = [...senderWalletIds]
+            .map((id) => wallets.find((w) => w.id === id))
+            .filter((w): w is WalletRecord => !!w)
+
+        setPreviewOpen(true)
+        setPreviewPhase('calculating')
+        setLegs([])
+        setLegStatuses({})
+        setDistributionWarning('')
+
+        // Let the dialog paint the spinner before doing the (near-instant) computation.
+        setTimeout(() => {
+            const { legs: computed, totalNeededSol, totalCapacitySol } = computeBalancedFundingAssignment(senders, receivers)
+            setLegs(computed)
+            if (totalCapacitySol < totalNeededSol) {
+                setDistributionWarning(
+                    `Selected senders can only cover ~${totalCapacitySol.toFixed(4)} SOL of the ` +
+                    `${totalNeededSol.toFixed(4)} SOL needed — some transfers below will likely fail.`
+                )
+            }
+            setPreviewPhase('ready')
+        }, 400)
     }
 
     function resetAfterTransfer() {
-        setShowProgress(false)
-        setSenderWalletId('')
+        setPreviewOpen(false)
+        setPreviewPhase('calculating')
+        setLegs([])
+        setLegStatuses({})
+        setDistributionWarning('')
+        setSenderWalletIds(new Set())
         setSelectedReceivers(new Set())
         setReceiverAmounts({})
         setActiveFilters([])
-        setActiveTransfer(null)
-        setReceiverStatuses({})
-        setTransfersDone(false)
+        setBondingCurveMsg('')
     }
 
-    async function executeTransfers() {
-        if (!pending) return
-        const transfer = pending
-        setPending(null)
-
-        const initial: Record<string, TransferStatus> = {}
-        transfer.receivers.forEach((r) => { initial[r.walletId] = 'loading' })
-        setReceiverStatuses(initial)
-        setActiveTransfer(transfer)
-        setTransfersDone(false)
-        setShowProgress(true)
-
+    async function sendLegBatch(senderWalletId: string, batch: FundingLeg[]) {
         try {
             const res = await fetch('/api/wallet/transfer/fund', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    senderWalletId: transfer.senderWalletId,
-                    receivers: transfer.receivers.map((r) => ({
-                        walletId:  r.walletId,
-                        publicKey: r.publicKey,
-                        amountSOL: parseFloat(r.amount),
+                    senderWalletId,
+                    receivers: batch.map((l) => ({
+                        walletId:  l.receiverWalletId,
+                        publicKey: l.receiverPublicKey,
+                        amountSOL: l.amountSOL,
                     })),
                 }),
             })
-
             if (res.ok) {
                 const { results } = await res.json()
-                const updated: Record<string, TransferStatus> = {}
-                for (const result of results as { walletId: string; success: boolean }[]) {
-                    updated[result.walletId] = result.success ? 'success' : 'error'
+                const updates: Record<string, TransferStatus> = {}
+                for (const r of results as { walletId: string; success: boolean }[]) {
+                    updates[`${senderWalletId}:${r.walletId}`] = r.success ? 'success' : 'error'
                 }
-                setReceiverStatuses(updated)
+                setLegStatuses((prev) => ({ ...prev, ...updates }))
             } else {
-                const failed: Record<string, TransferStatus> = {}
-                transfer.receivers.forEach((r) => { failed[r.walletId] = 'error' })
-                setReceiverStatuses(failed)
+                const updates: Record<string, TransferStatus> = {}
+                batch.forEach((l) => { updates[l.id] = 'error' })
+                setLegStatuses((prev) => ({ ...prev, ...updates }))
             }
         } catch {
-            const failed: Record<string, TransferStatus> = {}
-            transfer.receivers.forEach((r) => { failed[r.walletId] = 'error' })
-            setReceiverStatuses(failed)
+            const updates: Record<string, TransferStatus> = {}
+            batch.forEach((l) => { updates[l.id] = 'error' })
+            setLegStatuses((prev) => ({ ...prev, ...updates }))
         }
-
-        setTransfersDone(true)
     }
+
+    async function executeDistributedTransfers() {
+        setPreviewPhase('executing')
+
+        const initial: Record<string, TransferStatus> = {}
+        legs.forEach((l) => { initial[l.id] = 'loading' })
+        setLegStatuses(initial)
+
+        const bySender = new Map<string, FundingLeg[]>()
+        legs.forEach((l) => {
+            const arr = bySender.get(l.senderWalletId) ?? []
+            arr.push(l)
+            bySender.set(l.senderWalletId, arr)
+        })
+
+        // Independent senders/blockhash sequences — safe (and faster) to run in parallel.
+        await Promise.all(
+            Array.from(bySender.entries()).map(([senderWalletId, batch]) => sendLegBatch(senderWalletId, batch))
+        )
+
+        setPreviewPhase('done')
+    }
+
+    async function retryLeg(leg: FundingLeg) {
+        setLegStatuses((prev) => ({ ...prev, [leg.id]: 'loading' }))
+        await sendLegBatch(leg.senderWalletId, [leg])
+    }
+
+    const legsBySender = useMemo(() => {
+        const map = new Map<string, FundingLeg[]>()
+        legs.forEach((l) => {
+            const arr = map.get(l.senderWalletId) ?? []
+            arr.push(l)
+            map.set(l.senderWalletId, arr)
+        })
+        return Array.from(map.values())
+    }, [legs])
 
     function copyKey(e: React.MouseEvent, key: string, id: string) {
         e.stopPropagation()
@@ -396,6 +680,8 @@ export default function TransferForm() {
 
     if (loading) return <p className="text-sm text-muted-foreground py-4">Loading wallets…</p>
 
+    let devRowIndex = 0
+
     const totalSOL = [...selectedReceivers].reduce((sum, id) => {
         const v = parseFloat(receiverAmounts[id] ?? '')
         return sum + (isNaN(v) ? 0 : v)
@@ -407,29 +693,132 @@ export default function TransferForm() {
 
                 {/* Sender */}
                 <div className="flex flex-col gap-1.5 max-w-sm">
-                    <FieldLabel>Sender Wallet</FieldLabel>
-                    <Select value={senderWalletId} onValueChange={setSenderWalletId}>
-                        <SelectTrigger>
-                            <SelectValue placeholder="Select sender wallet" />
-                        </SelectTrigger>
-                        <SelectContent>
+                    <FieldLabel>Sender Wallet{senderWalletIds.size !== 1 ? 's' : ''}</FieldLabel>
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <button
+                                type="button"
+                                className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            >
+                                <span className={senderWalletIds.size === 0 ? 'text-muted-foreground' : 'truncate'}>
+                                    {senderWalletIds.size === 0 && 'Select sender wallet(s)'}
+                                    {senderWalletIds.size === 1 && (() => {
+                                        const w = wallets.find((w) => w.id === [...senderWalletIds][0])
+                                        if (!w) return null
+                                        return (
+                                            <>
+                                                {w.label ? `${w.label} · ` : ''}
+                                                {maskPubKey(w.public_key)}
+                                                {w.solana_balance_in_lamports
+                                                    ? ` · ${lamportsBNToSolDisplay(w.solana_balance_in_lamports)} SOL`
+                                                    : ''}
+                                            </>
+                                        )
+                                    })()}
+                                    {senderWalletIds.size > 1 && `${senderWalletIds.size} wallets selected`}
+                                </span>
+                                <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+                            </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent className="max-h-80 w-(--radix-dropdown-menu-trigger-width) overflow-y-auto">
                             {senderGroups.map(([typeName, group], i) => (
-                                <SelectGroup key={typeName}>
-                                    {i > 0 && <SelectSeparator />}
-                                    <SelectLabel>{typeName}</SelectLabel>
+                                <div key={typeName}>
+                                    {i > 0 && <DropdownMenuSeparator />}
+                                    <DropdownMenuLabel>{typeName}</DropdownMenuLabel>
                                     {group.map((w) => (
-                                        <SelectItem key={w.id} value={w.id}>
+                                        <DropdownMenuCheckboxItem
+                                            key={w.id}
+                                            checked={senderWalletIds.has(w.id)}
+                                            onSelect={(e) => e.preventDefault()}
+                                            onCheckedChange={() => toggleSender(w.id)}
+                                        >
                                             {w.label ? `${w.label} · ` : ''}
                                             {maskPubKey(w.public_key)}
                                             {w.solana_balance_in_lamports
                                                 ? ` · ${lamportsBNToSolDisplay(w.solana_balance_in_lamports)} SOL`
                                                 : ''}
-                                        </SelectItem>
+                                        </DropdownMenuCheckboxItem>
                                     ))}
-                                </SelectGroup>
+                                </div>
                             ))}
-                        </SelectContent>
-                    </Select>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                    {senderWalletIds.size > 1 && (
+                        <p className="text-xs text-muted-foreground">
+                            Each receiver will be funded by exactly one of the {senderWalletIds.size} selected senders —
+                            assigned to balance total load across them, not split across all of them.
+                        </p>
+                    )}
+                </div>
+
+                {/* Dev wallets — optional, surfaced separately for visibility */}
+                {devWallets.length > 0 && (
+                    <div className="flex flex-col gap-3">
+                        <div className="flex items-center justify-between">
+                            <FieldLabel>Dev Wallets</FieldLabel>
+                            <span className="text-xs text-muted-foreground">Optional — skip if already funded</span>
+                        </div>
+                        <div className="w-full overflow-x-auto rounded-md border">
+                            <table className="w-full text-sm border-collapse">
+                                <thead className="bg-muted">
+                                    <tr className="border-b text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                                        <th className="px-3 py-2.5 text-left w-10">#</th>
+                                        <th className="px-3 py-2.5 text-left">Public Key</th>
+                                        <th className="px-3 py-2.5 text-left">Label</th>
+                                        <th className="px-3 py-2.5 text-right">SOL Balance</th>
+                                        <th className="px-3 py-2.5 text-right">Amount (SOL)</th>
+                                        <th className="px-3 py-2.5 text-right">Include</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {devWallets.map((wallet) => renderRow(wallet, ++devRowIndex))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )}
+
+                {/* Funding strategy */}
+                <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/20 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-col gap-0.5">
+                            <p className="text-sm font-medium">Bonding Curve Funding</p>
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                                Fills the Amount for each checked wallet below with what it needs to buy ~1% of
+                                supply, walked sequentially down the curve, plus a buffer — ordered by each
+                                wallet&apos;s trailing number (e.g. &quot;_1&quot;, &quot;_2&quot;). If a Dev
+                                Wallet above is checked, it&apos;s funded first and also covers the token-creation cost.
+                            </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-2 shrink-0">
+                            <div className="flex items-center gap-1.5">
+                                <label htmlFor="bonding-curve-buffer" className="text-xs text-muted-foreground whitespace-nowrap">
+                                    Buffer %
+                                </label>
+                                <input
+                                    id="bonding-curve-buffer"
+                                    type="number"
+                                    min={0}
+                                    step={1}
+                                    value={bufferPct}
+                                    onChange={(e) => setBufferPct(e.target.value)}
+                                    className="w-16 rounded border border-input bg-background px-2 py-1 text-right text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                />
+                            </div>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={applyBondingCurveFunding}
+                                disabled={bondingCurveLoading}
+                            >
+                                {bondingCurveLoading ? 'Calculating…' : 'Calculate'}
+                            </Button>
+                        </div>
+                    </div>
+                    {bondingCurveMsg && (
+                        <p className="text-xs text-muted-foreground">{bondingCurveMsg}</p>
+                    )}
                 </div>
 
                 {/* Receiver table */}
@@ -520,7 +909,7 @@ export default function TransferForm() {
                                 {visibleWallets.length === 0 && (
                                     <tr>
                                         <td colSpan={6} className="px-3 py-6 text-center text-sm text-muted-foreground">
-                                            {senderWalletId ? 'No other wallets found.' : 'Select a sender wallet to see receivers.'}
+                                            {senderWalletIds.size > 0 ? 'No other wallets found.' : 'Select a sender wallet to see receivers.'}
                                         </td>
                                     </tr>
                                 )}
@@ -531,7 +920,12 @@ export default function TransferForm() {
                     {selectedReceivers.size > 0 && (
                         <div className="flex items-center justify-between text-xs text-muted-foreground">
                             <span>{selectedReceivers.size} wallet{selectedReceivers.size !== 1 ? 's' : ''} selected</span>
-                            {totalSOL > 0 && <span>Total: {totalSOL.toFixed(9)} SOL</span>}
+                            {totalSOL > 0 && (
+                                <span>
+                                    Total: {totalSOL.toFixed(9)} SOL
+                                    {formatUsd(totalSOL, solUsdPrice) && ` (~${formatUsd(totalSOL, solUsdPrice)})`}
+                                </span>
+                            )}
                         </div>
                     )}
                 </div>
@@ -542,114 +936,141 @@ export default function TransferForm() {
                 )}
 
                 {/* Submit */}
-                <Button size="lg" variant="default" onClick={handleSubmit}>
-                    Transfer
+                <Button size="lg" variant="default" onClick={openPreview}>
+                    Preview
                 </Button>
             </div>
 
-            {/* Confirmation dialog */}
-            <Dialog open={!!pending} onOpenChange={(open) => { if (!open) setPending(null) }}>
-                <DialogContent className="max-w-md">
+            {/* Distribution preview / execution dialog */}
+            <Dialog
+                open={previewOpen}
+                onOpenChange={(open) => {
+                    if (open) return
+                    if (previewPhase === 'calculating' || previewPhase === 'executing') return // block closing mid-flight
+                    if (previewPhase === 'done') resetAfterTransfer()
+                    else setPreviewOpen(false)
+                }}
+            >
+                <DialogContent className="max-w-lg">
                     <DialogHeader>
-                        <DialogTitle>Confirm Transfers</DialogTitle>
-                        <DialogDescription>Review all transfers before sending.</DialogDescription>
-                    </DialogHeader>
-
-                    {pending && (
-                        <div className="flex flex-col gap-3 text-sm">
-                            <div className="flex justify-between text-muted-foreground">
-                                <span>From</span>
-                                <span className="font-mono text-foreground">
-                                    {pending.senderLabel ? `${pending.senderLabel} · ` : ''}{maskPubKey(pending.senderPublicKey)}
-                                </span>
-                            </div>
-
-                            <div className="border-t pt-3 flex flex-col gap-2">
-                                {pending.receivers.map((r) => (
-                                    <div key={r.walletId} className="flex justify-between">
-                                        <span className="font-mono text-muted-foreground">
-                                            {r.label ? `${r.label} · ` : ''}{maskPubKey(r.publicKey)}
-                                        </span>
-                                        <span className="font-semibold tabular-nums">{r.amount} SOL</span>
-                                    </div>
-                                ))}
-                            </div>
-
-                            <div className="border-t pt-3 flex justify-between font-semibold">
-                                <span>Total</span>
-                                <span className="tabular-nums">
-                                    {pending.receivers.reduce((s, r) => s + parseFloat(r.amount), 0).toFixed(9)} SOL
-                                </span>
-                            </div>
-                        </div>
-                    )}
-
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button variant="outline">Cancel</Button>
-                        </DialogClose>
-                        <Button variant="default" onClick={executeTransfers}>
-                            Confirm {pending?.receivers.length ?? 0} Transfer{(pending?.receivers.length ?? 0) !== 1 ? 's' : ''}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-
-            {/* Progress dialog */}
-            <Dialog open={showProgress} onOpenChange={(open) => { if (!open && transfersDone) resetAfterTransfer() }}>
-                <DialogContent className="max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>{transfersDone ? 'Transfers Complete' : 'Transferring…'}</DialogTitle>
+                        <DialogTitle>
+                            {previewPhase === 'calculating' && 'Calculating Distribution…'}
+                            {previewPhase === 'ready' && 'Preview Distribution'}
+                            {previewPhase === 'executing' && 'Sending Transfers…'}
+                            {previewPhase === 'done' && 'Transfers Complete'}
+                        </DialogTitle>
                         <DialogDescription>
-                            From:{' '}
-                            {activeTransfer?.senderLabel ? `${activeTransfer.senderLabel} · ` : ''}
-                            {activeTransfer ? maskPubKey(activeTransfer.senderPublicKey) : ''}
+                            {previewPhase === 'calculating'
+                                ? 'Splitting funding evenly across the selected sender wallets…'
+                                : `${legsBySender.length} sender${legsBySender.length !== 1 ? 's' : ''} → ${new Set(legs.map((l) => l.receiverWalletId)).size} receiver${new Set(legs.map((l) => l.receiverWalletId)).size !== 1 ? 's' : ''}, ${legs.length} transfer${legs.length !== 1 ? 's' : ''} total`}
                         </DialogDescription>
                     </DialogHeader>
 
-                    <div className="flex flex-col divide-y">
-                        {activeTransfer?.receivers.map((r) => {
-                            const status = receiverStatuses[r.walletId] ?? 'pending'
-                            return (
-                                <div key={r.walletId} className="flex items-center gap-3 py-3">
-                                    {/* Status icon */}
-                                    <div className="size-5 shrink-0 flex items-center justify-center">
-                                        {status === 'pending' && (
-                                            <span className="size-2 rounded-full bg-muted-foreground/30" />
-                                        )}
-                                        {status === 'loading' && (
-                                            <span className="size-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-                                        )}
-                                        {status === 'success' && (
-                                            <svg className="size-4 text-green-500" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                                            </svg>
-                                        )}
-                                        {status === 'error' && (
-                                            <svg className="size-4 text-destructive" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                                            </svg>
-                                        )}
-                                    </div>
+                    {previewPhase === 'calculating' && (
+                        <div className="flex flex-col items-center gap-3 py-10 text-muted-foreground">
+                            <span className="size-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                            <p className="text-sm">Calculating distribution…</p>
+                        </div>
+                    )}
 
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-xs font-mono truncate text-foreground">
-                                            {r.label ? `${r.label} · ` : ''}{maskPubKey(r.publicKey)}
-                                        </p>
-                                        {status === 'error' && (
-                                            <p className="text-[10px] text-destructive mt-0.5">Transfer failed</p>
-                                        )}
-                                    </div>
+                    {previewPhase !== 'calculating' && (
+                        <>
+                            {distributionWarning && (
+                                <p className="text-xs text-destructive">{distributionWarning}</p>
+                            )}
 
-                                    <span className="text-xs font-semibold tabular-nums shrink-0">{r.amount} SOL</span>
-                                </div>
-                            )
-                        })}
-                    </div>
+                            <div className="flex flex-col gap-4 max-h-[420px] overflow-y-auto pr-1">
+                                {legsBySender.map((senderLegs) => {
+                                    const subtotal = senderLegs.reduce((s, l) => s + l.amountSOL, 0)
+                                    return (
+                                        <div key={senderLegs[0].senderWalletId} className="flex flex-col gap-1.5">
+                                            <div className="flex items-center justify-between border-b pb-1">
+                                                <span className="text-xs font-semibold text-foreground truncate">
+                                                    {senderLegs[0].senderLabel ? `${senderLegs[0].senderLabel} · ` : ''}
+                                                    {maskPubKey(senderLegs[0].senderPublicKey)}
+                                                </span>
+                                                <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                                                    {subtotal.toFixed(9)} SOL
+                                                </span>
+                                            </div>
+                                            <div className="flex flex-col divide-y">
+                                                {senderLegs.map((leg) => {
+                                                    const status = legStatuses[leg.id] ?? 'pending'
+                                                    return (
+                                                        <div key={leg.id} className="flex items-center gap-2 py-1.5">
+                                                            {previewPhase !== 'ready' && (
+                                                                <div className="size-4 shrink-0 flex items-center justify-center">
+                                                                    {status === 'pending' && (
+                                                                        <span className="size-2 rounded-full bg-muted-foreground/30" />
+                                                                    )}
+                                                                    {status === 'loading' && (
+                                                                        <span className="size-3.5 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+                                                                    )}
+                                                                    {status === 'success' && (
+                                                                        <svg className="size-4 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+                                                                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                                                        </svg>
+                                                                    )}
+                                                                    {status === 'error' && (
+                                                                        <svg className="size-4 text-destructive" viewBox="0 0 20 20" fill="currentColor">
+                                                                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                                                                        </svg>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                            <span className="flex-1 min-w-0 truncate text-xs font-mono text-muted-foreground">
+                                                                {leg.receiverLabel ? `${leg.receiverLabel} · ` : ''}{maskPubKey(leg.receiverPublicKey)}
+                                                            </span>
+                                                            <span className="text-xs font-semibold tabular-nums shrink-0">
+                                                                {leg.amountSOL.toFixed(9)} SOL
+                                                            </span>
+                                                            {status === 'error' && (
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant="outline"
+                                                                    className="h-6 shrink-0 px-2 text-[10px]"
+                                                                    onClick={() => retryLeg(leg)}
+                                                                >
+                                                                    Retry
+                                                                </Button>
+                                                            )}
+                                                        </div>
+                                                    )
+                                                })}
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            </div>
 
-                    {transfersDone && (() => {
-                        const total   = activeTransfer?.receivers.length ?? 0
-                        const success = Object.values(receiverStatuses).filter((s) => s === 'success').length
+                            <div className="border-t pt-3 flex justify-between font-semibold text-sm">
+                                <span>Total</span>
+                                <span className="tabular-nums text-right">
+                                    {legs.reduce((s, l) => s + l.amountSOL, 0).toFixed(9)} SOL
+                                    {formatUsd(legs.reduce((s, l) => s + l.amountSOL, 0), solUsdPrice) && (
+                                        <span className="block text-xs font-normal text-muted-foreground">
+                                            ~{formatUsd(legs.reduce((s, l) => s + l.amountSOL, 0), solUsdPrice)}
+                                        </span>
+                                    )}
+                                </span>
+                            </div>
+                        </>
+                    )}
+
+                    {previewPhase === 'ready' && (
+                        <DialogFooter>
+                            <DialogClose asChild>
+                                <Button variant="outline">Cancel</Button>
+                            </DialogClose>
+                            <Button variant="default" onClick={executeDistributedTransfers}>
+                                Confirm {legs.length} Transfer{legs.length !== 1 ? 's' : ''}
+                            </Button>
+                        </DialogFooter>
+                    )}
+
+                    {previewPhase === 'done' && (() => {
+                        const total   = legs.length
+                        const success = Object.values(legStatuses).filter((s) => s === 'success').length
                         const failed  = total - success
                         return (
                             <>
@@ -661,7 +1082,7 @@ export default function TransferForm() {
                                 ].join(' ')}>
                                     {failed === 0
                                         ? `All ${success} transfer${success !== 1 ? 's' : ''} submitted successfully.`
-                                        : `${success} succeeded, ${failed} failed. Check wallet balances and retry.`}
+                                        : `${success} succeeded, ${failed} failed — retry the failed ones above or close to finish.`}
                                 </div>
                                 <DialogFooter>
                                     <Button variant="default" onClick={resetAfterTransfer}>Done</Button>

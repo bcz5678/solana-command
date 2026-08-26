@@ -26,6 +26,8 @@ type Props = {
 }
 
 type DraftEdit = {
+  name:            string
+  symbol:          string
   description:     string
   website_url:     string
   twitter_url:     string
@@ -96,6 +98,8 @@ export default function TokenTable({ tokens, walletMap }: Props) {
       setEditMap(prev => ({
         ...prev,
         [token.id]: {
+          name:            token.token_name       ?? '',
+          symbol:          token.token_symbol     ?? '',
           description:     token.description     ?? '',
           website_url:     token.website_url      ?? '',
           twitter_url:     token.twitter_url      ?? '',
@@ -177,6 +181,8 @@ export default function TokenTable({ tokens, walletMap }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mintId:         token.id,
+          tokenName:      edits.name,
+          tokenSymbol:    edits.symbol,
           description:    edits.description,
           websiteUrl:     edits.website_url,
           twitterUrl:     edits.twitter_url,
@@ -531,11 +537,23 @@ export default function TokenTable({ tokens, walletMap }: Props) {
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground mb-0.5">Symbol</p>
-                      <p className="font-mono">{token.token_symbol}</p>
+                      {isDraft && edits ? (
+                        <input type="text" value={edits.symbol} placeholder="TOKEN"
+                          onChange={e => patchEdit(token.id, { symbol: e.target.value })}
+                          className={`${inputCls} font-mono`} />
+                      ) : (
+                        <p className="font-mono">{token.token_symbol}</p>
+                      )}
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground mb-0.5">Name</p>
-                      <p>{token.token_name}</p>
+                      {isDraft && edits ? (
+                        <input type="text" value={edits.name} placeholder="Token Name"
+                          onChange={e => patchEdit(token.id, { name: e.target.value })}
+                          className={inputCls} />
+                      ) : (
+                        <p>{token.token_name}</p>
+                      )}
                     </div>
 
                     {/* ── Editable fields (draft only) ──────────── */}

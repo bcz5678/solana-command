@@ -1,12 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import { ArrowLeft, Send, ArrowDownToLine, ArrowUpToLine } from 'lucide-react'
+import { ArrowLeft, Send, ArrowDownToLine, ArrowUpToLine, Users } from 'lucide-react'
 import TransferForm from './transfer-form'
+import FundOneToManyForm from './fund-one-to-many-form'
 import SingleTransferForm from './single-transfer-form'
 import ConsolidateForm from './consolidate-form'
 
-type Mode = 'single' | 'fund' | 'consolidate'
+type Mode = 'single' | 'fund' | 'fund-one-to-many' | 'consolidate'
 
 const MODES: { id: Mode; icon: React.ElementType; title: string; description: string }[] = [
     {
@@ -18,8 +19,14 @@ const MODES: { id: Mode; icon: React.ElementType; title: string; description: st
     {
         id:          'fund',
         icon:        ArrowDownToLine,
-        title:       'Fund Wallets',
-        description: 'Distribute SOL from a source wallet to multiple pool wallets.',
+        title:       'Fund Launch Wallets',
+        description: 'Distribute SOL from one or more source wallets to multiple pool wallets.',
+    },
+    {
+        id:          'fund-one-to-many',
+        icon:        Users,
+        title:       'Fund 1 to Many Wallets',
+        description: 'Send SOL from a single source wallet to multiple destination wallets.',
     },
     {
         id:          'consolidate',
@@ -54,6 +61,15 @@ export default function TransferHub() {
         )
     }
 
+    if (mode === 'fund-one-to-many') {
+        return (
+            <div>
+                <BackButton onBack={() => setMode(null)} />
+                <FundOneToManyForm />
+            </div>
+        )
+    }
+
     if (mode === 'single') {
         return (
             <div>
@@ -73,7 +89,7 @@ export default function TransferHub() {
     }
 
     return (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {MODES.map(({ id, icon: Icon, title, description }) => (
                 <button
                     key={id}

@@ -36,6 +36,13 @@ type PendingAction = 'confirm' | 'retry' | 'abandon' | null
  */
 export default function BlockResolutionDialog({ siteId, run, onResolved }: Props) {
     const guidance = blockGuidance(run)
+    // domain_purchase never auto-retries, by design: no automated check can
+    // tell "the registrar took the order and our process died" apart from
+    // "the order never landed," which is the entire reason this step blocks
+    // instead of failing. Retry would requeue the run with nothing left to
+    // ever act on it a second time — confirm or abandon are the only honest
+    // options here.
+    const isPurchaseBlock = run.blockedStep === 'domain_purchase'
 
     const [note, setNote] = useState('')
     const [pendingAction, setPendingAction] = useState<PendingAction>(null)
@@ -100,25 +107,35 @@ export default function BlockResolutionDialog({ siteId, run, onResolved }: Props
                         </div>
                     </div>
                 ) : (
-                    <DialogFooter className="items-center sm:justify-between">
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-destructive hover:text-destructive"
-                            onClick={() => setConfirmingAbandon(true)}
-                            disabled={pendingAction !== null}
-                        >
-                            Abandon
-                        </Button>
-                        <div className="flex gap-2">
-                            <Button variant="outline" onClick={() => resolve('retry')} disabled={pendingAction !== null}>
-                                {pendingAction === 'retry' ? 'Retrying…' : guidance.retryLabel}
+                    <>
+                        {isPurchaseBlock && (
+                            <p className="text-xs text-muted-foreground">
+                                Verify the order in the Namecheap account, then confirm with the order
+                                reference above, or abandon if no order exists.
+                            </p>
+                        )}
+                        <DialogFooter className="items-center sm:justify-between">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-destructive hover:text-destructive"
+                                onClick={() => setConfirmingAbandon(true)}
+                                disabled={pendingAction !== null}
+                            >
+                                Abandon
                             </Button>
-                            <Button onClick={() => resolve('confirm')} disabled={pendingAction !== null || noteMissing}>
-                                {pendingAction === 'confirm' ? 'Confirming…' : guidance.confirmLabel}
-                            </Button>
-                        </div>
-                    </DialogFooter>
+                            <div className="flex gap-2">
+                                {!isPurchaseBlock && (
+                                    <Button variant="outline" onClick={() => resolve('retry')} disabled={pendingAction !== null}>
+                                        {pendingAction === 'retry' ? 'Retrying…' : guidance.retryLabel}
+                                    </Button>
+                                )}
+                                <Button onClick={() => resolve('confirm')} disabled={pendingAction !== null || noteMissing}>
+                                    {pendingAction === 'confirm' ? 'Confirming…' : guidance.confirmLabel}
+                                </Button>
+                            </div>
+                        </DialogFooter>
+                    </>
                 )}
             </DialogContent>
         </Dialog>

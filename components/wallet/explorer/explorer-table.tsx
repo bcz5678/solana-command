@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useCallback } from 'react'
 import BN from 'bn.js'
 import { lamportsBNToSolDisplay, lamportsBNToSolNumber } from '@/lib/lamports';
 
@@ -53,6 +53,48 @@ function formatUsd(lamports: BN, solUsdPrice: number | null | undefined): string
   return usdFormatter.format(lamportsBNToSolNumber(lamports) * solUsdPrice)
 }
 
+const MIN_COL_WIDTH = 72
+
+type ColKey = 'name' | 'group' | 'balance'
+
+function ColumnResizer({ onResize }: { onResize: (deltaX: number) => void }) {
+  const lastX = useRef(0)
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    lastX.current = e.clientX
+
+    function handleMouseMove(ev: MouseEvent) {
+      const delta = ev.clientX - lastX.current
+      lastX.current = ev.clientX
+      onResize(delta)
+    }
+    function handleMouseUp() {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.removeProperty('cursor')
+      document.body.style.removeProperty('user-select')
+    }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+  }, [onResize])
+
+  return (
+    <span
+      onMouseDown={handleMouseDown}
+      onClick={(e) => e.stopPropagation()}
+      role="separator"
+      aria-orientation="vertical"
+      className="group/resizer flex h-5 w-3 shrink-0 cursor-col-resize items-center justify-center"
+    >
+      <span className="h-full w-0.5 rounded-full bg-muted-foreground/40 transition-colors group-hover/resizer:bg-primary group-active/resizer:bg-primary" />
+    </span>
+  )
+}
+
 export function WalletTable({ wallets, walletTypes, owners, groups, solUsdPrice }: Props) {
   const ownerMap = Object.fromEntries(owners.map((o) => [String(o.id), o.name]))
 
@@ -63,6 +105,11 @@ export function WalletTable({ wallets, walletTypes, owners, groups, solUsdPrice 
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [openItem, setOpenItem] = useState<string>('')
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [colWidths, setColWidths] = useState<Record<ColKey, number>>({ name: 176, group: 176, balance: 176 })
+
+  const resizeColumn = useCallback((key: ColKey, delta: number) => {
+    setColWidths((prev) => ({ ...prev, [key]: Math.max(MIN_COL_WIDTH, prev[key] + delta) }))
+  }, [])
 
   const filtered = useMemo(() => wallets.filter((w) => {
     if (isActive !== ALL && String(w.is_active) !== isActive) return false
@@ -208,15 +255,19 @@ export function WalletTable({ wallets, walletTypes, owners, groups, solUsdPrice 
       </p>
 
       {/* Column header */}
-      <div className="flex items-center gap-4 border-b pb-2 text-sm font-medium text-muted-foreground px-1">
-        <span className="flex-1">Public Key</span>
-        <span className="w-36">Group</span>
-        <span className="w-28">SOL Balance</span>
+      <div className="flex items-center border-b pb-2 text-sm font-medium text-muted-foreground px-1">
+        <span className="flex-1 min-w-0">Public Key</span>
+        <span className="shrink-0 truncate" style={{ width: colWidths.name }}>Name</span>
+        <ColumnResizer onResize={(d) => resizeColumn('name', d)} />
+        <span className="shrink-0 truncate" style={{ width: colWidths.group }}>Group</span>
+        <ColumnResizer onResize={(d) => resizeColumn('group', d)} />
+        <span className="shrink-0 truncate" style={{ width: colWidths.balance }}>SOL Balance</span>
+        <ColumnResizer onResize={(d) => resizeColumn('balance', d)} />
         <Checkbox
           checked={allFilteredSelected}
           onCheckedChange={toggleAll}
           aria-label="Select all"
-          className="mr-6"
+          className="ml-2 mr-6"
         />
       </div>
 
@@ -287,12 +338,29 @@ export function WalletTable({ wallets, walletTypes, owners, groups, solUsdPrice 
                     </Tooltip>
                   </TooltipProvider>
                 </span>
-                <span className="w-36 text-sm font-normal shrink-0">
+                <span
+                  className="text-sm font-normal shrink-0 truncate"
+                  style={{ width: colWidths.name }}
+                  title={wallet.label ?? undefined}
+                >
+                  {wallet.label ?? '—'}
+                </span>
+                <span className="w-3 shrink-0" />
+                <span
+                  className="text-sm font-normal shrink-0 truncate"
+                  style={{ width: colWidths.group }}
+                  title={wallet.group_name ?? undefined}
+                >
                   {wallet.group_name ?? wallet.wallet_group_id ?? '—'}
                 </span>
-                <span className="w-28 text-sm font-normal shrink-0">
+                <span className="w-3 shrink-0" />
+                <span
+                  className="text-sm font-normal shrink-0 truncate"
+                  style={{ width: colWidths.balance }}
+                >
                   {wallet.solana_balance_in_lamports ? lamportsBNToSolDisplay(wallet.solana_balance_in_lamports) : '—'}
                 </span>
+                <span className="w-3 shrink-0" />
               </AccordionTrigger>
 
               <AccordionContent className="px-1">
@@ -300,6 +368,10 @@ export function WalletTable({ wallets, walletTypes, owners, groups, solUsdPrice 
                   <div>
                     <p className="text-xs text-muted-foreground mb-0.5">ID</p>
                     <p>{wallet.id}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-0.5">Name</p>
+                    <p>{wallet.label ?? '—'}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground mb-0.5">Created At</p>

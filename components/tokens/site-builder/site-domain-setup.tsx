@@ -55,6 +55,15 @@ export default function SiteDomainSetup({ siteId, config, onDomainModeChange, on
     const [results, setResults] = useState<SearchResult[]>([])
     const [selectedPurchaseDomain, setSelectedPurchaseDomain] = useState<string | null>(null)
 
+    // Purchase-attempt state. `purchaseSettled` is the purchase-path analogue
+    // of `verifyStatus === 'owned'` on the existing-domain path — it is what
+    // unlocks the shared distribution-picker/setup steps below.
+    const [purchaseSubmitting, setPurchaseSubmitting] = useState(false)
+    const [purchaseError, setPurchaseError] = useState<string | null>(null)
+    const [purchaseUnknown, setPurchaseUnknown] = useState<{ runId: string | null; message: string } | null>(null)
+    const [purchasePending, setPurchasePending] = useState<{ runId: string | null; message: string } | null>(null)
+    const [purchaseSettled, setPurchaseSettled] = useState(false)
+
     const [distributions, setDistributions] = useState<DistributionOption[]>([])
     const [loadingDistributions, setLoadingDistributions] = useState(false)
     const [distributionsError, setDistributionsError] = useState<string | null>(null)
@@ -93,6 +102,11 @@ export default function SiteDomainSetup({ siteId, config, onDomainModeChange, on
         setSelectedPurchaseDomain(null)
         setResults([])
         setSearchError(null)
+        setPurchaseSubmitting(false)
+        setPurchaseError(null)
+        setPurchaseUnknown(null)
+        setPurchasePending(null)
+        setPurchaseSettled(false)
         resetDownstream()
     }
 
@@ -158,11 +172,105 @@ export default function SiteDomainSetup({ siteId, config, onDomainModeChange, on
         setSelectedPurchaseDomain(domain)
         onDomainModeChange(DomainMode.custom)
         onCustomDomainChange(domain)
+        // A different domain invalidates any prior purchase attempt — this is
+        // also how a failed purchase (which leaves sites.domain pointing at
+        // the domain that failed) recovers: picking a new one here gets a
+        // fresh idempotency key and a fresh run when committed, with nothing
+        // left over from the failed attempt to collide with.
+        setPurchaseError(null)
+        setPurchaseUnknown(null)
+        setPurchasePending(null)
+        setPurchaseSettled(false)
+        resetDownstream()
     }
 
-    // Load CloudFront distributions once the domain to attach is confirmed owned.
+    async function commitPurchase() {
+        if (!selectedPurchaseDomain || purchaseSubmitting) return
+
+        setPurchaseSubmitting(true)
+        setPurchaseError(null)
+        setPurchaseUnknown(null)
+        setPurchasePending(null)
+
+        try {
+            const expectedPriceUsd = results.find((r) => r.domain === selectedPurchaseDomain)?.price ?? undefined
+
+            const res = await fetch('/api/domains/purchase', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ siteId, domain: selectedPurchaseDomain, expectedPriceUsd }),
+            })
+            const data = await res.json().catch(() => ({}))
+
+            if (res.status === 401) {
+                setPurchaseError('Your session expired — sign in again.')
+                return
+            }
+
+            if (data.status === 'registered' || data.status === 'already_owned') {
+                setPurchaseSettled(true)
+                return
+            }
+
+            if (data.status === 'pending_registry') {
+                setPurchasePending({
+                    runId: data.runId ?? null,
+                    message: 'Order placed — waiting on the registry to confirm. This can take a few minutes; do not resubmit.',
+                })
+                return
+            }
+
+            if (data.status === 'failed') {
+                // Confirmed, unambiguous — either the registrar declined (422)
+                // or the request never reached it at all (502: bad secret, bad
+                // DNS). Either way this is fixable and safe to retry once
+                // whatever's wrong is addressed — keyed on `status`, not the
+                // HTTP code, since both land here.
+                setPurchaseError(data.error ?? 'The registrar declined the purchase.')
+                return
+            }
+
+            if (data.runStatus === 'running' || data.runStatus === 'queued') {
+                // Transient — a race the disabled control didn't quite catch
+                // (another tab, a retry that beat this one). The winning
+                // request's run already exists and resolves on its own; no
+                // operator involved, so this must not carry the same
+                // escalation copy as a genuinely blocked run.
+                setPurchasePending({
+                    runId: data.runId ?? null,
+                    message: 'A purchase attempt for this domain is already in progress — this resolves automatically, usually within a few seconds.',
+                })
+                await refresh()
+                return
+            }
+
+            // runStatus === 'blocked', or anything else unexpected with no
+            // runStatus to key off (network error, malformed body) — there is
+            // a blocked run behind this now, or we can't tell. Do not offer a
+            // bare retry either way.
+            setPurchaseUnknown({
+                runId: data.runId ?? null,
+                message: data.error ?? 'The purchase state could not be confirmed.',
+            })
+        } catch (err) {
+            console.error('[SiteDomainSetup] purchase error:', err)
+            setPurchaseUnknown({ runId: null, message: 'Could not reach the purchase endpoint.' })
+        } finally {
+            setPurchaseSubmitting(false)
+        }
+    }
+
+    // The domain string once it is safe to attach a distribution to it —
+    // "owned" on the existing-domain path, "purchased" on the other. Neither
+    // path shows the distribution picker until this is non-null.
+    const confirmedDomain =
+        path === 'existing' ? (verifyStatus === 'owned' ? existingInput.trim() : null)
+      : path === 'purchase' ? (purchaseSettled ? selectedPurchaseDomain : null)
+      : null
+
+    // Load CloudFront distributions once the domain to attach is confirmed.
     useEffect(() => {
-        if (path !== 'existing' || verifyStatus !== 'owned') return
+        if (confirmedDomain === null) return
         if (distributions.length > 0 || loadingDistributions) return
 
         setLoadingDistributions(true)
@@ -183,7 +291,7 @@ export default function SiteDomainSetup({ siteId, config, onDomainModeChange, on
             })
             .finally(() => setLoadingDistributions(false))
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [path, verifyStatus])
+    }, [confirmedDomain])
 
     function selectDistribution(id: string) {
         setSelectedDistributionId(id)
@@ -194,21 +302,32 @@ export default function SiteDomainSetup({ siteId, config, onDomainModeChange, on
 
         console.log("[start]", `/api/sites/${siteId}/provisioning`, { siteId });
 
-        if (!selectedDistributionId || !existingInput.trim() || !selectedDistribution) return
+        if (!selectedDistributionId || !confirmedDomain || !selectedDistribution) return
 
         setSubmitting(true)
         setSubmitError(null)
 
         try {
-            // domain + domainSource select and start in one request — this path
-            // has no preceding purchase run, so nothing else has recorded them.
-            await startSetup(
-                siteId,
-                selectedDistributionId,
-                selectedDistribution.url,
-                'in_account',
-                existingInput.trim(),
-            )
+            if (path === 'existing') {
+                // domain + domainSource select and start in one request — this
+                // path has no preceding purchase run, so nothing else has
+                // recorded them.
+                await startSetup(
+                    siteId,
+                    selectedDistributionId,
+                    selectedDistribution.url,
+                    'in_account',
+                    confirmedDomain,
+                )
+            } else {
+                // purchase path — start_domain_purchase already claimed the
+                // domain and set domain_source = 'purchase' on the site when
+                // the run was created. Passing domain args here again would be
+                // a redundant no-op at best; omitting them is the documented
+                // normal path after a purchase run (start_domain_setup leaves
+                // the site's existing domain/domain_source in place).
+                await startSetup(siteId, selectedDistributionId, selectedDistribution.url)
+            }
             // Realtime will pick up the new run, but an eager refetch avoids a
             // beat of stale UI while that subscription round-trips.
             await refresh()
@@ -370,22 +489,63 @@ export default function SiteDomainSetup({ siteId, config, onDomainModeChange, on
                 </Card>
             )}
 
-            {/* Step 2b confirmation (checkout comes in a later step of this build) */}
-            {path === 'purchase' && selectedPurchaseDomain && (
+            {/* Step 2b confirmation — commit to purchasing the selected domain */}
+            {path === 'purchase' && selectedPurchaseDomain && !purchaseSettled && (
                 <Card>
-                    <CardContent className="flex flex-col gap-1.5 pt-2">
+                    <CardContent className="flex flex-col gap-2 pt-2">
                         <p className="text-sm">
                             <span className="font-mono">{selectedPurchaseDomain}</span> selected.
                         </p>
-                        <p className="text-xs text-muted-foreground">
-                            Checkout (contact details &amp; payment) isn&apos;t wired up yet — that&apos;s the next piece of this build.
-                        </p>
+
+                        {purchaseError && (
+                            <p className="text-sm text-destructive">{purchaseError}</p>
+                        )}
+
+                        {purchasePending && (
+                            <div className="flex flex-col gap-1 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+                                <p className="text-sm font-medium">Waiting on the registry</p>
+                                <p className="text-sm text-muted-foreground">{purchasePending.message}</p>
+                            </div>
+                        )}
+
+                        {purchaseUnknown && (
+                            <div className="flex flex-col gap-1 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                                <p className="text-sm font-medium text-destructive">Purchase state unknown</p>
+                                <p className="text-sm text-muted-foreground">{purchaseUnknown.message}</p>
+                                <p className="text-xs text-muted-foreground">
+                                    Do not submit again. An operator needs to verify the Namecheap account and resolve this run before you can continue.
+                                </p>
+                            </div>
+                        )}
+
+                        {!purchasePending && !purchaseUnknown && (
+                            <div>
+                                <button
+                                    onClick={commitPurchase}
+                                    disabled={purchaseSubmitting}
+                                    className="px-3 py-1.5 text-sm rounded border border-blue-500 bg-blue-500 text-white hover:bg-blue-600 hover:border-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                >
+                                    {purchaseSubmitting ? 'Purchasing…' : `Buy ${selectedPurchaseDomain}`}
+                                </button>
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+            )}
+
+            {path === 'purchase' && purchaseSettled && selectedPurchaseDomain && (
+                <Card>
+                    <CardContent className="flex items-center gap-1.5 pt-2">
+                        <Badge variant="default">Purchased</Badge>
+                        <span className="text-sm text-muted-foreground">
+                            <span className="font-mono">{selectedPurchaseDomain}</span> is registered to your account.
+                        </span>
                     </CardContent>
                 </Card>
             )}
 
             {/* Step 3 — choose an AWS CloudFront distribution */}
-            {path === 'existing' && verifyStatus === 'owned' && !currentRun && (
+            {confirmedDomain !== null && !currentRun && (
                 <Card>
                     <CardHeader>
                         <CardTitle className="text-base">Choose a CloudFront Distribution</CardTitle>
@@ -445,7 +605,7 @@ export default function SiteDomainSetup({ siteId, config, onDomainModeChange, on
             {/* Step 4 — review & confirm. Origin path isn't shown or entered here —
                 start_domain_setup derives it server-side from s3_prefix, so nothing
                 client-side should invent or overwrite it. */}
-            {path === 'existing' && verifyStatus === 'owned' && selectedDistribution && !currentRun && (
+            {confirmedDomain !== null && selectedDistribution && !currentRun && (
                 <Card>
                     <CardHeader>
                         <CardTitle className="text-base">Review Domain Setup</CardTitle>
@@ -454,7 +614,7 @@ export default function SiteDomainSetup({ siteId, config, onDomainModeChange, on
                         <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
                             <div>
                                 <p className="text-xs text-muted-foreground mb-0.5">Domain</p>
-                                <p className="font-mono">{existingInput}</p>
+                                <p className="font-mono">{confirmedDomain}</p>
                             </div>
                             <div>
                                 <p className="text-xs text-muted-foreground mb-0.5">Distribution</p>

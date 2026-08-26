@@ -26,6 +26,11 @@ export default function GrapesJSPageBuilder() {
         { default: gjsNavbar },
         { default: gjsBlocksFlexbox },
         { default: gjsExportZip },
+        { default: gjsStyleBg },
+        { default: gjsCustomCode },
+        //{ default: gjsTabs },
+        { default: gjsStyleGradient },
+        { default: gjsTemplates },
       ] = await Promise.all([
         import('grapesjs'),
         import('@silexlabs/grapesjs-fonts'),
@@ -35,6 +40,11 @@ export default function GrapesJSPageBuilder() {
         import('grapesjs-navbar'),
         import('grapesjs-blocks-flexbox'),
         import('grapesjs-plugin-export'),
+        import('grapesjs-style-bg'),
+        import('grapesjs-custom-code'),
+        //import('grapesjs-tabs'),
+        import('grapesjs-style-gradient'),
+        import('grapesjs-templates'),
       ]);
 
       // Bail if the component unmounted while the chunks were loading
@@ -47,7 +57,7 @@ export default function GrapesJSPageBuilder() {
           type: "local", // Storage type. Available: local | remote
           autosave: true, // Store data automatically
           autoload: true, // Autoload stored data on init
-          stepsBeforeSave: 1
+          stepsBeforeSave: 20
         },
         plugins: [
           gjsFonts,
@@ -57,11 +67,22 @@ export default function GrapesJSPageBuilder() {
           gjsNavbar,
           gjsBlocksFlexbox,
           gjsExportZip,
+          gjsStyleBg,
+          gjsCustomCode,
+          //gjsTabs,
+          gjsStyleGradient,
+          gjsTemplates,
         ],
         pluginsOpts: {
           [gjsFonts as any]: {
-            // e.g. api_key: process.env.NEXT_PUBLIC_GOOGLE_FONTS_KEY,
             api_key: process.env.NEXT_PUBLIC_GOOGLE_FONTS_KEY,
+          },
+          [gjsExportZip as any]: {
+            addExportBtn: true,
+            btnLabel: "Export to ZIP",
+          },
+          gjsStyleBgOpts: {
+            'grapesjs-style-bg': {},
           },
         },
       });
@@ -72,18 +93,25 @@ export default function GrapesJSPageBuilder() {
       editorRef.current = editor;
 
     
-      const btn = editor.Panels.addButton('options', {
+      const fontBtn = editor.Panels.addButton('options', {
         id: 'open-fonts',
         className: 'fa fa-font',
         command: 'open-fonts',
         attributes: { title: 'Open font dialog' },
       });
-    
+
+      const exportBtn = editor.Panels.addButton('options', {
+        id: 'export-zip',
+        className: 'fa fa-file',
+        command: 'gjs-export-zip',
+        attributes: { title: 'Export as ZIP' },
+      });
+
 
       // addButton returns null/undefined when the target panel doesn't exist —
     // it fails silently, which is why you get no error and no button.
-    console.log('addButton returned:', btn);
-
+    console.log('addButton returned:', fontBtn);
+    console.log('addButton returned:', exportBtn);
     })();
 
     return () => {

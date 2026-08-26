@@ -14,6 +14,7 @@ export default function Page() {
   const [groups, setGroups]           = useState<LookupEntry[]>([])
   const [solUsdPrice, setSolUsdPrice] = useState<number | null>(null)
   const [error, setError]             = useState<string | null>(null)
+  const [isLoading, setIsLoading]     = useState(true)
 
   useEffect(() => {
     fetch('/api/wallets/explorer')
@@ -31,6 +32,7 @@ export default function Page() {
         setGroups(groups ?? [])
       })
       .catch(() => setError('Failed to load wallets'))
+      .finally(() => setIsLoading(false))
 
     fetch('/api/price/sol-usd')
       .then((r) => r.json())
@@ -46,13 +48,20 @@ export default function Page() {
         <p className="text-destructive text-sm">Failed to load wallets: {error}</p>
       )}
 
-      <WalletTable
-        wallets={wallets}
-        walletTypes={walletTypes}
-        owners={owners}
-        groups={groups}
-        solUsdPrice={solUsdPrice}
-      />
+      {isLoading ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-muted-foreground">
+          <span className="size-8 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          <p className="text-sm">Fetching wallet balances…</p>
+        </div>
+      ) : (
+        <WalletTable
+          wallets={wallets}
+          walletTypes={walletTypes}
+          owners={owners}
+          groups={groups}
+          solUsdPrice={solUsdPrice}
+        />
+      )}
     </div>
   )
 }
