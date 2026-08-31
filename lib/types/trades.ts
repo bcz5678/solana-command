@@ -15,6 +15,14 @@ export interface SellTokenBody {
     slippage:    number
 }
 
+export interface AutoCommentOptions {
+  enabled:      boolean
+  delayMinMs:   number
+  delayMaxMs:   number
+  /** 0-1, fraction of eligible wallets that get a comment scheduled at all. Defaults to 1. */
+  probability?: number
+}
+
 export interface BundleBuyBody {
   jitoTipInLamports: string   // lamports as decimal string — BN can't cross JSON
   tradesList:        BuyTokenBody[]
@@ -24,6 +32,8 @@ export interface BundleBuyBody {
   useQuicknodeJito?: boolean
   /** Simulate the bundle and stop — never calls sendBundle. QuickNode path only. */
   dryRun?:           boolean
+  /** Schedule an organic-timed pump.fun callout per wallet after a confirmed buy. */
+  autoComment?:      AutoCommentOptions
 }
 
 export interface BundleSellBody {

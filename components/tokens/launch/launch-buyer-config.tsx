@@ -26,7 +26,16 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
     const [walletTypes, setWalletTypes] = useState<WalletTypeRow[]>([])
     const [loading, setLoading]         = useState(true)
     const [activeFilters, setActiveFilters] = useState<string[]>([])
-    const [buyAmounts, setBuyAmounts]   = useState<Record<string, string>>({})
+    // Seeded from launchConfig so a previously-entered/saved buy amount still
+    // shows when this dialog is reopened — it used to always start blank even
+    // though launchConfig.walletTrades already had the real persisted amount.
+    const [buyAmounts, setBuyAmounts] = useState<Record<string, string>>(() => {
+        const initial: Record<string, string> = {}
+        for (const trade of launchConfig.walletTrades) {
+            initial[trade.walletId] = lamportsBNToSolDisplay(trade.buyAmountInSOL)
+        }
+        return initial
+    })
 
     useEffect(() => {
         fetch('/api/wallets/explorer')

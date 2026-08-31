@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { Node, Edge } from '@xyflow/react'
 import BN from 'bn.js'
 import {
@@ -30,11 +30,12 @@ import LaunchBuyerConfig from '@/components/tokens/launch/launch-buyer-config'
 import { LaunchConfig } from '@/components/tokens/launch/launch-config-class'
 import { LaunchType } from '@/components/tokens/launch/types'
 import { TokenMint } from '@/lib/types/token-mint'
-import { WalletTradeDTO } from '@/lib/types/wallet'
+import { WalletTradeDTO, WalletRecord } from '@/lib/types/wallet'
+import type { LookupTable } from '@/lib/types/lookup-table'
 import { solStringToLamports } from '@/lib/lamports'
 import StrategyWalletSelector from '@/components/trade/strategy-trade/strategy-wallet-selector'
 import { SlippageControl } from '@/components/trade/trade/SlippageControl'
-import { BuilderNodeData, LaunchTypeSubtype, TradeSubtype, TriggerSubtype, ConditionalSubtype, UtilitySubtype } from './types'
+import { BuilderNodeData, LaunchTypeSubtype, TradeSubtype, TriggerSubtype, ConditionalSubtype, UtilitySubtype, ParsedBundledWallet } from './types'
 import { PALETTE_ITEMS } from './node-palette-config'
 import { findTokenNodeData, collectAvailableVariables } from './handle-types'
 
@@ -197,7 +198,7 @@ type SerializedWalletTrade = ReturnType<LaunchConfig['toJSON']>['walletTrades'][
 
 function deserializeWalletTrades(raw: unknown): WalletTradeDTO[] {
     const trades = (raw as SerializedWalletTrade[] | undefined) ?? []
-    return trades.map((t) => ({
+    const deserialized = trades.map((t) => ({
         walletId: t.walletId,
         tradeType: t.tradeType,
         buyAmountInSOL: new BN(t.buyAmountInSOL),
@@ -205,6 +206,12 @@ function deserializeWalletTrades(raw: unknown): WalletTradeDTO[] {
         percentOfSupplyHeld: t.percentOfSupplyHeld != null ? new BN(t.percentOfSupplyHeld) : null,
         marketCapAtBuy: t.marketCapAtBuy != null ? new BN(t.marketCapAtBuy) : null,
     }))
+    // Self-heals configs saved while LaunchConfig's old mutate-in-place bug could
+    // duplicate an entry — collapse to one trade per wallet, keeping the last
+    // (most recently entered) amount for that wallet.
+    const byWalletId = new Map<string, WalletTradeDTO>()
+    for (const trade of deserialized) byWalletId.set(trade.walletId, trade)
+    return Array.from(byWalletId.values())
 }
 
 function LaunchTypeFields({
@@ -222,24 +229,66 @@ function LaunchTypeFields({
     nodes: Node[]
     edges: Edge[]
 }) {
-    const devOnly = subtype === 'dev0DevOnly'
+    const devOnly    = subtype === 'dev0DevOnly'
+    const devBundle  = subtype === 'dev0DevBundle'
 
     const tokenNodeData = findTokenNodeData(nodeId, nodes, edges)
     const devWalletId = (tokenNodeData?.config.devWalletId as string | null | undefined) ?? null
 
+    // Jito bundles cap at 5 transactions — tx #1 is create+dev-buy, so at most
+    // 4 more wallets can join. Mirrors MAX_BUNDLE_WALLETS in the launch route.
+    const MAX_BUNDLE_WALLETS = 5
+    const [jitoTipSol, setJitoTipSol] = useState<string>((config.jitoTipSol as string) ?? '0.001')
+    const [slippage, setSlippage]     = useState<number>((config.slippage as number) ?? 0.05)
+
+    function updateJitoTip(v: string) {
+        setJitoTipSol(v)
+        patch({ jitoTipSol: v })
+    }
+
+    function updateSlippage(v: number) {
+        setSlippage(v)
+        patch({ slippage: v })
+    }
+
     const [launchConfig, setLaunchConfig] = useState<LaunchConfig>(
-        () =>
-            new LaunchConfig(
+        () => {
+            const allTrades = deserializeWalletTrades(config.walletTrades)
+            // "Dev 0 (Dev Only)" can only ever hold the dev wallet's own buy — the
+            // config UI can't add anyone else while devOnly is true, but a config
+            // saved before this node's data was properly scoped could still carry
+            // an extra non-dev entry (e.g. from an earlier, differently-configured
+            // save). Strip anything that isn't the dev wallet on load so old data
+            // self-heals instead of silently showing/spending on a second buyer.
+            const walletTrades = devOnly
+                ? allTrades.filter((t) => t.walletId === devWalletId)
+                : allTrades
+            return new LaunchConfig(
                 LaunchType.unselected,
                 // LaunchBuyerConfig only reads `token.dev_wallet_id` — a partial stand-in is fine here.
                 devWalletId ? ({ dev_wallet_id: devWalletId } as unknown as TokenMint) : null,
+                LaunchConfig.sumBuyAmounts(walletTrades),
                 new BN(0),
                 new BN(0),
                 new BN(0),
-                new BN(0),
-                deserializeWalletTrades(config.walletTrades),
-            ),
+                walletTrades,
+            )
+        },
     )
+
+    // If the load-time filter above actually stripped a stale non-dev entry,
+    // push the corrected wallet list into the node's config immediately — so
+    // the fix takes effect (node card's "N buyers" label, next Save) just from
+    // opening this dialog, not only after the user happens to edit something.
+    useEffect(() => {
+        const rawCount = (deserializeWalletTrades(config.walletTrades)).length
+        if (devOnly && rawCount !== launchConfig.walletTrades.length) {
+            const json = launchConfig.toJSON()
+            patch({ walletTrades: json.walletTrades, totalSOLInLamports: json.totalSOLInLamports })
+        }
+        // Only ever needs to run once, right after mount — deps intentionally omitted.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
 
     function persist(next: LaunchConfig) {
         setLaunchConfig(next)
@@ -249,20 +298,17 @@ function LaunchTypeFields({
 
     function onBuyInputChange(walletId: string, newAmount: string) {
         const newAmountInLamports = newAmount === '' || newAmount === '.' ? new BN(0) : solStringToLamports(newAmount)
-        launchConfig.updateWalletList(walletId, newAmountInLamports, 'buy')
-        persist(launchConfig.copyWith({
-            walletTrades: launchConfig.walletTrades,
-            totalSOLInLamports: launchConfig.totalSOLInLamports,
-        }))
+        persist(launchConfig.updateWalletList(walletId, newAmountInLamports, 'buy'))
     }
 
     function onBuyInputReset() {
-        launchConfig.clearWalletList()
-        persist(launchConfig.copyWith({
-            walletTrades: launchConfig.walletTrades,
-            totalSOLInLamports: launchConfig.totalSOLInLamports,
-        }))
+        persist(launchConfig.clearWalletList())
     }
+
+    const walletCount     = launchConfig.walletTrades.length
+    const overBundleLimit = devBundle && walletCount > MAX_BUNDLE_WALLETS
+    const missingDevBuy   = devBundle && walletCount > 0 && devWalletId != null
+        && !launchConfig.walletTrades.some((t) => t.walletId === devWalletId)
 
     return (
         <div className="flex flex-col gap-3">
@@ -272,6 +318,41 @@ function LaunchTypeFields({
                     {devOnly ? 'configure its dev wallet buy here.' : 'highlight its dev wallet here.'}
                 </p>
             )}
+
+            {devBundle && (
+                <>
+                    <p className="text-xs text-muted-foreground">
+                        Create + dev buy lands as transaction #1 of one atomic Jito bundle — add up to{' '}
+                        {MAX_BUNDLE_WALLETS - 1} more wallets below and they buy alongside it in the same
+                        bundle, so nothing can be sniped in between.
+                    </p>
+                    <div className="flex flex-wrap items-end gap-4">
+                        <div className="flex flex-col gap-1.5">
+                            <Label className="text-xs text-muted-foreground whitespace-nowrap">Jito Tip (SOL)</Label>
+                            <Input
+                                type="number"
+                                min={0}
+                                step={0.0001}
+                                value={jitoTipSol}
+                                onChange={(e) => updateJitoTip(e.target.value)}
+                                className="w-28"
+                            />
+                        </div>
+                    </div>
+                    <SlippageControl value={slippage} onChange={updateSlippage} />
+                    {overBundleLimit && (
+                        <p className="text-xs text-destructive">
+                            {walletCount} wallets selected — at most {MAX_BUNDLE_WALLETS} (dev + {MAX_BUNDLE_WALLETS - 1}) can buy in one launch bundle.
+                        </p>
+                    )}
+                    {missingDevBuy && (
+                        <p className="text-xs text-destructive">
+                            The dev wallet needs its own buy amount set — it must be one of the buyers in a bundled launch.
+                        </p>
+                    )}
+                </>
+            )}
+
             <LaunchBuyerConfig
                 launchConfig={launchConfig}
                 onBuyInputChange={onBuyInputChange}
@@ -407,19 +488,369 @@ function TradeFields({
                 </div>
             )}
 
-            <SlippageControl value={slippage} onChange={updateSlippage} />
+            {subtype !== 'bundledJito' && (
+                <SlippageControl value={slippage} onChange={updateSlippage} />
+            )}
 
-            <StrategyWalletSelector
-                selectedIds={selectedWalletIds}
-                onSelectionChange={updateWallets}
-                onTradeAmountChange={updateAmount}
-                onTradeAmountReset={resetAmounts}
-                tradeAmounts={tradeAmounts}
-                defaultTypeName="Trader"
-                tradeType={isSellSubtype ? 'sell' : 'buy'}
-                tokenMint={isSellSubtype ? (tokenMint ?? undefined) : undefined}
-                hideTradeAmountColumn={subtype === 'sellPercent' || subtype === 'sellAll'}
+            {subtype === 'bundledJito' ? (
+                <BundledJitoWalletsInput
+                    config={config}
+                    patch={patch}
+                    slippage={slippage}
+                    onSlippageChange={updateSlippage}
+                    tokenId={(tokenNodeData?.config.tokenId as string | undefined) ?? null}
+                    devWalletId={(tokenNodeData?.config.devWalletId as string | undefined) ?? null}
+                />
+            ) : (
+                <StrategyWalletSelector
+                    selectedIds={selectedWalletIds}
+                    onSelectionChange={updateWallets}
+                    onTradeAmountChange={updateAmount}
+                    onTradeAmountReset={resetAmounts}
+                    tradeAmounts={tradeAmounts}
+                    defaultTypeName="Trader"
+                    tradeType={isSellSubtype ? 'sell' : 'buy'}
+                    tokenMint={isSellSubtype ? (tokenMint ?? undefined) : undefined}
+                    hideTradeAmountColumn={subtype === 'sellPercent' || subtype === 'sellAll'}
+                />
+            )}
+        </div>
+    )
+}
+
+/**
+ * Bundled Jito trade's wallet source: paste the "Copy Launch Totals" JSON built
+ * by the Fund Launch Wallets bonding-curve panel, parse its `wallets` array
+ * (already in sequential launch order), and resolve each entry's public key
+ * against the live wallet list to get the internal wallet id trades execute
+ * with. `bundleSize` is how many wallets the eventual loop packs into each
+ * Jito bundle submission.
+ */
+function BundledJitoWalletsInput({
+    config,
+    patch,
+    slippage,
+    onSlippageChange,
+    tokenId,
+    devWalletId,
+}: {
+    config: Record<string, unknown>
+    patch: (p: Record<string, unknown>) => void
+    slippage: number
+    onSlippageChange: (v: number) => void
+    tokenId: string | null
+    devWalletId: string | null
+}) {
+    const [jsonText, setJsonText]     = useState<string>((config.bundledSourceJson as string) ?? '')
+    const [parseError, setParseError] = useState('')
+    const [wallets, setWallets]       = useState<ParsedBundledWallet[]>((config.bundledWallets as ParsedBundledWallet[]) ?? [])
+    const [bundleSize, setBundleSize] = useState<number>((config.bundleSize as number) ?? 5)
+    const [jitoTipSol, setJitoTipSol] = useState<string>((config.jitoTipSol as string) ?? '0.001')
+
+    const [liveWallets, setLiveWallets]             = useState<WalletRecord[]>([])
+    const [liveWalletsLoading, setLiveWalletsLoading] = useState(true)
+
+    useEffect(() => {
+        fetch('/api/wallets/explorer')
+            .then((r) => r.ok ? r.json() : null)
+            .then((data) => { if (data) setLiveWallets(data.wallets ?? []) })
+            .catch(() => {})
+            .finally(() => setLiveWalletsLoading(false))
+    }, [])
+
+    function resolveWalletIds(list: ParsedBundledWallet[], live: WalletRecord[]): ParsedBundledWallet[] {
+        const byPublicKey = new Map(live.map((w) => [w.public_key, w.id]))
+        return list.map((w) => ({ ...w, walletId: byPublicKey.get(w.publicKey) ?? null }))
+    }
+
+    function parseAndResolve(text: string) {
+        setJsonText(text)
+        patch({ bundledSourceJson: text })
+        setParseError('')
+
+        if (!text.trim()) {
+            setWallets([])
+            patch({ bundledWallets: [] })
+            return
+        }
+
+        let parsed: unknown
+        try {
+            parsed = JSON.parse(text)
+        } catch {
+            setParseError('Invalid JSON.')
+            return
+        }
+
+        const rawWallets = (parsed as { wallets?: unknown })?.wallets
+        if (!Array.isArray(rawWallets)) {
+            setParseError('No "wallets" array found in the pasted JSON.')
+            return
+        }
+
+        const unresolved: ParsedBundledWallet[] = rawWallets.map((w) => {
+            const rw = w as Record<string, unknown>
+            return {
+                label:         typeof rw.label === 'string' ? rw.label : null,
+                publicKey:     typeof rw.publicKey === 'string' ? rw.publicKey : '',
+                buyAmountSol:  typeof rw.buyAmountSol === 'number' ? rw.buyAmountSol : Number(rw.buyAmountSol) || 0,
+                fundAmountSol: typeof rw.fundAmountSol === 'number' ? rw.fundAmountSol : null,
+                walletId:      null,
+            }
+        })
+
+        const resolved = resolveWalletIds(unresolved, liveWallets)
+        setWallets(resolved)
+        patch({ bundledWallets: resolved })
+    }
+
+    // Live wallet list can arrive after a paste that already happened — re-resolve once it lands.
+    useEffect(() => {
+        if (liveWallets.length === 0 || wallets.length === 0) return
+        const reresolved = resolveWalletIds(wallets, liveWallets)
+        if (reresolved.some((w, i) => w.walletId !== wallets[i].walletId)) {
+            setWallets(reresolved)
+            patch({ bundledWallets: reresolved })
+        }
+        // Only re-run when the live wallet list changes — re-resolving on every `wallets` write would loop.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [liveWallets])
+
+    function updateBundleSize(v: number) {
+        const clamped = Math.min(10, Math.max(1, v))
+        setBundleSize(clamped)
+        patch({ bundleSize: clamped })
+    }
+
+    function updateJitoTip(v: string) {
+        setJitoTipSol(v)
+        patch({ jitoTipSol: v })
+    }
+
+    const unmatchedCount = wallets.filter((w) => !w.walletId).length
+    const totalBuySol    = wallets.reduce((s, w) => s + w.buyAmountSol, 0)
+    const bundleCount     = bundleSize > 0 ? Math.ceil(wallets.length / bundleSize) : 0
+
+    return (
+        <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-end gap-4">
+                <div className="flex flex-col gap-1.5">
+                    <Label className="text-xs text-muted-foreground whitespace-nowrap">Wallets per bundle</Label>
+                    <Input
+                        type="number"
+                        min={1}
+                        max={10}
+                        value={bundleSize}
+                        onChange={(e) => updateBundleSize(Number(e.target.value) || 1)}
+                        className="w-24"
+                    />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                    <Label className="text-xs text-muted-foreground whitespace-nowrap">Jito Tip (SOL)</Label>
+                    <Input
+                        type="number"
+                        min={0}
+                        step={0.0001}
+                        value={jitoTipSol}
+                        onChange={(e) => updateJitoTip(e.target.value)}
+                        className="w-28"
+                    />
+                </div>
+            </div>
+
+            <SlippageControl value={slippage} onChange={onSlippageChange} />
+
+            <Label className="text-xs">Launch Totals JSON</Label>
+            <Textarea
+                rows={6}
+                placeholder='Paste the "Copy Launch Totals" JSON here…'
+                value={jsonText}
+                onChange={(e) => parseAndResolve(e.target.value)}
+                className="font-mono text-xs"
             />
+
+            {parseError && <p className="text-xs text-destructive">{parseError}</p>}
+
+            {wallets.length > 0 && !parseError && (
+                <div className="flex flex-col gap-2">
+                    <p className="text-xs text-muted-foreground">
+                        {wallets.length} wallet{wallets.length !== 1 ? 's' : ''} parsed, {totalBuySol.toFixed(4)} SOL total buy —{' '}
+                        {bundleCount} bundle{bundleCount !== 1 ? 's' : ''} of up to {bundleSize}
+                        {liveWalletsLoading
+                            ? ' · matching against live wallets…'
+                            : unmatchedCount > 0
+                            ? ` · ${unmatchedCount} not found in wallet list`
+                            : ' · all matched'}
+                    </p>
+
+                    <div className="max-h-56 overflow-y-auto rounded-md border">
+                        <table className="w-full text-xs border-collapse">
+                            <thead className="sticky top-0 bg-muted">
+                                <tr className="border-b text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                                    <th className="px-2 py-1.5 text-left w-10">#</th>
+                                    <th className="px-2 py-1.5 text-left">Wallet</th>
+                                    <th className="px-2 py-1.5 text-right">Buy (SOL)</th>
+                                    <th className="px-2 py-1.5 text-right">Bundle</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {wallets.map((w, i) => (
+                                    <tr
+                                        key={`${w.publicKey || 'wallet'}-${i}`}
+                                        className={['border-b', !w.walletId && !liveWalletsLoading ? 'bg-destructive/5' : ''].join(' ')}
+                                    >
+                                        <td className="px-2 py-1.5 text-muted-foreground tabular-nums">{i + 1}</td>
+                                        <td className="px-2 py-1.5">
+                                            <span className="font-medium">{w.label ?? '—'}</span>{' '}
+                                            <span className="font-mono text-muted-foreground">
+                                                {w.publicKey ? `${w.publicKey.slice(0, 5)}…${w.publicKey.slice(-5)}` : '—'}
+                                            </span>
+                                            {!w.walletId && !liveWalletsLoading && (
+                                                <span className="ml-1.5 text-[10px] text-destructive">not found</span>
+                                            )}
+                                        </td>
+                                        <td className="px-2 py-1.5 text-right tabular-nums">{w.buyAmountSol.toFixed(4)}</td>
+                                        <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
+                                            #{Math.floor(i / bundleSize) + 1}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            <MintAltSection
+                tokenId={tokenId}
+                devWalletId={devWalletId}
+                walletIds={wallets.filter((w): w is ParsedBundledWallet & { walletId: string } => !!w.walletId).map((w) => w.walletId)}
+            />
+        </div>
+    )
+}
+
+/**
+ * Checks for (and can build) a dedicated per-mint Address Lookup Table —
+ * shared pump.fun accounts + every target wallet's ATA, built via
+ * POST /api/lookup-table/mint-alt. Bundle buy/sell routes pick this up
+ * automatically by mint once it exists (lib/lookup-table/resolve-mint-alt.ts) —
+ * this is purely a build/status UI, there's no "use it" toggle since a mint
+ * with no table just falls back to the previous (unoptimized) behavior.
+ */
+function MintAltSection({
+    tokenId,
+    devWalletId,
+    walletIds,
+}: {
+    tokenId:     string | null
+    devWalletId: string | null
+    walletIds:   string[]
+}) {
+    const [status, setStatus]     = useState<'checking' | 'none' | 'active'>('checking')
+    const [table, setTable]       = useState<LookupTable | null>(null)
+    const [building, setBuilding] = useState(false)
+    const [error, setError]       = useState('')
+
+    useEffect(() => {
+        if (!tokenId) {
+            setStatus('none')
+            setTable(null)
+            return
+        }
+        setStatus('checking')
+        fetch(`/api/lookup-table?mintId=${encodeURIComponent(tokenId)}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data) => {
+                const active = (data?.tables as LookupTable[] | undefined)?.find((t) => t.status === 'active')
+                setTable(active ?? null)
+                setStatus(active ? 'active' : 'none')
+            })
+            .catch(() => setStatus('none'))
+    }, [tokenId])
+
+    async function build() {
+        if (!tokenId || !devWalletId || walletIds.length === 0) return
+        setBuilding(true)
+        setError('')
+        try {
+            const res = await fetch('/api/lookup-table/mint-alt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    mintId:            tokenId,
+                    walletIds,
+                    authorityWalletId: devWalletId,
+                }),
+            })
+            const result = await res.json()
+            if (!res.ok) throw new Error(result.error ?? 'ALT build failed')
+            setTable({
+                id:             result.id as string,
+                public_address: result.altAddress as string,
+                address_count:  result.addressCount as number,
+                status:         'active',
+            } as LookupTable)
+            setStatus('active')
+        } catch (err) {
+            setError(err instanceof Error ? err.message : String(err))
+        } finally {
+            setBuilding(false)
+        }
+    }
+
+    if (!tokenId) {
+        return (
+            <p className="text-xs text-muted-foreground">
+                Add a Token node to enable building a lookup table for this launch.
+            </p>
+        )
+    }
+
+    return (
+        <div className="flex flex-col gap-2 rounded-md border border-border bg-muted/20 px-3 py-2.5">
+            <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                    <p className="text-xs font-medium">Address Lookup Table</p>
+                    <p className="text-[11px] text-muted-foreground">
+                        {status === 'checking' && 'Checking for an existing table…'}
+                        {status === 'active' && table && `Active — ${table.address_count} addresses compressed into every bundle`}
+                        {status === 'none' && 'No table built for this token yet — bundles will run without ALT compression.'}
+                    </p>
+                </div>
+                {status === 'none' && (
+                    <Button
+                        type="button"
+                        size="sm"
+                        disabled={building || !devWalletId || walletIds.length === 0}
+                        onClick={build}
+                    >
+                        {building ? 'Building…' : 'Build Lookup Table'}
+                    </Button>
+                )}
+            </div>
+
+            {status === 'none' && !devWalletId && (
+                <p className="text-[11px] text-amber-500">
+                    No dev wallet found on the Token node — needed as the ALT&apos;s paying authority.
+                </p>
+            )}
+            {status === 'none' && devWalletId && walletIds.length === 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                    Paste the Launch Totals JSON above first — the table needs the resolved wallet list.
+                </p>
+            )}
+            {status === 'active' && table?.public_address && (
+                <a
+                    href={`https://solscan.io/account/${table.public_address}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-fit text-[11px] text-primary underline underline-offset-2"
+                >
+                    View on Solscan ↗
+                </a>
+            )}
+            {error && <p className="text-[11px] text-destructive">{error}</p>}
         </div>
     )
 }

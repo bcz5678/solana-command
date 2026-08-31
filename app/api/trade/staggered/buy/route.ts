@@ -7,12 +7,14 @@ import { parsePumpError } from '@/lib/pumpfun/errors';
 import { logTrade } from '@/lib/trades/log';
 import { getTradeLogContext } from '@/lib/trades/context';
 import { lamportsBNToSolNumber } from '@/lib/lamports';
+import { maybeEnqueueCommentAfterBuy } from '@/lib/pumpfun/comment-scheduler';
+import type { AutoCommentOptions } from '@/lib/types/trades';
 
 export const dynamic    = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function POST(request: Request) {
-    let body: { walletId: string; mintAddress: string; solAmountLamports: string; slippage: number; dryRun?: boolean }
+    let body: { walletId: string; mintAddress: string; solAmountLamports: string; slippage: number; dryRun?: boolean; autoComment?: AutoCommentOptions }
     try {
         body = await request.json()
     } catch {
@@ -22,7 +24,7 @@ export async function POST(request: Request) {
         })
     }
 
-    const { walletId, mintAddress, solAmountLamports, slippage, dryRun } = body
+    const { walletId, mintAddress, solAmountLamports, slippage, dryRun, autoComment } = body
     if (!walletId || !mintAddress || !solAmountLamports) {
         return new Response(JSON.stringify({ error: 'walletId, mintAddress, and solAmountLamports are required.' }), {
             status: 400,
@@ -58,6 +60,10 @@ export async function POST(request: Request) {
                 priceImpact:  logContext.priceImpactPct,
                 errorMessage: result.success ? null : result.error,
             })
+
+            if (result.success && autoComment) {
+                void maybeEnqueueCommentAfterBuy(walletId, mintAddress, autoComment, 'staggered_buy')
+            }
         }
 
         return new Response(JSON.stringify({

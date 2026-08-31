@@ -205,23 +205,19 @@ export function collectAvailableVariables(nodeId: string, nodes: Node[], edges: 
         .sort((a, b) => a.name.localeCompare(b.name))
 }
 
+/**
+ * Returns the graph's Token node data, if one exists. `token` is one of
+ * SINGLE_INSTANCE_CATEGORIES — the editor never allows more than one — so
+ * this is a direct lookup rather than an edge walk: any node that needs "the
+ * launch token" gets it regardless of how (or whether) it's wired into the
+ * config/exec chain. `startNodeId`/`edges` are unused but kept in the
+ * signature so existing call sites don't need to change.
+ */
 export function findTokenNodeData(
     startNodeId: string,
     nodes: Node[],
     edges: Edge[],
 ): BuilderNodeData | null {
-    const visited = new Set<string>()
-    let currentId: string = startNodeId
-
-    while (!visited.has(currentId)) {
-        visited.add(currentId)
-        const inEdge = edges.find((e) => e.target === currentId)
-        if (!inEdge) break
-        const sourceNode = nodes.find((n) => n.id === inEdge.source)
-        if (!sourceNode) break
-        const sourceData = sourceNode.data as unknown as BuilderNodeData
-        if (sourceData.category === 'token') return sourceData
-        currentId = inEdge.source
-    }
-    return null
+    const tokenNode = nodes.find((n) => (n.data as unknown as BuilderNodeData).category === 'token')
+    return tokenNode ? (tokenNode.data as unknown as BuilderNodeData) : null
 }

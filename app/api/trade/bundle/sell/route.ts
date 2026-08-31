@@ -20,17 +20,21 @@ import type { LookupTable } from '@/lib/types/lookup-table'
 import { logTrade } from '@/lib/trades/log'
 import { fetchPumpCoinApi } from '@/lib/pumpfun/pump-api'
 import { lamportsBNToSolNumber } from '@/lib/lamports'
+import { resolveMintAlt } from '@/lib/lookup-table/resolve-mint-alt'
+import { packWalletsBySize } from '@/lib/jito/pack-wallets'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 120
 
 const BLOCK_ENGINE_URL = process.env.JITO_BLOCK_ENGINE_URL ?? 'ny.mainnet.block-engine.jito.wtf'
-// QuickNode packed path: 5 txs × 2 wallets each = 10 wallets max
-// pump.fun sell instructions are large (~12 accounts each); 2 per tx stays under the 1232-byte limit
-// Legacy JitoExecutor path: 4 wallets max (one tx per wallet)
-const MAX_BUNDLE_TRADES = 10
+// QuickNode packed path: wallets-per-transaction is no longer fixed — packWalletsBySize
+// packs greedily against the real serialized tx size, which a mint's dedicated ALT
+// (lib/lookup-table/mint-alt.ts) shrinks dramatically vs. the old ~2-wallets/tx ceiling.
+// MAX_BUNDLE_TRADES is just an input-validation ceiling; JITO_MAX_BUNDLE_TXS (5) is the
+// hard limit actually enforced after packing, since exact per-tx density depends on ALT presence.
+const MAX_BUNDLE_TRADES = 50
 const MAX_LEGACY_TRADES = 4
-const WALLETS_PER_BATCH = 2  // wallets packed into each Jito transaction
+const JITO_MAX_BUNDLE_TXS = 5
 
 // Bundle routes only ever handle a live (non-graduated) bonding curve — a
 // graduated mint throws before reaching any trade logic below — so every
@@ -233,26 +237,34 @@ export async function POST(req: NextRequest) {
         walletIxSets.push({ wallet: tradeWallet, ixs: rawIxs })
       }
 
-      // Resolve ALTs to compress shared pump.fun accounts
+      // Resolve ALTs to compress shared pump.fun accounts. Fast path: this mint
+      // may already have a dedicated ALT (built via POST /api/lookup-table/mint-alt
+      // — shared pump.fun accounts + every target wallet's ATA) — use it directly
+      // instead of overlap-scoring across every ALT the caller owns.
       let idealALTs: AddressLookupTableAccount[] = []
-      try {
-        const supabase = await createClient()
-        const { data, error } = await supabase.rpc('get_lookup_tables', { target_user_id: null })
-        if (!error && data) {
-          const activeTables = (data as unknown as LookupTable[]).filter(t => t.status === 'active')
-          if (activeTables.length > 0) {
-            const altResolver = new JitoExecutor({
-              blockEngineUrl: BLOCK_ENGINE_URL,
-              connection,
-              payer:          tradeKeypairs[0],
-              tipLamports:    Number(jitoTipInLamports),
-            })
-            const allIxs = walletIxSets.flatMap(w => w.ixs)
-            idealALTs = await altResolver.resolveOptimalLookupTables(activeTables, allIxs)
+      const supabase = await createClient()
+      const mintAlt = await resolveMintAlt(supabase, connection, mintAddress)
+      if (mintAlt) {
+        idealALTs = [mintAlt]
+      } else {
+        try {
+          const { data, error } = await supabase.rpc('get_lookup_tables', { target_user_id: null })
+          if (!error && data) {
+            const activeTables = (data as unknown as LookupTable[]).filter(t => t.status === 'active')
+            if (activeTables.length > 0) {
+              const altResolver = new JitoExecutor({
+                blockEngineUrl: BLOCK_ENGINE_URL,
+                connection,
+                payer:          tradeKeypairs[0],
+                tipLamports:    Number(jitoTipInLamports),
+              })
+              const allIxs = walletIxSets.flatMap(w => w.ixs)
+              idealALTs = await altResolver.resolveOptimalLookupTables(activeTables, allIxs)
+            }
           }
+        } catch (altErr) {
+          console.warn('[bundle/sell] ALT resolution failed, proceeding without lookup tables:', altErr)
         }
-      } catch (altErr) {
-        console.warn('[bundle/sell] ALT resolution failed, proceeding without lookup tables:', altErr)
       }
 
       const executor = await QuicknodeJitoExecutor.create({
@@ -268,10 +280,16 @@ export async function POST(req: NextRequest) {
 
       const tipPublicKey = new PublicKey(tipAccount as string)
 
-      // Pack wallets into batches — each batch's first wallet pays tx fee; last wallet overall pays tip inline
-      const batches: WalletIxSet[][] = []
-      for (let i = 0; i < walletIxSets.length; i += WALLETS_PER_BATCH) {
-        batches.push(walletIxSets.slice(i, i + WALLETS_PER_BATCH))
+      // Pack wallets into batches — each batch's first wallet pays tx fee; last wallet overall
+      // pays tip inline. Greedy, size-driven packing (not a fixed wallets/tx count) — see
+      // lib/jito/pack-wallets.ts for why: with idealALTs resolved, far more wallets fit per tx.
+      const batches: WalletIxSet[][] = packWalletsBySize(walletIxSets, blockhash, idealALTs)
+
+      if (batches.length > JITO_MAX_BUNDLE_TXS) {
+        throw new Error(
+          `${tradesList.length} wallets need ${batches.length} transactions even with ALT compression — ` +
+          `Jito bundles cap at ${JITO_MAX_BUNDLE_TXS}. Reduce the wallet count or split into multiple bundle calls.`
+        )
       }
 
       const signerAddresses: string[] = []
@@ -394,18 +412,23 @@ export async function POST(req: NextRequest) {
     let idealALTs: AddressLookupTableAccount[] = []
 
     if (useJito) {
-      try {
-        const supabase = await createClient()
-        const { data, error } = await supabase.rpc('get_lookup_tables', { target_user_id: null })
-        if (!error && data) {
-          const activeTables = (data as unknown as LookupTable[]).filter(t => t.status === 'active')
-          if (activeTables.length > 0) {
-            const allInstructions = tradeData.flatMap(d => d.instructions)
-            idealALTs = await executor.resolveOptimalLookupTables(activeTables, allInstructions)
+      const supabase = await createClient()
+      const legacyMintAlt = tradesList[0] ? await resolveMintAlt(supabase, connection, tradesList[0].mintAddress) : null
+      if (legacyMintAlt) {
+        idealALTs = [legacyMintAlt]
+      } else {
+        try {
+          const { data, error } = await supabase.rpc('get_lookup_tables', { target_user_id: null })
+          if (!error && data) {
+            const activeTables = (data as unknown as LookupTable[]).filter(t => t.status === 'active')
+            if (activeTables.length > 0) {
+              const allInstructions = tradeData.flatMap(d => d.instructions)
+              idealALTs = await executor.resolveOptimalLookupTables(activeTables, allInstructions)
+            }
           }
+        } catch (altErr) {
+          console.warn('[bundle/sell] ALT resolution failed, proceeding without lookup tables:', altErr)
         }
-      } catch (altErr) {
-        console.warn('[bundle/sell] ALT resolution failed, proceeding without lookup tables:', altErr)
       }
 
       const [{ blockhash }, tipAccount] = await Promise.all([

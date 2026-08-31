@@ -93,22 +93,11 @@ export default function LaunchWizard() {
         const newAmountInLamports = (newAmount === '' || newAmount === '.')
             ? new BN(0)
             : solStringToLamports(newAmount);
-        launchConfig.updateWalletList(walletId, newAmountInLamports, "buy")
-        setLaunchConfig((prev) => prev.copyWith({
-            walletTrades: launchConfig.walletTrades,
-            totalSOLInLamports: launchConfig.totalSOLInLamports,
-        }));
+        setLaunchConfig((prev) => prev.updateWalletList(walletId, newAmountInLamports, "buy"));
     }
 
     function onBuyInputReset() {
-        launchConfig.clearWalletList();
-        setLaunchConfig((prev) => prev.copyWith({
-            totalSOLInLamports: launchConfig.totalSOLInLamports,
-            tokensTotal: launchConfig.tokensTotal,
-            percentOfSupply: launchConfig.percentOfSupply,
-            marketCap: launchConfig.marketCap,
-            walletTrades: launchConfig.walletTrades,
-        }));
+        setLaunchConfig((prev) => prev.clearWalletList());
     }
 
 

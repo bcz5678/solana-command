@@ -94,3 +94,17 @@ export type BuilderNodeData = {
      */
     executionResult?: { ok: boolean; status?: number; message: string; signature?: string }
 }
+
+/**
+ * One entry from a pasted "Copy Launch Totals" JSON, parsed and resolved
+ * against the live wallet list. Stored on a Bundled Jito trade node's
+ * `config.bundledWallets`, in the JSON's original (sequential launch) order.
+ */
+export type ParsedBundledWallet = {
+    label:         string | null
+    publicKey:     string
+    buyAmountSol:  number
+    fundAmountSol: number | null
+    /** Resolved internal wallet id (matched by public key against the live wallet list) — required to execute the trade. */
+    walletId:      string | null
+}

@@ -112,59 +112,61 @@ export class LaunchConfig {
     }
 
 
-    clearWalletList(): void {
-        this.totalSOLInLamports = new BN(0);
-        this.tokensTotal = new BN(0);
-        this.percentOfSupply = new BN(0);
-        this.marketCap = new BN(0);
-        this.walletTrades.length = 0;
+    /** Pure — returns a new LaunchConfig with an empty wallet list, doesn't mutate this one. */
+    clearWalletList(): LaunchConfig {
+        return this.copyWith({
+            walletTrades:       [],
+            totalSOLInLamports: new BN(0),
+            tokensTotal:        new BN(0),
+            percentOfSupply:    new BN(0),
+            marketCap:          new BN(0),
+        });
     }
 
-    updateWalletList(walletID: string, newAmount: BN, tradeType: string): void {
+    /**
+     * Pure — returns a new LaunchConfig with `walletID`'s buy amount set (added,
+     * updated, or removed if zeroed), doesn't mutate this.walletTrades in place.
+     * Mutating a shared array here previously risked stale/duplicate entries
+     * across renders (React state must be treated as immutable) — that's the
+     * class of bug that let a single dev-wallet buy show up twice.
+     */
+    updateWalletList(walletID: string, newAmount: BN, tradeType: string): LaunchConfig {
         const walletListIndex: number = this.getWalletListIndex(walletID);
-        
-        if(walletListIndex != -1) {
+        let walletTrades: WalletTradeDTO[];
 
-            //Wallet in this.walletTrades and the amount has been cleared
-            if(newAmount.isZero() || newAmount == null) {
-
-                //Remove wallet from list
-                this.walletTrades.splice(walletListIndex, 1);
-
-                //Loop through updated walletTrades list and recalculate Total SOL
-                this.totalSOLInLamports = this._calculateTotalSOLBuyAmount();
-
-            }else {
-                //wallet in this.walletTrades, adusting SOL amount
-                this.walletTrades[walletListIndex].buyAmountInSOL = newAmount;
-
-                //Loop through walletTrades list and recalculate Total SOL
-                this.totalSOLInLamports = this._calculateTotalSOLBuyAmount();
+        if (walletListIndex !== -1) {
+            if (newAmount.isZero() || newAmount == null) {
+                // Wallet in the list, amount cleared — remove it.
+                walletTrades = this.walletTrades.filter((_, i) => i !== walletListIndex);
+            } else {
+                // Wallet in the list — adjust its SOL amount.
+                walletTrades = this.walletTrades.map((t, i) =>
+                    i === walletListIndex ? { ...t, buyAmountInSOL: newAmount } : t
+                );
             }
         } else {
-            if (newAmount.isZero() || newAmount == null) return;
+            if (newAmount.isZero() || newAmount == null) return this;
 
-
-            //building new WalletTrade and adding to this.walletTrades 
-            const newWalletTrade: WalletTradeDTO= {
+            const newWalletTrade: WalletTradeDTO = {
                 walletId: walletID,
                 tradeType: tradeType,
                 buyAmountInSOL: newAmount,
-                tokensAmountHeld:  null,
+                tokensAmountHeld: null,
                 percentOfSupplyHeld: null,
-                marketCapAtBuy: null
-            } 
-            this.walletTrades.push(newWalletTrade);
-
-            //Loop through updated walletTrades list and recalculate Total SOL
-            this.totalSOLInLamports = this._calculateTotalSOLBuyAmount();
+                marketCapAtBuy: null,
+            };
+            walletTrades = [...this.walletTrades, newWalletTrade];
         }
-    }
 
+        return this.copyWith({
+            walletTrades,
+            totalSOLInLamports: LaunchConfig.sumBuyAmounts(walletTrades),
+        });
+    }
 
     getWalletListIndex(walletId: string): number {
         let isInList: number = -1;
-        
+
         for(const [index, element] of this.walletTrades.entries()) {
             if (walletId == element.walletId) {
                 isInList = index;
@@ -175,11 +177,11 @@ export class LaunchConfig {
         return isInList;
     }
 
-    _calculateTotalSOLBuyAmount(): BN {
-        let runningTotalSOL:BN = new BN(0);
+    static sumBuyAmounts(walletTrades: WalletTradeDTO[]): BN {
+        let runningTotalSOL: BN = new BN(0);
 
-        for(const [index, walletTrade] of this.walletTrades.entries()) {
-            runningTotalSOL.iadd(walletTrade.buyAmountInSOL);
+        for (const walletTrade of walletTrades) {
+            runningTotalSOL = runningTotalSOL.add(walletTrade.buyAmountInSOL);
         }
 
         return runningTotalSOL;

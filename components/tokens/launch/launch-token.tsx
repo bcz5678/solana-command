@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { LaunchConfig } from './launch-config-class';
 import LaunchTokenPreview from './launch-token-preview';
 import LaunchTokenFinal from './launch-token-final';
+import LaunchTradeFeedPanel from './launch-trade-feed-panel';
 
 export interface LaunchResult {
     message:      string
@@ -42,7 +43,17 @@ export default function LaunchToken({ launchConfig }: Props) {
     }
 
     if (launchResult) {
-        return <LaunchTokenFinal result={launchResult} />;
+        return (
+            <>
+                <LaunchTokenFinal result={launchResult} />
+                {launchResult.mintAddress && (
+                    <LaunchTradeFeedPanel
+                        mintAddress={launchResult.mintAddress}
+                        tokenSymbol={launchResult.tokenSymbol}
+                    />
+                )}
+            </>
+        );
     }
 
     return <LaunchTokenPreview launchConfig={launchConfig} onLaunch={handleLaunch} />;

@@ -226,6 +226,8 @@ export default function TransferForm() {
     const [bondingCurveLoading, setBondingCurveLoading] = useState(false)
     const [bondingCurveMsg, setBondingCurveMsg]         = useState('')
     const [bufferPct, setBufferPct]                     = useState('10')
+    const [launchTotalsJson, setLaunchTotalsJson]       = useState('')
+    const [launchTotalsCopied, setLaunchTotalsCopied]   = useState(false)
     const [solUsdPrice, setSolUsdPrice]                 = useState<number | null>(null)
 
     useEffect(() => {
@@ -357,6 +359,7 @@ export default function TransferForm() {
 
     async function applyBondingCurveFunding() {
         setBondingCurveMsg('')
+        setLaunchTotalsJson('')
 
         const checkedVisible = visibleWallets.filter((w) => selectedReceivers.has(w.id))
         const checkedTrading = checkedVisible
@@ -399,18 +402,34 @@ export default function TransferForm() {
             const data = await res.json()
             if (!res.ok) throw new Error(data.error ?? 'Calculation failed')
 
-            const wallets: { bufferedSol: number }[] = data.wallets
+            const wallets: { buyCostSol: number; bufferedSol: number }[] = data.wallets
+            let totalBuySol = 0
             let totalBufferedSol = 0
             setReceiverAmounts((prev) => {
                 const next = { ...prev }
                 sequence.forEach((w, i) => {
                     if (wallets[i]) {
                         next[w.id] = wallets[i].bufferedSol.toFixed(9)
+                        totalBuySol += wallets[i].buyCostSol
                         totalBufferedSol += wallets[i].bufferedSol
                     }
                 })
                 return next
             })
+
+            setLaunchTotalsJson(JSON.stringify({
+                bufferPct: parsedBufferPct,
+                wallets: sequence.map((w, i) => ({
+                    label:        w.label,
+                    publicKey:    w.public_key,
+                    buyAmountSol: wallets[i] ? Number(wallets[i].buyCostSol.toFixed(9)) : null,
+                    fundAmountSol: wallets[i] ? Number(wallets[i].bufferedSol.toFixed(9)) : null,
+                })),
+                totals: {
+                    buySol:   Number(totalBuySol.toFixed(9)),
+                    fundSol:  Number(totalBufferedSol.toFixed(9)),
+                },
+            }, null, 2))
 
             const usd = formatUsd(totalBufferedSol, solUsdPrice)
             const extraDev = checkedDev.length > 1 ? ` (${checkedDev.length - 1} extra checked dev wallet${checkedDev.length - 1 !== 1 ? 's' : ''} left as-is — set manually)` : ''
@@ -555,6 +574,12 @@ export default function TransferForm() {
         navigator.clipboard.writeText(key)
         setCopiedId(id)
         setTimeout(() => setCopiedId(null), 2000)
+    }
+
+    function copyLaunchTotals() {
+        navigator.clipboard.writeText(launchTotalsJson)
+        setLaunchTotalsCopied(true)
+        setTimeout(() => setLaunchTotalsCopied(false), 2000)
     }
 
     function renderGroupHeader(group: WalletGroup) {
@@ -818,6 +843,18 @@ export default function TransferForm() {
                     </div>
                     {bondingCurveMsg && (
                         <p className="text-xs text-muted-foreground">{bondingCurveMsg}</p>
+                    )}
+                    {launchTotalsJson && (
+                        <div>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={copyLaunchTotals}
+                            >
+                                {launchTotalsCopied ? 'Copied!' : 'Copy Launch Totals'}
+                            </Button>
+                        </div>
                     )}
                 </div>
 

@@ -14,10 +14,24 @@ import LaunchBuilderPalette from './launch-builder-palette'
 import LaunchBuilderCanvas from './launch-builder-canvas'
 import LaunchBuilderToolbar from './launch-builder-toolbar'
 import NodeConfigDialog from './node-config-dialog'
-import { BuilderNodeData } from './types'
+import BundleLoopPanel, { type BundleLoopState, type BundleLoopRow } from './bundle-loop-panel'
+import LaunchTradeFeedPanel from '@/components/tokens/launch/launch-trade-feed-panel'
+import { BuilderNodeData, ParsedBundledWallet } from './types'
 import { buildLaunchProfile, applyLaunchProfile, type LaunchProfile } from './launch-profile'
 import { getExecEntryNodeIds, getDownstreamNodeIds, getDownstreamNodeIdsByHandle, buildDataNodePayload, findTokenNodeData } from './handle-types'
 import { LaunchType } from '@/components/tokens/launch/types'
+import { solStringToLamports } from '@/lib/lamports'
+
+const DEFAULT_JITO_TIP_SOL = '0.001'
+
+function jitoTipLamportsFromConfig(config: Record<string, unknown>): string {
+    const raw = (config.jitoTipSol as string | undefined) ?? DEFAULT_JITO_TIP_SOL
+    try {
+        return solStringToLamports(raw).toString()
+    } catch {
+        return solStringToLamports(DEFAULT_JITO_TIP_SOL).toString()
+    }
+}
 
 const RUN_STEP_MS = 550
 
@@ -74,6 +88,45 @@ function LaunchBuilderInner() {
         setNodes((nds) => nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, awaitingContinue: false } } : n)))
         resolve()
     }, [setNodes])
+
+    // Bundled Jito loop progress dialog. Only one loop runs at a time in
+    // practice, but keyed by node id (like hitlWaitingRef) so a stray resolver
+    // never fires against the wrong run.
+    // Live trade feed for whatever mint most recently launched for real in this
+    // session — a dry run never broadcasts, so there's no real mint on-chain to
+    // watch, and the panel is intentionally not shown for those (see callLaunch).
+    const [launchedToken, setLaunchedToken] = useState<{ mintAddress: string; tokenSymbol: string | null } | null>(null)
+    const [ourWallets, setOurWallets]             = useState<Set<string>>(new Set())
+    const [ourWalletLabels, setOurWalletLabels]   = useState<Record<string, string>>({})
+
+    useEffect(() => {
+        if (!launchedToken) return
+        fetch('/api/wallets/explorer')
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data) => {
+                if (!data) return
+                const wallets = (data.wallets ?? []) as { public_key: string; label: string | null }[]
+                setOurWallets(new Set(wallets.map((w) => w.public_key)))
+                const labels: Record<string, string> = {}
+                for (const w of wallets) if (w.label) labels[w.public_key] = w.label
+                setOurWalletLabels(labels)
+            })
+            .catch(() => {})
+    }, [launchedToken])
+
+    const [bundleLoop, setBundleLoop] = useState<BundleLoopState | null>(null)
+    const bundleLoopDecisionRef = useRef<Map<string, (action: 'retry' | 'skip') => void>>(new Map())
+    const onRetryBundle = useCallback(() => {
+        if (!bundleLoop) return
+        const resolve = bundleLoopDecisionRef.current.get(bundleLoop.nodeId)
+        resolve?.('retry')
+    }, [bundleLoop])
+    const onSkipBundle = useCallback(() => {
+        if (!bundleLoop) return
+        const resolve = bundleLoopDecisionRef.current.get(bundleLoop.nodeId)
+        resolve?.('skip')
+    }, [bundleLoop])
+    const onCloseBundleLoop = useCallback(() => setBundleLoop(null), [])
 
     const runDryRun = useCallback(
         (execNodeId: string) => {
@@ -237,10 +290,11 @@ function LaunchBuilderInner() {
                 return message ?? 'Unknown error'
             }
 
-            // Launch Type — only "Dev 0 (Dev Only)" has a real execution path
-            // server-side today (single dev-wallet buy). Real keys are loaded
-            // and the transaction is signed either way; testMode simulates
-            // instead of broadcasting and never touches the draft's DB status.
+            // Launch Type — "Dev 0 (Dev Only)" and "Dev 0 (Dev + Bundle)" both have real
+            // execution paths server-side (single dev-wallet buy, or dev+up to 4 more
+            // wallets landing atomically in one Jito bundle). Real keys are loaded and
+            // every transaction is signed either way; testMode simulates instead of
+            // broadcasting and never touches the draft's DB status.
             const callLaunch = async (nodeId: string, config: Record<string, unknown>) => {
                 const tokenData = findTokenNodeData(nodeId, nodesRef.current, edgesRef.current)
                 const tokenId = tokenData?.config?.tokenId as string | undefined
@@ -248,6 +302,21 @@ function LaunchBuilderInner() {
                     console.warn(`[launch-builder] Launch node ${nodeId} has no Token node connected — skipping.`)
                     setResult(nodeId, { ok: false, message: 'No Token node connected' })
                     return
+                }
+
+                // Start watching BEFORE firing the launch, not after. The create(+buy)
+                // transaction — and every wallet bundled into it, for a Dev+Bundle launch —
+                // lands and finalizes on-chain during the POST below; if the trade feed's
+                // subscription only starts once that response comes back, it's watching a
+                // mint whose launch trade(s) already happened. Solana's logsSubscribe is
+                // forward-only — there's no backfill for logs that occurred before the
+                // subscription existed — so those trades would be permanently invisible,
+                // not just delayed. The mint address is already known from the Token node,
+                // no need to wait for the launch response to have it.
+                if (!testModeRef.current) {
+                    const mintAddress = tokenData?.config?.tokenMint as string | undefined
+                    const tokenSymbol = (tokenData?.config?.tokenSymbol as string | undefined) ?? null
+                    if (mintAddress) setLaunchedToken({ mintAddress, tokenSymbol })
                 }
 
                 const payload = {
@@ -261,6 +330,10 @@ function LaunchBuilderInner() {
                         walletTrades: config.walletTrades ?? [],
                     },
                     dryRun: testModeRef.current,
+                    // Only load-bearing for "Dev 0 (Dev + Bundle)" (>1 wallet) — the
+                    // server ignores both for create-only / solo-dev-buy launches.
+                    jitoTipInLamports: jitoTipLamportsFromConfig(config),
+                    slippage: (config.slippage as number | undefined) ?? 0.05,
                 }
 
                 try {
@@ -272,6 +345,14 @@ function LaunchBuilderInner() {
                     const result = await res.json()
                     console.log(`[launch-builder] Launch POST /api/pumpfun/launch →`, { status: res.status, ok: res.ok, payload, response: result })
 
+                    // launchStatus/hint (e.g. "current status: launching — only draft tokens
+                    // can be launched") used to be silently dropped here — result.error alone
+                    // ("Token cannot be launched") gives no way to tell "stuck from an
+                    // interrupted attempt" apart from "genuinely already launched."
+                    const errorMessage = result.launchStatus
+                        ? `${explainTradeError(result.error)} — current status: ${result.launchStatus}${result.hint ? ` (${result.hint})` : ''}`
+                        : explainTradeError(result.error)
+
                     setResult(nodeId, res.ok
                         ? {
                             ok: true,
@@ -280,8 +361,10 @@ function LaunchBuilderInner() {
                                 : result.simulated ? 'Simulated OK' : `Launched — ${String(result.signature ?? '').slice(0, 10)}…`,
                             signature: result.signature,
                         }
-                        : { ok: false, message: explainTradeError(result.error) })
-                    if (res.ok) setVariable(varNameFor(nodeId), { ...config, signature: result.signature, tokenMint: tokenData?.config?.tokenMint })
+                        : { ok: false, message: errorMessage })
+                    if (res.ok) {
+                        setVariable(varNameFor(nodeId), { ...config, signature: result.signature, tokenMint: tokenData?.config?.tokenMint })
+                    }
                 } catch (err) {
                     console.error(`[launch-builder] Launch call failed`, err)
                     setResult(nodeId, { ok: false, message: String(err) })
@@ -371,54 +454,167 @@ function LaunchBuilderInner() {
                 if (failCount === 0) setVariable(varNameFor(nodeId), { ...config, signature: lastSignature, walletIds: order })
             }
 
-            // Bundled Jito — QuickNode/Lil Jito path only, per scope.
+            // Bundled Jito — QuickNode/Lil Jito path only, per scope. Wallets come
+            // from the pasted "Copy Launch Totals" JSON (config.bundledWallets, in
+            // sequential launch order), chunked into config.bundleSize-wallet Jito
+            // bundles and submitted one bundle at a time — this is "the loop."
+            // No artificial gap between bundles: /api/trade/bundle/buy's QuickNode
+            // path already blocks inside sendPrebuiltBundle → pollBundleStatus until
+            // the bundle lands (or throws on Failed/timeout) before responding, so
+            // the awaited fetch below IS the confirmation wait — the next bundle
+            // fires the instant we have that bundle id back.
             const callBundledTrade = async (nodeId: string, config: Record<string, unknown>) => {
                 const tokenData = findTokenNodeData(nodeId, nodesRef.current, edgesRef.current)
                 const mintAddress = tokenData?.config?.tokenMint as string | undefined
-                const selectedWalletIds = (config.selectedWalletIds as string[] | undefined) ?? []
+                const bundledWallets = (config.bundledWallets as ParsedBundledWallet[] | undefined) ?? []
+                const bundleSize = Math.max(1, (config.bundleSize as number | undefined) ?? 5)
+                const slippage = (config.slippage as number | undefined) ?? 0.05
 
                 if (!mintAddress) {
                     setResult(nodeId, { ok: false, message: 'No Token node connected' })
                     return
                 }
-                if (selectedWalletIds.length === 0) {
-                    setResult(nodeId, { ok: false, message: 'No wallets selected' })
+                if (bundledWallets.length === 0) {
+                    setResult(nodeId, { ok: false, message: 'No wallets parsed — paste the Launch Totals JSON in the node config' })
                     return
                 }
 
-                const tradeAmounts = (config.tradeAmounts as Record<string, string> | undefined) ?? {}
-                const slippage = (config.slippage as number | undefined) ?? 0.05
-                const tradesList = selectedWalletIds.map((walletId) => ({
-                    walletId,
-                    mintAddress,
-                    amountInSol: Math.round((parseFloat(tradeAmounts[walletId] ?? '0') || 0) * 1e9).toString(),
-                    slippage,
-                }))
-
-                try {
-                    const res = await fetch('/api/trade/bundle/buy', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            jitoTipInLamports: '1000000',
-                            tradesList,
-                            useQuicknodeJito: true,
-                            dryRun: testModeRef.current,
-                        }),
-                    })
-                    const result = await res.json()
-                    console.log(`[launch-builder] Bundled Jito POST /api/trade/bundle/buy →`, { status: res.status, result })
-
-                    // Jito bundles don't have a single tx signature — the bundle id
-                    // is the closest analog for a downstream confirmation to reference.
-                    setResult(nodeId, res.ok
-                        ? { ok: true, message: result.simulated ? 'Simulated OK' : 'Bundle landed', signature: result.bundleId }
-                        : { ok: false, message: explainTradeError(result.error) })
-                    if (res.ok) setVariable(varNameFor(nodeId), { ...config, bundleId: result.bundleId, walletIds: selectedWalletIds })
-                } catch (err) {
-                    console.error(`[launch-builder] Bundled Jito call failed`, err)
-                    setResult(nodeId, { ok: false, message: explainTradeError(String(err)) })
+                const resolved = bundledWallets.filter((w): w is ParsedBundledWallet & { walletId: string } => !!w.walletId)
+                const unmatchedCount = bundledWallets.length - resolved.length
+                if (resolved.length === 0) {
+                    setResult(nodeId, { ok: false, message: 'None of the pasted wallets matched a known wallet' })
+                    return
                 }
+
+                const chunks: (typeof resolved)[] = []
+                for (let i = 0; i < resolved.length; i += bundleSize) {
+                    chunks.push(resolved.slice(i, i + bundleSize))
+                }
+
+                const jitoTipInLamports = jitoTipLamportsFromConfig(config)
+
+                // Local mirror of the dialog's rows — synchronous source of truth
+                // (React state updates are async/batched), pushed to the dialog via
+                // setBundleLoop after every mutation.
+                const rows: BundleLoopRow[] = chunks.map((chunk) => ({
+                    wallets:   chunk.map((w) => ({ label: w.label, publicKey: w.publicKey })),
+                    amountSol: chunk.reduce((s, w) => s + w.buyAmountSol, 0),
+                    status:    'pending',
+                }))
+                function pushRows(pausedIndex: number | null, done = false) {
+                    setBundleLoop({ nodeId, rows: [...rows], pausedIndex, done })
+                }
+                pushRows(null)
+
+                // Fires one bundle's full submit-and-confirm cycle. Bundles are launched
+                // back-to-back with no gap between them (see the dispatch loop below) —
+                // waiting for bundle N to fully land before even building bundle N+1 used
+                // to leave a multi-second window where bundle N's trades were already
+                // visible on-chain but bundle N+1 hadn't been submitted yet, wide enough
+                // for a sniper to react in between. Now every bundle races to land as
+                // close together as possible instead.
+                async function fireBundle(b: number): Promise<void> {
+                    const chunk = chunks[b]
+                    const tradesList = chunk.map((w) => ({
+                        walletId: w.walletId,
+                        mintAddress,
+                        amountInSol: Math.round(w.buyAmountSol * 1e9).toString(),
+                        slippage,
+                    }))
+
+                    rows[b] = { ...rows[b], status: 'running', error: undefined }
+                    pushRows(null)
+
+                    let landed = false
+                    let bundleId: string | undefined
+                    let errorMsg: string | undefined
+
+                    try {
+                        const res = await fetch('/api/trade/bundle/buy', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                jitoTipInLamports,
+                                tradesList,
+                                useQuicknodeJito: true,
+                                dryRun: testModeRef.current,
+                            }),
+                        })
+                        const result = await res.json()
+                        console.log(`[launch-builder] Bundled Jito loop bundle ${b + 1}/${chunks.length} POST /api/trade/bundle/buy →`, { status: res.status, result })
+
+                        if (res.ok) {
+                            landed = true
+                            bundleId = result.bundleId
+                        } else {
+                            errorMsg = explainTradeError(result.error)
+                        }
+                    } catch (err) {
+                        console.error(`[launch-builder] Bundled Jito loop bundle ${b + 1}/${chunks.length} failed`, err)
+                        errorMsg = explainTradeError(String(err))
+                    }
+
+                    if (landed) {
+                        rows[b] = { ...rows[b], status: 'landed', bundleId }
+                    } else {
+                        rows[b] = { ...rows[b], status: 'failed', error: errorMsg }
+                    }
+                    pushRows(null)
+                }
+
+                // Dispatch every bundle in order, but only wait for each one to be
+                // *initiated* (not landed) before starting the next — a tiny stagger
+                // between fires, not a confirmation gate. Genuine microsecond timing
+                // isn't achievable through a browser JS timer (setTimeout floors out
+                // around 1-4ms), so FIRE_STAGGER_MS is the practical equivalent: just
+                // enough to keep dispatch order deterministic and avoid slamming the
+                // RPC/Jito endpoint with N simultaneous requests, nowhere near enough
+                // for a sniper to react in between (unlike the old design, which waited
+                // out each bundle's full multi-second landing confirmation in between).
+                const FIRE_STAGGER_MS = 15
+                setResult(nodeId, { ok: true, message: `Firing ${chunks.length} bundle${chunks.length !== 1 ? 's' : ''}…` })
+                const firing: Promise<void>[] = []
+                for (let b = 0; b < chunks.length; b++) {
+                    firing.push(fireBundle(b))
+                    if (b < chunks.length - 1) await new Promise((r) => setTimeout(r, FIRE_STAGGER_MS))
+                }
+                await Promise.allSettled(firing)
+
+                // Anything that didn't land gets a chance to retry (or skip), one at a
+                // time — everything that DID land is already done, no further waiting.
+                const failedIndexes = rows.map((r, i) => (r.status === 'failed' ? i : -1)).filter((i) => i !== -1)
+                let f = 0
+                while (f < failedIndexes.length) {
+                    const b = failedIndexes[f]
+                    pushRows(b)
+                    setResult(nodeId, { ok: false, message: `Bundle ${b + 1}/${chunks.length} failed — ${rows[b].error}` })
+
+                    const action = await new Promise<'retry' | 'skip'>((resolve) => {
+                        bundleLoopDecisionRef.current.set(nodeId, resolve)
+                    })
+                    bundleLoopDecisionRef.current.delete(nodeId)
+
+                    if (action === 'retry') {
+                        await fireBundle(b)
+                        if (rows[b].status === 'landed') f++ // landed — move to the next failed bundle
+                        // still failed — loop again and re-prompt for this same bundle
+                    } else {
+                        f++ // skip — leave this row marked failed, move to the next one
+                    }
+                }
+
+                const landedCount = rows.filter((r) => r.status === 'landed').length
+                const failCount   = rows.filter((r) => r.status === 'failed').length
+                const bundleIds   = rows.filter((r) => r.status === 'landed' && r.bundleId).map((r) => r.bundleId!)
+                pushRows(null, true)
+
+                const unmatchedNote = unmatchedCount > 0 ? ` (${unmatchedCount} unmatched wallet${unmatchedCount !== 1 ? 's' : ''} skipped)` : ''
+                // Jito bundles don't have a single tx signature — the last-landed bundle
+                // id is the closest analog for a downstream confirmation to reference.
+                setResult(nodeId, failCount === 0
+                    ? { ok: true, message: `${landedCount}/${chunks.length} bundle${chunks.length !== 1 ? 's' : ''} ${testModeRef.current ? 'simulated' : 'landed'}${unmatchedNote}`, signature: bundleIds[bundleIds.length - 1] }
+                    : { ok: false, message: `${landedCount}/${chunks.length} bundles landed, ${failCount} failed${unmatchedNote}` })
+                if (failCount === 0) setVariable(varNameFor(nodeId), { ...config, bundleIds, walletIds: resolved.map((w) => w.walletId) })
             }
 
             // Sell All — sells every selected wallet's full balance atomically in
@@ -765,10 +961,10 @@ function LaunchBuilderInner() {
                     // a friendlier alias for the dev wallet field.
                     setVariable(varNameFor(nodeId), { ...data.config, devWalletPublicKey: data.config?.devWalletId })
                     await wait(RUN_STEP_MS)
-                } else if (data?.category === 'launchType' && data.subtype === 'dev0DevOnly') {
+                } else if (data?.category === 'launchType' && (data.subtype === 'dev0DevOnly' || data.subtype === 'dev0DevBundle')) {
                     await callLaunch(nodeId, data.config ?? {})
                 } else if (data?.category === 'launchType') {
-                    // dev0DevBundle / bundled / swarm — no real execution backend yet.
+                    // bundled / swarm — no real execution backend yet.
                     setResult(nodeId, { ok: false, message: 'Not executable yet — no backend for this launch type' })
                     await wait(RUN_STEP_MS)
                 } else if (data?.category === 'trade' && (data.subtype === 'staggeredBuy' || data.subtype === 'staggeredSell' || data.subtype === 'sellPercent')) {
@@ -878,9 +1074,13 @@ function LaunchBuilderInner() {
         const tokenNode = nodes.find(
             (n) => (n.data as unknown as BuilderNodeData).category === 'token',
         )
+        // save_launch_config's p_token_mint_id is a uuid FK into private.token_mints(id) —
+        // config.tokenId is that row id. config.tokenMint is the on-chain mint *address*
+        // (base58, not a uuid); sending that instead throws "invalid input syntax for
+        // type uuid" from Postgres the moment a Token node is actually configured.
         const tokenMintId =
             (tokenNode
-                ? ((tokenNode.data as unknown as BuilderNodeData).config?.tokenMint as string)
+                ? ((tokenNode.data as unknown as BuilderNodeData).config?.tokenId as string)
                 : null) ?? null
 
         try {
@@ -1001,6 +1201,25 @@ function LaunchBuilderInner() {
                     onSave={onSaveConfig}
                     testMode={testMode}
                 />
+                <BundleLoopPanel
+                    state={bundleLoop}
+                    onRetry={onRetryBundle}
+                    onSkip={onSkipBundle}
+                    onClose={onCloseBundleLoop}
+                />
+                {launchedToken && (
+                    <LaunchTradeFeedPanel
+                        key={launchedToken.mintAddress}
+                        mintAddress={launchedToken.mintAddress}
+                        tokenSymbol={launchedToken.tokenSymbol}
+                        ourWallets={ourWallets}
+                        ourWalletLabels={ourWalletLabels}
+                        // Shares the bottom-right corner with BundleLoopPanel (both w-96) —
+                        // offset left so a Bundled Jito trade run right after launch doesn't
+                        // stack its progress panel directly on top of the trade feed.
+                        positionClassName="bottom-4 right-[26rem]"
+                    />
+                )}
             </div>
         </div>
     )

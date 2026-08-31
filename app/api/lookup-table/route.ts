@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
   const targetUserId     = searchParams.get('userId') ?? null
   const status           = searchParams.get('status') ?? null   // active|frozen|deactivated
   const chain            = searchParams.get('chain')  ?? null
+  const mintId           = searchParams.get('mintId') ?? null   // private.token_mints.id — dedicated per-launch ALT
 
   // ── 3. Fetch via security definer function ────────────────
   // get_lookup_tables() scopes automatically:
@@ -30,7 +31,8 @@ export async function GET(req: NextRequest) {
   //   user        → own only
 const { data: tablesRaw, error: rpcError } = await supabase
   .rpc('get_lookup_tables', {
-    target_user_id: targetUserId
+    target_user_id: targetUserId,
+    p_mint_id:      mintId
   })
 
 

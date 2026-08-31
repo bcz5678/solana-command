@@ -26,18 +26,27 @@ export async function POST(request: Request) {
     try {
         const connection = initializeConnection()
 
-        // Fetch all parsed token accounts for each wallet in parallel.
-        // Querying both SPL Token and Token-2022 program to cover all token types.
-        const walletResults = await Promise.all(
-            walletAddresses.map(async (addr) => {
-                const owner = new PublicKey(addr)
-                const [v1, v2] = await Promise.all([
-                    connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID }),
-                    connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_2022_PROGRAM_ID }),
-                ])
-                return { addr, accounts: [...v1.value, ...v2.value] }
-            })
-        )
+        // Fetch all parsed token accounts for each wallet, batched — each wallet
+        // fires 2 RPC calls (SPL Token + Token-2022), so an unbatched Promise.all
+        // over e.g. 100 wallets fires 200 concurrent requests at once. QuickNode
+        // (and most RPC providers) queue/throttle rather than reject outright at
+        // that concurrency, so the symptom is a hang, not a clean error.
+        const WALLET_BATCH_SIZE = 20
+
+        async function fetchBatch(addr: string) {
+            const owner = new PublicKey(addr)
+            const [v1, v2] = await Promise.all([
+                connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID }),
+                connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_2022_PROGRAM_ID }),
+            ])
+            return { addr, accounts: [...v1.value, ...v2.value] }
+        }
+
+        const walletResults: Awaited<ReturnType<typeof fetchBatch>>[] = []
+        for (let i = 0; i < walletAddresses.length; i += WALLET_BATCH_SIZE) {
+            const batch = walletAddresses.slice(i, i + WALLET_BATCH_SIZE)
+            walletResults.push(...await Promise.all(batch.map(fetchBatch)))
+        }
 
         const balances: Record<string, string> = {}
         let decimals = 6

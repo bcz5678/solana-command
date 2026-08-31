@@ -39,7 +39,9 @@ import {
     Repeat,
     GitBranch,
     FileBracesCornerIcon,
-    PackagePlus
+    PackagePlus,
+    Radio,
+    MessageSquare
 } from "lucide-react"
 import { RelayStatusIndicator } from "@/components/wss/relay-status-indicator"
 
@@ -236,6 +238,28 @@ export function AppSidebar() {
                   <Link href="/protected/tokens/launch-builder">
                     <Workflow />
                     <span>Launch Builder</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+               <SidebarMenuItem>
+                <SidebarMenuButton
+                  className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
+                  asChild
+                >
+                  <Link href="/protected/tokens/live-trades">
+                    <Radio />
+                    <span>Live Trades</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+               <SidebarMenuItem>
+                <SidebarMenuButton
+                  className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
+                  asChild
+                >
+                  <Link href="/protected/tokens/comment-bot">
+                    <MessageSquare />
+                    <span>Comment Bot</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
