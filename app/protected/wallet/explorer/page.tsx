@@ -16,8 +16,8 @@ export default function Page() {
   const [error, setError]             = useState<string | null>(null)
   const [isLoading, setIsLoading]     = useState(true)
 
-  useEffect(() => {
-    fetch('/api/wallets/explorer')
+  function refreshWallets() {
+    return fetch('/api/wallets/explorer')
       .then((r) => r.json())
       .then(({ wallets, walletTypes, owners, groups }) => {
         const parsed: WalletRecord[] = (wallets ?? []).map((w: any) => ({
@@ -32,7 +32,10 @@ export default function Page() {
         setGroups(groups ?? [])
       })
       .catch(() => setError('Failed to load wallets'))
-      .finally(() => setIsLoading(false))
+  }
+
+  useEffect(() => {
+    refreshWallets().finally(() => setIsLoading(false))
 
     fetch('/api/price/sol-usd')
       .then((r) => r.json())
@@ -60,6 +63,7 @@ export default function Page() {
           owners={owners}
           groups={groups}
           solUsdPrice={solUsdPrice}
+          onWalletRetired={refreshWallets}
         />
       )}
     </div>

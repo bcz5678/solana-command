@@ -75,10 +75,11 @@ export async function searchJupiterToken(mint: string): Promise<JupiterTokenInfo
   }
 }
 
-interface JupiterPriceResponse {
-  data: Record<string, { id: string; price: string } | undefined>
-  timeTaken: number
-}
+// v2 (`/price/v2`, `{ data: Record<mint, {id, price}> }`) 404s as of 2026-09
+// — Jupiter dropped it with no redirect. v3 dropped the `data` wrapper (the
+// mint is the top-level key) and renamed `price` (a string) to `usdPrice`
+// (a number). Confirmed live against lite-api.jup.ag before switching.
+type JupiterPriceResponse = Record<string, { usdPrice: number } | undefined>
 
 let cachedSolUsdPrice: { price: number; fetchedAt: number } | null = null
 const SOL_USD_CACHE_TTL_MS = 30_000
@@ -89,10 +90,10 @@ export async function getSolUsdPrice(): Promise<number> {
     return cachedSolUsdPrice.price
   }
 
-  const res = await jupiterFetch<JupiterPriceResponse>(`/price/v2?ids=${WRAPPED_SOL_MINT}`)
-  const price = Number(res.data[WRAPPED_SOL_MINT]?.price)
+  const res = await jupiterFetch<JupiterPriceResponse>(`/price/v3?ids=${WRAPPED_SOL_MINT}`)
+  const price = res[WRAPPED_SOL_MINT]?.usdPrice ?? NaN
   if (!Number.isFinite(price) || price <= 0) {
-    throw new Error('Jupiter price/v2 returned no usable SOL price')
+    throw new Error('Jupiter price/v3 returned no usable SOL price')
   }
 
   cachedSolUsdPrice = { price, fetchedAt: Date.now() }
