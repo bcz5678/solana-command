@@ -5,6 +5,7 @@ import type { CommentBankEntry } from '@/lib/types/comment-bank'
 
 export const dynamic = 'force-dynamic'
 
+// Entries within one bank — see /api/comment-banks for the bank entities themselves.
 export async function GET(req: NextRequest) {
   try {
     await requireSuperAdmin()
@@ -13,12 +14,16 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url)
-  const tag   = searchParams.get('tag')
-  const limit = Number(searchParams.get('limit') ?? 500)
+  const bankId = searchParams.get('bankId')
+  const limit  = Number(searchParams.get('limit') ?? 500)
+
+  if (!bankId) {
+    return NextResponse.json({ error: 'bankId is required' }, { status: 400 })
+  }
 
   const supabase = await createClient()
   const { data, error } = await supabase.rpc('get_comment_bank', {
-    p_tag:         tag,
+    p_bank_id:     bankId,
     p_active_only: true,
     p_limit:       limit,
   })
@@ -38,7 +43,7 @@ export async function POST(req: NextRequest) {
     return res as Response
   }
 
-  let body: { texts?: string[]; tag?: string; source?: string }
+  let body: { bankId?: string; texts?: string[]; source?: string }
   try {
     body = await req.json()
   } catch {
@@ -46,15 +51,18 @@ export async function POST(req: NextRequest) {
   }
 
   const texts = (body.texts ?? []).map((t) => t.trim()).filter(Boolean)
+  if (!body.bankId) {
+    return NextResponse.json({ error: 'bankId is required' }, { status: 400 })
+  }
   if (texts.length === 0) {
     return NextResponse.json({ error: 'texts must be a non-empty array' }, { status: 400 })
   }
 
   const supabase = await createClient()
   const { data, error } = await supabase.rpc('add_comment_bank_entries', {
-    p_texts:  texts,
-    p_tag:    body.tag ?? null,
-    p_source: body.source ?? 'manual',
+    p_bank_id: body.bankId,
+    p_texts:   texts,
+    p_source:  body.source ?? 'manual',
   })
 
   if (error) {
@@ -63,4 +71,28 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ success: true, ...(data as { inserted: number }) })
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    await requireSuperAdmin()
+  } catch (res) {
+    return res as Response
+  }
+
+  const { searchParams } = new URL(req.url)
+  const id = searchParams.get('id')
+  if (!id) {
+    return NextResponse.json({ error: 'id is required' }, { status: 400 })
+  }
+
+  const supabase = await createClient()
+  const { error } = await supabase.rpc('delete_comment_bank_entry', { p_id: id })
+
+  if (error) {
+    console.error('[api/comment-bank] delete_comment_bank_entry error:', error.message)
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  return NextResponse.json({ success: true })
 }

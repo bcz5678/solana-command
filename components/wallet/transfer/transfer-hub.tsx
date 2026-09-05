@@ -1,13 +1,16 @@
 'use client'
 
 import { useState } from 'react'
-import { ArrowLeft, Send, ArrowDownToLine, ArrowUpToLine, Users } from 'lucide-react'
+import { ArrowLeft, Send, ArrowDownToLine, ArrowUpToLine, Users, Coins, Banknote, Shuffle } from 'lucide-react'
 import TransferForm from './transfer-form'
 import FundOneToManyForm from './fund-one-to-many-form'
 import SingleTransferForm from './single-transfer-form'
 import ConsolidateForm from './consolidate-form'
+import SingleTokenTransferForm from './single-token-transfer-form'
+import FundOneToManyTokenForm from './fund-one-to-many-token-form'
+import ManyToManyTokenForm from './many-to-many-token-form'
 
-type Mode = 'single' | 'fund' | 'fund-one-to-many' | 'consolidate'
+type Mode = 'single' | 'fund' | 'fund-one-to-many' | 'consolidate' | 'token-single' | 'token-fund-one-to-many' | 'token-many-to-many'
 
 const MODES: { id: Mode; icon: React.ElementType; title: string; description: string }[] = [
     {
@@ -33,6 +36,24 @@ const MODES: { id: Mode; icon: React.ElementType; title: string; description: st
         icon:        ArrowUpToLine,
         title:       'Consolidate Wallets',
         description: 'Sweep SOL from multiple wallets back into a single destination.',
+    },
+    {
+        id:          'token-single',
+        icon:        Coins,
+        title:       'Send Token to Single Wallet',
+        description: 'Transfer an SPL token from one wallet to a single destination address.',
+    },
+    {
+        id:          'token-fund-one-to-many',
+        icon:        Banknote,
+        title:       'Send Token to Many Wallets',
+        description: 'Send an SPL token from a single source wallet to multiple destination wallets.',
+    },
+    {
+        id:          'token-many-to-many',
+        icon:        Shuffle,
+        title:       'Many-to-Many Token Transfer',
+        description: 'Move one SPL token between any number of wallets — build a list of from/to/amount transfers and send them all at once.',
     },
 ]
 
@@ -84,6 +105,33 @@ export default function TransferHub() {
             <div>
                 <BackButton onBack={() => setMode(null)} />
                 <ConsolidateForm />
+            </div>
+        )
+    }
+
+    if (mode === 'token-single') {
+        return (
+            <div>
+                <BackButton onBack={() => setMode(null)} />
+                <SingleTokenTransferForm />
+            </div>
+        )
+    }
+
+    if (mode === 'token-fund-one-to-many') {
+        return (
+            <div>
+                <BackButton onBack={() => setMode(null)} />
+                <FundOneToManyTokenForm />
+            </div>
+        )
+    }
+
+    if (mode === 'token-many-to-many') {
+        return (
+            <div>
+                <BackButton onBack={() => setMode(null)} />
+                <ManyToManyTokenForm />
             </div>
         )
     }

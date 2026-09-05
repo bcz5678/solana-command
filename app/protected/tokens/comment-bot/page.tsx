@@ -12,7 +12,8 @@ import {
 } from '@/components/ui/combobox'
 import type { WalletRecord } from '@/lib/types/wallet'
 import type { TokenMint } from '@/lib/types/token-mint'
-import type { CommentBankEntry } from '@/lib/types/comment-bank'
+import type { CommentBank, CommentBankEntry } from '@/lib/types/comment-bank'
+import BankPicker from '@/components/tokens/comment-bank/bank-picker'
 
 type TokenOption = { value: string; label: string; token: TokenMint }
 
@@ -60,8 +61,14 @@ export default function CommentBotPage() {
   const [commentSource, setCommentSource] = useState<'manual' | 'bank'>('manual')
   const [commentsInput, setCommentsInput] = useState('')
 
+  // Which bank(s) to pull FROM when running — least-used-first across their union.
+  const [selectedBankIds, setSelectedBankIds] = useState<Set<string>>(new Set())
   const [bankEntries, setBankEntries]         = useState<CommentBankEntry[]>([])
-  const [bankLoading, setBankLoading]         = useState(true)
+  const [bankEntriesLoading, setBankEntriesLoading] = useState(false)
+
+  // Which single bank to import new pasted lines INTO — separate from the pull-from set above.
+  const [importBanks, setImportBanks]         = useState<CommentBank[]>([])
+  const [importBankId, setImportBankId]       = useState('')
   const [bankImportText, setBankImportText]   = useState('')
   const [bankSaving, setBankSaving]           = useState(false)
   const [bankImportMessage, setBankImportMessage] = useState('')
@@ -73,13 +80,59 @@ export default function CommentBotPage() {
   const [running, setRunning] = useState(false)
   const stopRef = useRef(false)
 
-  function refreshBank() {
-    setBankLoading(true)
-    return fetch('/api/comment-bank')
+  // Reply to an existing callout — a single-wallet action, and unlike the
+  // bulk poster above the wallet doesn't need to still hold the token
+  // (replying to your own callout stays eligible after the position closes),
+  // so this uses the full wallet list rather than holdingWallets.
+  const [replyWalletId, setReplyWalletId]         = useState('')
+  const [replyCalloutId, setReplyCalloutId]       = useState<string | null>(null)
+  const [replyCalloutThesis, setReplyCalloutThesis] = useState<string | null>(null)
+  const [replyLookupLoading, setReplyLookupLoading] = useState(false)
+  const [replyLookupError, setReplyLookupError]   = useState<string | null>(null)
+  const [replyText, setReplyText]                 = useState('')
+  const [replySending, setReplySending]           = useState(false)
+  const [replyResult, setReplyResult]             = useState<{ success: boolean; message: string } | null>(null)
+
+  // Merges entries across every selected bank and sorts least-used-first —
+  // mirrors claim_comment_bank_entry()'s ordering so manual "Start" here
+  // behaves the same as the durable scheduler's pick.
+  function refreshBankEntries(bankIds: Set<string>) {
+    if (bankIds.size === 0) {
+      setBankEntries([])
+      return Promise.resolve()
+    }
+    setBankEntriesLoading(true)
+    return Promise.all(
+      [...bankIds].map((id) =>
+        fetch(`/api/comment-bank?bankId=${encodeURIComponent(id)}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data) => (data?.entries ?? []) as CommentBankEntry[])
+          .catch(() => [] as CommentBankEntry[]),
+      ),
+    )
+      .then((lists) => {
+        const merged = lists.flat().sort((a, b) => {
+          if (a.used_count !== b.used_count) return a.used_count - b.used_count
+          const aLast = a.last_used_at ? new Date(a.last_used_at).getTime() : -Infinity
+          const bLast = b.last_used_at ? new Date(b.last_used_at).getTime() : -Infinity
+          if (aLast !== bLast) return aLast - bLast
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        })
+        setBankEntries(merged)
+      })
+      .finally(() => setBankEntriesLoading(false))
+  }
+
+  function refreshImportBanks() {
+    const qs = mintValid ? `?mintAddress=${encodeURIComponent(mintAddress)}` : ''
+    return fetch(`/api/comment-banks${qs}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => { if (data) setBankEntries((data.entries ?? []) as CommentBankEntry[]) })
+      .then((data) => {
+        const list = (data?.banks ?? []) as CommentBank[]
+        setImportBanks(list)
+        setImportBankId((prev) => (prev && list.some((b) => b.id === prev)) ? prev : (list[0]?.id ?? ''))
+      })
       .catch(() => {})
-      .finally(() => setBankLoading(false))
   }
 
   useEffect(() => {
@@ -93,20 +146,23 @@ export default function CommentBotPage() {
       .then((r) => r.json())
       .then((data) => setTokens((data.tokens ?? []) as TokenMint[]))
       .catch(() => {})
-
-    refreshBank()
   }, [])
+
+  useEffect(() => {
+    refreshBankEntries(selectedBankIds)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBankIds])
 
   async function saveBankImport() {
     const texts = bankImportText.split('\n').map((l) => l.trim()).filter(Boolean)
-    if (texts.length === 0) return
+    if (texts.length === 0 || !importBankId) return
     setBankSaving(true)
     setBankImportMessage('')
     try {
       const res = await fetch('/api/comment-bank', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ texts }),
+        body:    JSON.stringify({ bankId: importBankId, texts }),
       })
       const result = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -114,7 +170,7 @@ export default function CommentBotPage() {
       } else {
         setBankImportMessage(`Saved ${result.inserted ?? texts.length} entr${(result.inserted ?? texts.length) === 1 ? 'y' : 'ies'}`)
         setBankImportText('')
-        await refreshBank()
+        await Promise.all([refreshImportBanks(), refreshBankEntries(selectedBankIds)])
       }
     } catch (err) {
       setBankImportMessage(err instanceof Error ? err.message : String(err))
@@ -161,6 +217,11 @@ export default function CommentBotPage() {
   }, [mintAddress])
 
   useEffect(() => {
+    refreshImportBanks()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mintValid])
+
+  useEffect(() => {
     if (!mintValid || wallets.length === 0) {
       setTokenBalances({})
       return
@@ -205,6 +266,60 @@ export default function CommentBotPage() {
       return pruned.size === prev.size ? prev : pruned
     })
   }, [holdingWallets, mintValid])
+
+  // Auto-resolve "my callout" for the selected reply wallet + the page's
+  // selected mint — the caller never needs pump.fun's raw calloutId.
+  useEffect(() => {
+    setReplyResult(null)
+    if (!replyWalletId || !mintValid) {
+      setReplyCalloutId(null)
+      setReplyCalloutThesis(null)
+      setReplyLookupError(null)
+      return
+    }
+    let cancelled = false
+    setReplyLookupLoading(true)
+    fetch(`/api/pumpfun/callout-reply?walletId=${encodeURIComponent(replyWalletId)}&mintAddress=${encodeURIComponent(mintAddress)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return
+        if (data.error) {
+          setReplyCalloutId(null)
+          setReplyCalloutThesis(null)
+          setReplyLookupError(data.error)
+        } else {
+          setReplyCalloutId(data.calloutId ?? null)
+          setReplyCalloutThesis(data.thesis ?? null)
+          setReplyLookupError(data.calloutId ? null : 'This wallet hasn’t called out this token yet.')
+        }
+      })
+      .catch((err) => { if (!cancelled) setReplyLookupError(err instanceof Error ? err.message : String(err)) })
+      .finally(() => { if (!cancelled) setReplyLookupLoading(false) })
+    return () => { cancelled = true }
+  }, [replyWalletId, mintValid, mintAddress])
+
+  async function submitReply() {
+    if (!replyWalletId || !replyCalloutId || !replyText.trim()) return
+    setReplySending(true)
+    setReplyResult(null)
+    try {
+      const res = await fetch('/api/pumpfun/callout-reply', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ walletId: replyWalletId, calloutId: replyCalloutId, text: replyText.trim() }),
+      })
+      const result = await res.json().catch(() => ({}))
+      setReplyResult({
+        success: res.ok,
+        message: res.ok ? 'Reply posted!' : (result.error ?? `HTTP ${res.status}`),
+      })
+      if (res.ok) setReplyText('')
+    } catch (err) {
+      setReplyResult({ success: false, message: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setReplySending(false)
+    }
+  }
 
   const hasCommentSource = commentSource === 'bank' ? bankEntries.length > 0 : commentsInput.trim().length > 0
   const canStart = !running && mintValid && selectedWalletIds.size > 0 && hasCommentSource
@@ -277,7 +392,7 @@ export default function CommentBotPage() {
     }
 
     setRunning(false)
-    if (commentSource === 'bank') refreshBank()
+    if (commentSource === 'bank') refreshBankEntries(selectedBankIds)
   }
 
   function stopLoop() {
@@ -378,6 +493,69 @@ export default function CommentBotPage() {
         </div>
       </div>
 
+      <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
+        <div>
+          <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Reply to my callout</label>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Post a follow-up under a wallet&apos;s existing callout for the token selected above. Unlike posting a new callout, the wallet doesn&apos;t need to still hold the token.
+          </p>
+        </div>
+
+        {!mintValid ? (
+          <p className="text-xs text-muted-foreground">Select a target mint above first.</p>
+        ) : (
+          <>
+            <select
+              value={replyWalletId}
+              onChange={(e) => setReplyWalletId(e.target.value)}
+              className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <option value="">Select a wallet…</option>
+              {wallets.map((w) => (
+                <option key={w.id} value={w.id}>{w.label ?? maskPubKey(w.public_key)}</option>
+              ))}
+            </select>
+
+            {replyWalletId && (
+              <>
+                {replyLookupLoading && <p className="text-xs text-muted-foreground">Checking for an existing callout…</p>}
+                {!replyLookupLoading && replyCalloutId && (
+                  <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
+                    <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Replying to</p>
+                    <p className="truncate text-xs">{replyCalloutThesis || '(no thesis text)'}</p>
+                  </div>
+                )}
+                {!replyLookupLoading && !replyCalloutId && replyLookupError && (
+                  <p className="text-xs text-muted-foreground">{replyLookupError}</p>
+                )}
+
+                {replyCalloutId && (
+                  <>
+                    <textarea
+                      value={replyText}
+                      onChange={(e) => setReplyText(e.target.value)}
+                      rows={2}
+                      placeholder="Add a reply…"
+                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    />
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" onClick={submitReply} disabled={replySending || !replyText.trim()}>
+                        {replySending ? 'Posting…' : 'Post reply'}
+                      </Button>
+                      {replyResult && (
+                        <p className={`text-xs ${replyResult.success ? 'text-green-500' : 'text-destructive'}`}>
+                          {replyResult.message}
+                        </p>
+                      )}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </div>
+
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -406,7 +584,7 @@ export default function CommentBotPage() {
                   : 'border-border text-muted-foreground hover:border-blue-400 hover:text-foreground',
               ].join(' ')}
             >
-              Bank ({bankEntries.length})
+              Banks ({selectedBankIds.size} selected, {bankEntries.length} entries)
             </button>
           </div>
         </div>
@@ -425,13 +603,19 @@ export default function CommentBotPage() {
         ) : (
           <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
             <p className="text-xs text-muted-foreground">
-              Pulls least-used entries first, one per selected wallet, and marks each used after a successful post so it isn&apos;t reused right away.
+              Pick one or more banks — a generic bank plus one written for this token works well.
+              Pulls least-used entries first across all selected banks, one per selected wallet, and marks each used after a successful post.
             </p>
-            {bankLoading ? (
-              <p className="text-sm text-muted-foreground">Loading bank…</p>
-            ) : bankEntries.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Bank is empty — import some below.</p>
-            ) : (
+
+            <BankPicker
+              mintAddress={mintValid ? mintAddress : undefined}
+              selectedBankIds={selectedBankIds}
+              onChange={setSelectedBankIds}
+            />
+
+            {bankEntriesLoading ? (
+              <p className="text-xs text-muted-foreground">Loading entries…</p>
+            ) : bankEntries.length > 0 && (
               <div className="max-h-32 overflow-y-auto rounded-md border border-border divide-y divide-border">
                 {bankEntries.slice(0, 20).map((entry) => (
                   <div key={entry.id} className="flex items-center gap-2 px-2 py-1.5 text-xs">
@@ -444,8 +628,23 @@ export default function CommentBotPage() {
 
             <div className="flex flex-col gap-2 border-t border-border pt-3">
               <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Import into bank (one per line)
+                Import into
               </label>
+              {importBanks.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Create a bank above first.</p>
+              ) : (
+                <select
+                  value={importBankId}
+                  onChange={(e) => setImportBankId(e.target.value)}
+                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  {importBanks.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} {b.mint_address ? '(this token)' : '(generic)'}
+                    </option>
+                  ))}
+                </select>
+              )}
               <textarea
                 value={bankImportText}
                 onChange={(e) => setBankImportText(e.target.value)}
@@ -458,7 +657,7 @@ export default function CommentBotPage() {
                   size="sm"
                   variant="outline"
                   onClick={saveBankImport}
-                  disabled={bankSaving || !bankImportText.trim()}
+                  disabled={bankSaving || !bankImportText.trim() || !importBankId}
                 >
                   {bankSaving ? 'Saving…' : 'Save to bank'}
                 </Button>

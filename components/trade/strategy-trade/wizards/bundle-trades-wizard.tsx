@@ -8,6 +8,7 @@ import { solStringToLamports, lamportsBNToSolDisplay, lamportsStringToBN } from 
 import { WalletRecord } from '@/lib/types/wallet'
 import { SlippageControl } from '@/components/trade/trade/SlippageControl'
 import { TokenMintInput } from '@/components/trade/strategy-trade/TokenMintInput'
+import BankPicker from '@/components/tokens/comment-bank/bank-picker'
 
 const steps: WizardStep[] = [
     {
@@ -69,6 +70,29 @@ function randomInRange(min: number, max: number): string {
     return (Math.random() * (max - min) + min).toFixed(2)
 }
 
+// A single /api/trade/bundle/sell call throws once packed wallets need more
+// than 5 transactions (Jito's per-bundle cap) even after ALT compression —
+// exactly what "Sell All" across many wallets used to hit. 5 wallets/chunk is
+// the same conservative default the launch-builder Bundled Jito loop already
+// uses for buys (safe even with zero ALT compression, since the legacy path
+// caps at 4 wallets/tx and 5 chunks = 5 tx at worst). Sell isn't chunked
+// there today — this wizard is where it gets fixed.
+const BUNDLE_CHUNK_SIZE = 5
+// Same anti-sniper reasoning as the buy loop: fire every chunk back-to-back
+// with only a dispatch stagger, not a wait for each to land, so a large sell
+// doesn't leave a multi-second window where part of it is already visible
+// on-chain while the rest hasn't fired yet.
+const FIRE_STAGGER_MS = 15
+
+type ChunkStatus = 'pending' | 'running' | 'landed' | 'failed'
+
+interface BundleChunkRow {
+    walletIds: string[]
+    status:    ChunkStatus
+    bundleId?: string
+    error?:    string
+}
+
 export default function BundleTradesWizard() {
     const [step, setStep]                       = useState(0)
     const [tradeType, setTradeType]             = useState<TradeType>('buy')
@@ -88,6 +112,8 @@ export default function BundleTradesWizard() {
     const [wallets, setWallets]   = useState<WalletRecord[]>([])
     const [slippage, setSlippage] = useState(0.01)
     const [sellPct, setSellPct]                   = useState('')
+    const [sellAllEnabled, setSellAllEnabled]     = useState(false)
+    const [bundleLoopRows, setBundleLoopRows]     = useState<BundleChunkRow[]>([])
     const [tokenMint, setTokenMint]               = useState('')
     const [tokenResolved, setTokenResolved]       = useState(false)
     const [tokenName, setTokenName]               = useState('')
@@ -99,6 +125,12 @@ export default function BundleTradesWizard() {
     const [executing, setExecuting]               = useState(false)
     const [bundleResult, setBundleResult]         = useState<{ bundleId: string; status: string } | null>(null)
     const [executeError, setExecuteError]         = useState<string | null>(null)
+
+    const [autoCommentEnabled, setAutoCommentEnabled]           = useState(false)
+    const [autoCommentDelayMinSec, setAutoCommentDelayMinSec]   = useState('180')
+    const [autoCommentDelayMaxSec, setAutoCommentDelayMaxSec]   = useState('1800')
+    const [autoCommentProbabilityPct, setAutoCommentProbabilityPct] = useState('100')
+    const [autoCommentBankIds, setAutoCommentBankIds]           = useState<Set<string>>(new Set())
 
     useEffect(() => {
         fetch('/api/wallets/explorer')
@@ -143,9 +175,16 @@ export default function BundleTradesWizard() {
                 const total = parseFloat(maxSolTotal)
                 if (isNaN(total) || total <= 0) return false
             }
+            if (autoCommentEnabled) {
+                const dMin = parseFloat(autoCommentDelayMinSec), dMax = parseFloat(autoCommentDelayMaxSec)
+                const prob = parseFloat(autoCommentProbabilityPct)
+                if (isNaN(dMin) || isNaN(dMax) || dMax < dMin || dMin < 0) return false
+                if (isNaN(prob) || prob < 0 || prob > 100) return false
+                if (autoCommentBankIds.size === 0) return false
+            }
         }
         return true
-    }, [step, tradeType, tokenResolved, randomRange, rangeMin, rangeMax, maxSolEnabled, maxSolTotal, slippage, tipMode, jitoTipLamports, tipFloorData, selectedWallets])
+    }, [step, tradeType, tokenResolved, randomRange, rangeMin, rangeMax, maxSolEnabled, maxSolTotal, slippage, tipMode, jitoTipLamports, tipFloorData, selectedWallets, autoCommentEnabled, autoCommentDelayMinSec, autoCommentDelayMaxSec, autoCommentProbabilityPct, autoCommentBankIds])
 
     async function fetchTipFloor() {
         setTipFloorLoading(true)
@@ -169,7 +208,28 @@ export default function BundleTradesWizard() {
     useEffect(() => {
         setTradeAmounts({})
         setSellPct('')
+        setSellAllEnabled(false)
     }, [tradeType])
+
+    // Sell All: select every wallet currently holding this token and set each
+    // one's sell amount to its full live balance — re-runs whenever balances
+    // (re)load so toggling it on before the token/balances have finished
+    // fetching still resolves correctly once they arrive.
+    useEffect(() => {
+        if (!sellAllEnabled || tradeType !== 'sell') return
+        const holderIds = wallets
+            .map((w) => w.id)
+            .filter((id) => {
+                const raw = tokenBalances[id]
+                return raw && raw !== '0'
+            })
+        if (holderIds.length === 0) return
+        setSelectedWallets(new Set(holderIds))
+        setSellPct('100')
+        const newAmounts: Record<string, string> = {}
+        holderIds.forEach((id) => { newAmounts[id] = tokenBalances[id] })
+        setTradeAmounts(newAmounts)
+    }, [sellAllEnabled, tradeType, tokenBalances, wallets])
 
     function rawPctAmount(rawBalance: string, pct: number): string {
         if (!rawBalance || rawBalance === '0' || pct <= 0) return '0'
@@ -188,7 +248,14 @@ export default function BundleTradesWizard() {
         setTradeAmounts(newAmounts)
     }
 
+    function handleSellAllToggle(enabled: boolean) {
+        setSellAllEnabled(enabled)
+        // Population is handled by the effect above (keyed on tokenBalances/
+        // wallets) — it fires immediately off this state change too.
+    }
+
     function handleSellPctChange(value: string) {
+        if (sellAllEnabled) return
         setSellPct(value)
         const pct = parseFloat(value)
         if (!isNaN(pct) && pct > 0 && selectedWallets.size > 0) {
@@ -335,40 +402,137 @@ export default function BundleTradesWizard() {
         setStep((s) => s + 1)
     }
 
+    // Fires one chunk's sell bundle and writes its result back into `rows` in
+    // place — `rows` is a shared local array across a whole loop run (see
+    // executeSellChunks/retryFailedChunks below), matching the exact pattern
+    // launch-builder's Bundled Jito loop already uses: safe because each
+    // call only ever touches its own index, so concurrent in-flight chunks
+    // (fired with just a dispatch stagger, not awaited) never collide.
+    async function fireSellChunk(rows: BundleChunkRow[], i: number) {
+        const chunkIds = rows[i].walletIds
+        rows[i] = { ...rows[i], status: 'running', error: undefined }
+        setBundleLoopRows([...rows])
+
+        const tradesList = chunkIds.map((id) => ({
+            walletId:    id,
+            mintAddress: tokenMint,
+            tokenAmount: tradeAmounts[id] ?? '0',
+            slippage,
+        }))
+
+        try {
+            const res = await fetch('/api/trade/bundle/sell', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({
+                    jitoTipInLamports: jitoTipLamports!.toString(),
+                    tradesList,
+                    useQuicknodeJito: true,
+                }),
+            })
+            const data = await res.json()
+            if (res.ok && data.success) {
+                rows[i] = { ...rows[i], status: 'landed', bundleId: data.bundleId }
+            } else {
+                rows[i] = { ...rows[i], status: 'failed', error: data.error ?? 'Bundle submission failed' }
+            }
+        } catch (err) {
+            rows[i] = { ...rows[i], status: 'failed', error: err instanceof Error ? err.message : 'Network error' }
+        }
+        setBundleLoopRows([...rows])
+    }
+
+    // Splits however many wallets are selling into BUNDLE_CHUNK_SIZE-wallet
+    // bundles and fires them all — this is the actual fix for "sell all
+    // fails past the Jito limit": no single /api/trade/bundle/sell call ever
+    // carries more wallets than reliably fits in one bundle, regardless of
+    // how many wallets are selected.
+    async function executeSellChunks(walletIds: string[]) {
+        const chunks: string[][] = []
+        for (let i = 0; i < walletIds.length; i += BUNDLE_CHUNK_SIZE) {
+            chunks.push(walletIds.slice(i, i + BUNDLE_CHUNK_SIZE))
+        }
+
+        const rows: BundleChunkRow[] = chunks.map((c) => ({ walletIds: c, status: 'pending' }))
+        setBundleLoopRows([...rows])
+
+        const firing: Promise<void>[] = []
+        for (let i = 0; i < chunks.length; i++) {
+            firing.push(fireSellChunk(rows, i))
+            if (i < chunks.length - 1) await new Promise((r) => setTimeout(r, FIRE_STAGGER_MS))
+        }
+        await Promise.allSettled(firing)
+
+        const failCount = rows.filter((r) => r.status === 'failed').length
+        if (failCount > 0) {
+            setExecuteError(`${chunks.length - failCount}/${chunks.length} bundle${chunks.length !== 1 ? 's' : ''} landed, ${failCount} failed — see below, or Retry Failed`)
+        } else {
+            setBundleResult({ bundleId: rows[rows.length - 1]?.bundleId ?? '', status: 'landed' })
+        }
+    }
+
+    async function retryFailedChunks() {
+        if (executing) return
+        const rows = [...bundleLoopRows]
+        const failedIndexes = rows.map((r, i) => (r.status === 'failed' ? i : -1)).filter((i) => i !== -1)
+        if (failedIndexes.length === 0) return
+
+        setExecuting(true)
+        setExecuteError(null)
+        try {
+            const firing: Promise<void>[] = []
+            for (const i of failedIndexes) {
+                firing.push(fireSellChunk(rows, i))
+                await new Promise((r) => setTimeout(r, FIRE_STAGGER_MS))
+            }
+            await Promise.allSettled(firing)
+
+            const failCount = rows.filter((r) => r.status === 'failed').length
+            if (failCount > 0) {
+                setExecuteError(`${rows.length - failCount}/${rows.length} bundle${rows.length !== 1 ? 's' : ''} landed, ${failCount} failed — see below, or Retry Failed`)
+            } else {
+                setBundleResult({ bundleId: rows[rows.length - 1]?.bundleId ?? '', status: 'landed' })
+            }
+        } finally {
+            setExecuting(false)
+        }
+    }
+
     async function handleExecute() {
         if (!jitoTipLamports || executing) return
         setExecuting(true)
         setExecuteError(null)
         setBundleResult(null)
+        setBundleLoopRows([])
 
         try {
-            const endpoint = tradeType === 'buy'
-                ? '/api/trade/bundle/buy'
-                : '/api/trade/bundle/sell'
+            if (tradeType === 'sell') {
+                await executeSellChunks([...selectedWallets])
+                return
+            }
 
-            const tradesList = [...selectedWallets].map((id) => {
-                if (tradeType === 'buy') {
-                    return {
-                        walletId:    id,
-                        mintAddress: tokenMint,
-                        amountInSol: solStringToLamports(tradeAmounts[id] ?? '0').toString(),
-                        slippage,
-                    }
-                }
-                return {
-                    walletId:    id,
-                    mintAddress: tokenMint,
-                    tokenAmount: tradeAmounts[id] ?? '0',
-                    slippage,
-                }
-            })
+            const tradesList = [...selectedWallets].map((id) => ({
+                walletId:    id,
+                mintAddress: tokenMint,
+                amountInSol: solStringToLamports(tradeAmounts[id] ?? '0').toString(),
+                slippage,
+            }))
 
-            const res  = await fetch(endpoint, {
+            const res  = await fetch('/api/trade/bundle/buy', {
                 method:  'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body:    JSON.stringify({
                     jitoTipInLamports: jitoTipLamports.toString(),
                     tradesList: tradesList,
+                    ...(autoCommentEnabled ? {
+                        autoComment: {
+                            enabled:     true,
+                            delayMinMs:  (parseFloat(autoCommentDelayMinSec) || 0) * 1000,
+                            delayMaxMs:  (parseFloat(autoCommentDelayMaxSec) || 0) * 1000,
+                            probability: (parseFloat(autoCommentProbabilityPct) || 0) / 100,
+                            bankIds:     [...autoCommentBankIds],
+                        },
+                    } : {}),
                 }),
             })
 
@@ -524,42 +688,136 @@ export default function BundleTradesWizard() {
                                             </div>
                                         )}
                                     </div>
+
+                                    {/* Auto-Comment */}
+                                    <div className="flex flex-col gap-1.5">
+                                        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Auto-Comment</span>
+                                        <label className="flex items-center gap-2 cursor-pointer select-none h-9">
+                                            <input
+                                                type="checkbox"
+                                                checked={autoCommentEnabled}
+                                                onChange={(e) => setAutoCommentEnabled(e.target.checked)}
+                                                className="size-4 rounded border border-input accent-blue-500"
+                                            />
+                                            <span className="text-xs font-medium text-muted-foreground">Enable</span>
+                                        </label>
+                                        {autoCommentEnabled && (
+                                            <div className="flex flex-col gap-1.5">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="flex flex-col gap-1">
+                                                        <span className="text-[10px] text-muted-foreground">Delay min (sec)</span>
+                                                        <input
+                                                            type="number"
+                                                            min={0}
+                                                            value={autoCommentDelayMinSec}
+                                                            onChange={(e) => setAutoCommentDelayMinSec(e.target.value)}
+                                                            className="w-20 rounded border border-input bg-transparent px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                        />
+                                                    </div>
+                                                    <span className="text-muted-foreground text-sm mt-3">–</span>
+                                                    <div className="flex flex-col gap-1">
+                                                        <span className="text-[10px] text-muted-foreground">Delay max (sec)</span>
+                                                        <input
+                                                            type="number"
+                                                            min={0}
+                                                            value={autoCommentDelayMaxSec}
+                                                            onChange={(e) => setAutoCommentDelayMaxSec(e.target.value)}
+                                                            className="w-20 rounded border border-input bg-transparent px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="text-[10px] text-muted-foreground">Chance to comment (%)</span>
+                                                    <input
+                                                        type="number"
+                                                        min={0}
+                                                        max={100}
+                                                        value={autoCommentProbabilityPct}
+                                                        onChange={(e) => setAutoCommentProbabilityPct(e.target.value)}
+                                                        className="w-20 rounded border border-input bg-transparent px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                    />
+                                                </div>
+                                                <p className="text-[10px] text-muted-foreground max-w-52">
+                                                    Requires the wallet to still hold the token — disappears from pump.fun if it later sells. Below 100%, the rate rolls toward the target instead of an independent flip per wallet.
+                                                </p>
+                                                <BankPicker
+                                                    mintAddress={tokenResolved ? tokenMint : undefined}
+                                                    selectedBankIds={autoCommentBankIds}
+                                                    onChange={setAutoCommentBankIds}
+                                                    className="w-64"
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
                                 </>
                             ) : (
-                                /* Amount to Sell */
-                                <div className="flex flex-col gap-1.5">
-                                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Amount to Sell</span>
-                                    <div className="flex gap-1.5">
-                                        {[25, 50, 75, 100].map((p) => (
-                                            <button
-                                                key={p}
-                                                type="button"
-                                                onClick={() => handleSellPctChange(String(p))}
-                                                className={[
-                                                    'px-3 py-1.5 rounded-md text-xs font-medium border transition-colors',
-                                                    sellPct === String(p)
-                                                        ? 'bg-red-500 border-red-500 text-white'
-                                                        : 'border-border text-muted-foreground hover:border-red-400 hover:text-foreground',
-                                                ].join(' ')}
-                                            >
-                                                {p}%
-                                            </button>
-                                        ))}
+                                <>
+                                    {/* Amount to Sell */}
+                                    <div className="flex flex-col gap-1.5">
+                                        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Amount to Sell</span>
+                                        {sellAllEnabled ? (
+                                            <p className="text-xs text-muted-foreground max-w-56 h-9 flex items-center">
+                                                Locked at 100% while Sell All is enabled.
+                                            </p>
+                                        ) : (
+                                            <>
+                                                <div className="flex gap-1.5">
+                                                    {[25, 50, 75, 100].map((p) => (
+                                                        <button
+                                                            key={p}
+                                                            type="button"
+                                                            onClick={() => handleSellPctChange(String(p))}
+                                                            className={[
+                                                                'px-3 py-1.5 rounded-md text-xs font-medium border transition-colors',
+                                                                sellPct === String(p)
+                                                                    ? 'bg-red-500 border-red-500 text-white'
+                                                                    : 'border-border text-muted-foreground hover:border-red-400 hover:text-foreground',
+                                                            ].join(' ')}
+                                                        >
+                                                            {p}%
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                                <div className="flex items-center gap-2 rounded-lg border border-input bg-transparent px-3 h-9 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30">
+                                                    <input
+                                                        type="number"
+                                                        min={0}
+                                                        max={100}
+                                                        step={1}
+                                                        placeholder="0"
+                                                        value={sellPct}
+                                                        onChange={(e) => handleSellPctChange(e.target.value)}
+                                                        className="w-16 bg-transparent text-xs outline-none placeholder:text-muted-foreground [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                                    />
+                                                    <span className="text-xs text-muted-foreground shrink-0">%</span>
+                                                </div>
+                                            </>
+                                        )}
                                     </div>
-                                    <div className="flex items-center gap-2 rounded-lg border border-input bg-transparent px-3 h-9 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30">
-                                        <input
-                                            type="number"
-                                            min={0}
-                                            max={100}
-                                            step={1}
-                                            placeholder="0"
-                                            value={sellPct}
-                                            onChange={(e) => handleSellPctChange(e.target.value)}
-                                            className="w-16 bg-transparent text-xs outline-none placeholder:text-muted-foreground [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                        />
-                                        <span className="text-xs text-muted-foreground shrink-0">%</span>
+
+                                    {/* Sell All */}
+                                    <div className="flex flex-col gap-1.5">
+                                        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Sell All</span>
+                                        <label className="flex items-center gap-2 cursor-pointer select-none h-9">
+                                            <input
+                                                type="checkbox"
+                                                checked={sellAllEnabled}
+                                                onChange={(e) => handleSellAllToggle(e.target.checked)}
+                                                className="size-4 rounded border border-input accent-red-500"
+                                            />
+                                            <span className="text-xs font-medium text-muted-foreground">Enable</span>
+                                        </label>
+                                        {sellAllEnabled && (
+                                            <p className="text-[10px] text-muted-foreground max-w-52">
+                                                {Object.keys(tokenBalances).length === 0
+                                                    ? 'Checking wallet balances…'
+                                                    : selectedWallets.size === 0
+                                                        ? 'No wallets currently hold this token.'
+                                                        : `Selling 100% from all ${selectedWallets.size} holding wallet${selectedWallets.size !== 1 ? 's' : ''}. Submitted as ${Math.ceil(selectedWallets.size / BUNDLE_CHUNK_SIZE)} bundle${Math.ceil(selectedWallets.size / BUNDLE_CHUNK_SIZE) !== 1 ? 's' : ''} of up to ${BUNDLE_CHUNK_SIZE} wallets each.`}
+                                            </p>
+                                        )}
                                     </div>
-                                </div>
+                                </>
                             )}
 
                             {/* Slippage */}
@@ -716,7 +974,17 @@ export default function BundleTradesWizard() {
                                 {tradeType === 'sell' && (
                                     <div className="flex items-center gap-3 px-4 py-2.5 bg-muted/20">
                                         <span className="w-28 shrink-0 font-medium text-muted-foreground">Sell Amount</span>
-                                        <span className="tabular-nums text-foreground">{sellPct}%</span>
+                                        <span className="tabular-nums text-foreground">
+                                            {sellPct}%{sellAllEnabled ? ' (Sell All)' : ''}
+                                        </span>
+                                    </div>
+                                )}
+                                {tradeType === 'sell' && selectedWallets.size > BUNDLE_CHUNK_SIZE && (
+                                    <div className="flex items-center gap-3 px-4 py-2.5">
+                                        <span className="w-28 shrink-0 font-medium text-muted-foreground">Bundles</span>
+                                        <span className="tabular-nums text-foreground">
+                                            {Math.ceil(selectedWallets.size / BUNDLE_CHUNK_SIZE)} sequential bundles of up to {BUNDLE_CHUNK_SIZE} wallets
+                                        </span>
                                     </div>
                                 )}
                                 {tradeType === 'buy' && randomRange && (
@@ -730,6 +998,14 @@ export default function BundleTradesWizard() {
                                         <span className="w-28 shrink-0 font-medium text-muted-foreground">Max SOL Split</span>
                                         <span className="tabular-nums text-foreground">
                                             {maxSolTotal} SOL ÷ {selectedWallets.size} wallets = {(parseFloat(maxSolTotal) / selectedWallets.size).toFixed(4)} SOL each
+                                        </span>
+                                    </div>
+                                )}
+                                {tradeType === 'buy' && autoCommentEnabled && (
+                                    <div className="flex items-center gap-3 px-4 py-2.5 bg-muted/20">
+                                        <span className="w-28 shrink-0 font-medium text-muted-foreground">Auto-Comment</span>
+                                        <span className="tabular-nums text-foreground">
+                                            {autoCommentDelayMinSec}–{autoCommentDelayMaxSec}s delay, {autoCommentProbabilityPct}% of wallets, {autoCommentBankIds.size} bank{autoCommentBankIds.size !== 1 ? 's' : ''}
                                         </span>
                                     </div>
                                 )}
@@ -821,14 +1097,17 @@ export default function BundleTradesWizard() {
                         </div>
                     )
                 })()}
-                {step === 2 && (
+                {step === 2 && (() => {
+                    const chunkCount = tradeType === 'sell' ? Math.ceil(selectedWallets.size / BUNDLE_CHUNK_SIZE) : 1
+                    return (
                     <div className="flex flex-col gap-5">
                         {/* Ready state */}
-                        {!executing && !bundleResult && !executeError && (
+                        {!executing && !bundleResult && !executeError && bundleLoopRows.length === 0 && (
                             <div className="flex flex-col gap-4">
                                 <p className="text-xs text-muted-foreground">
-                                    Ready to submit {selectedWallets.size} {tradeType} transaction{selectedWallets.size !== 1 ? 's' : ''} as a Jito bundle.
-                                    All trades execute atomically in a single block.
+                                    {chunkCount > 1
+                                        ? `Ready to submit ${selectedWallets.size} sell transactions as ${chunkCount} sequential Jito bundles (up to ${BUNDLE_CHUNK_SIZE} wallets each — a single bundle can't fit more than a few wallets once Jito's transaction cap is hit).`
+                                        : `Ready to submit ${selectedWallets.size} ${tradeType} transaction${selectedWallets.size !== 1 ? 's' : ''} as a Jito bundle. All trades execute atomically in a single block.`}
                                 </p>
                                 <button
                                     type="button"
@@ -840,13 +1119,48 @@ export default function BundleTradesWizard() {
                                             : 'bg-red-500 hover:bg-red-600',
                                     ].join(' ')}
                                 >
-                                    Execute Bundle
+                                    Execute Bundle{chunkCount > 1 ? `s (${chunkCount})` : ''}
                                 </button>
                             </div>
                         )}
 
-                        {/* Loading */}
-                        {executing && (
+                        {/* Chunked sell progress — one row per bundle */}
+                        {bundleLoopRows.length > 0 && (
+                            <div className="flex flex-col gap-3">
+                                <div className="flex flex-col divide-y divide-border rounded-lg border border-border overflow-hidden">
+                                    {bundleLoopRows.map((row, i) => (
+                                        <div key={i} className="flex items-center gap-3 px-4 py-2.5 text-xs">
+                                            <div className="size-4 shrink-0 flex items-center justify-center">
+                                                {row.status === 'pending' && <span className="size-2 rounded-full bg-muted-foreground/30" />}
+                                                {row.status === 'running' && <span className="size-3.5 animate-spin rounded-full border-2 border-red-500 border-t-transparent" />}
+                                                {row.status === 'landed' && (
+                                                    <svg className="size-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+                                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                                    </svg>
+                                                )}
+                                                {row.status === 'failed' && (
+                                                    <svg className="size-3.5 text-destructive" viewBox="0 0 20 20" fill="currentColor">
+                                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                                                    </svg>
+                                                )}
+                                            </div>
+                                            <span className="flex-1 text-muted-foreground">
+                                                Bundle {i + 1} — {row.walletIds.length} wallet{row.walletIds.length !== 1 ? 's' : ''}
+                                            </span>
+                                            {row.status === 'landed' && row.bundleId && (
+                                                <span className="font-mono text-[10px] text-muted-foreground truncate max-w-40">{row.bundleId}</span>
+                                            )}
+                                            {row.status === 'failed' && row.error && (
+                                                <span className="text-[10px] text-destructive truncate max-w-40">{row.error}</span>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Loading — plain spinner for the single-bundle buy path, before any chunk rows exist */}
+                        {executing && bundleLoopRows.length === 0 && (
                             <div className="flex items-center gap-3 text-xs text-muted-foreground">
                                 <svg className="size-4 animate-spin shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                     <path d="M21 12a9 9 0 1 1-6.219-8.56" />
@@ -862,12 +1176,14 @@ export default function BundleTradesWizard() {
                                     <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                         <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
                                     </svg>
-                                    Bundle {bundleResult.status}
+                                    {bundleLoopRows.length > 1 ? `All ${bundleLoopRows.length} bundles landed` : `Bundle ${bundleResult.status}`}
                                 </div>
-                                <div className="rounded-lg border border-border bg-muted/20 px-4 py-3 text-xs">
-                                    <span className="text-muted-foreground">Bundle ID </span>
-                                    <span className="font-mono break-all text-foreground">{bundleResult.bundleId}</span>
-                                </div>
+                                {bundleLoopRows.length <= 1 && (
+                                    <div className="rounded-lg border border-border bg-muted/20 px-4 py-3 text-xs">
+                                        <span className="text-muted-foreground">Bundle ID </span>
+                                        <span className="font-mono break-all text-foreground">{bundleResult.bundleId}</span>
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -883,15 +1199,17 @@ export default function BundleTradesWizard() {
                                 </div>
                                 <button
                                     type="button"
-                                    onClick={handleExecute}
-                                    className="self-start px-4 py-1.5 rounded-md text-xs font-medium border border-border text-muted-foreground hover:text-foreground transition-colors"
+                                    onClick={bundleLoopRows.length > 0 ? retryFailedChunks : handleExecute}
+                                    disabled={executing}
+                                    className="self-start px-4 py-1.5 rounded-md text-xs font-medium border border-border text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
-                                    Retry
+                                    {bundleLoopRows.length > 0 ? 'Retry Failed' : 'Retry'}
                                 </button>
                             </div>
                         )}
                     </div>
-                )}
+                    )
+                })()}
             </WizardShell>
         </div>
     )

@@ -33,6 +33,7 @@ import { TokenMint } from '@/lib/types/token-mint'
 import { WalletTradeDTO, WalletRecord } from '@/lib/types/wallet'
 import type { LookupTable } from '@/lib/types/lookup-table'
 import { solStringToLamports } from '@/lib/lamports'
+import BankPicker from '@/components/tokens/comment-bank/bank-picker'
 import StrategyWalletSelector from '@/components/trade/strategy-trade/strategy-wallet-selector'
 import { SlippageControl } from '@/components/trade/trade/SlippageControl'
 import { BuilderNodeData, LaunchTypeSubtype, TradeSubtype, TriggerSubtype, ConditionalSubtype, UtilitySubtype, ParsedBundledWallet } from './types'
@@ -441,6 +442,14 @@ function TradeFields({
                 <StaggerDelayInputs config={config} patch={patch} />
             )}
 
+            {(subtype === 'staggeredBuy' || subtype === 'staggeredSell') && (
+                <AutoHaltFields config={config} patch={patch} />
+            )}
+
+            {subtype === 'staggeredBuy' && (
+                <AutoCommentFields config={config} patch={patch} tokenMint={tokenMint} />
+            )}
+
             {(subtype === 'staggeredSell' || subtype === 'sellPercent') && (
                 <StaggeredSellFields config={config} patch={patch} />
             )}
@@ -500,6 +509,7 @@ function TradeFields({
                     onSlippageChange={updateSlippage}
                     tokenId={(tokenNodeData?.config.tokenId as string | undefined) ?? null}
                     devWalletId={(tokenNodeData?.config.devWalletId as string | undefined) ?? null}
+                    tokenMint={tokenMint}
                 />
             ) : (
                 <StrategyWalletSelector
@@ -533,6 +543,7 @@ function BundledJitoWalletsInput({
     onSlippageChange,
     tokenId,
     devWalletId,
+    tokenMint,
 }: {
     config: Record<string, unknown>
     patch: (p: Record<string, unknown>) => void
@@ -540,6 +551,7 @@ function BundledJitoWalletsInput({
     onSlippageChange: (v: number) => void
     tokenId: string | null
     devWalletId: string | null
+    tokenMint: string | null
 }) {
     const [jsonText, setJsonText]     = useState<string>((config.bundledSourceJson as string) ?? '')
     const [parseError, setParseError] = useState('')
@@ -659,6 +671,8 @@ function BundledJitoWalletsInput({
             </div>
 
             <SlippageControl value={slippage} onChange={onSlippageChange} />
+
+            <AutoCommentFields config={config} patch={patch} tokenMint={tokenMint} />
 
             <Label className="text-xs">Launch Totals JSON</Label>
             <Textarea
@@ -876,6 +890,116 @@ function StaggerDelayInputs({ config, patch }: { config: Record<string, unknown>
                     className="w-28"
                 />
             </div>
+        </div>
+    )
+}
+
+function AutoHaltFields({ config, patch }: { config: Record<string, unknown>; patch: (p: Record<string, unknown>) => void }) {
+    const enabled = (config.autoHaltEnabled as boolean | undefined) ?? false
+
+    return (
+        <div className="flex flex-col gap-2 rounded-md border p-3">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={(e) => patch({ autoHaltEnabled: e.target.checked })}
+                    className="size-4 rounded border border-input accent-blue-500"
+                />
+                <span className="text-xs font-medium">Front-running protection</span>
+            </label>
+            <p className="text-[10px] text-muted-foreground">
+                Watches this token&apos;s live trade feed while the run is in progress. If outside wallets (not selected above) buy or sell enough times within the window, the remaining trades in this run are skipped instead of walking into a sniper.
+            </p>
+            {enabled && (
+                <div className="flex flex-wrap items-end gap-4 pt-1">
+                    <div className="flex flex-col gap-1.5">
+                        <Label className="text-xs text-muted-foreground whitespace-nowrap">Trigger after (trades)</Label>
+                        <Input
+                            type="number" min={1}
+                            value={(config.haltThreshold as string) ?? '2'}
+                            onChange={(e) => patch({ haltThreshold: e.target.value })}
+                            className="w-24"
+                        />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                        <Label className="text-xs text-muted-foreground whitespace-nowrap">Within (sec)</Label>
+                        <Input
+                            type="number" min={1}
+                            value={(config.haltWindowSec as string) ?? '10'}
+                            onChange={(e) => patch({ haltWindowSec: e.target.value })}
+                            className="w-24"
+                        />
+                    </div>
+                </div>
+            )}
+        </div>
+    )
+}
+
+function AutoCommentFields({
+    config,
+    patch,
+    tokenMint,
+}: {
+    config: Record<string, unknown>
+    patch: (p: Record<string, unknown>) => void
+    tokenMint: string | null
+}) {
+    const enabled = (config.autoCommentEnabled as boolean | undefined) ?? false
+    const bankIds = new Set<string>((config.autoCommentBankIds as string[] | undefined) ?? [])
+
+    return (
+        <div className="flex flex-col gap-2 rounded-md border p-3">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={(e) => patch({ autoCommentEnabled: e.target.checked })}
+                    className="size-4 rounded border border-input accent-blue-500"
+                />
+                <span className="text-xs font-medium">Auto-comment after buy</span>
+            </label>
+            <p className="text-[10px] text-muted-foreground">
+                Each wallet that lands a buy posts a pump.fun callout from its own comment bank at a random delay — requires holding the token, and the callout disappears if the wallet later sells. Below 100%, the actual rate rolls toward the target over the run instead of an independent coin flip per wallet, so a small batch won&apos;t cluster into all-or-nothing.
+            </p>
+            {enabled && (
+                <div className="flex flex-wrap items-end gap-4 pt-1">
+                    <div className="flex flex-col gap-1.5">
+                        <Label className="text-xs text-muted-foreground whitespace-nowrap">Delay min (sec)</Label>
+                        <Input
+                            type="number" min={0}
+                            value={(config.autoCommentDelayMinSec as string) ?? '180'}
+                            onChange={(e) => patch({ autoCommentDelayMinSec: e.target.value })}
+                            className="w-24"
+                        />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                        <Label className="text-xs text-muted-foreground whitespace-nowrap">Delay max (sec)</Label>
+                        <Input
+                            type="number" min={0}
+                            value={(config.autoCommentDelayMaxSec as string) ?? '1800'}
+                            onChange={(e) => patch({ autoCommentDelayMaxSec: e.target.value })}
+                            className="w-24"
+                        />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                        <Label className="text-xs text-muted-foreground whitespace-nowrap">Chance to comment (%)</Label>
+                        <Input
+                            type="number" min={0} max={100}
+                            value={(config.autoCommentProbabilityPct as string) ?? '100'}
+                            onChange={(e) => patch({ autoCommentProbabilityPct: e.target.value })}
+                            className="w-24"
+                        />
+                    </div>
+                    <BankPicker
+                        mintAddress={tokenMint ?? undefined}
+                        selectedBankIds={bankIds}
+                        onChange={(ids) => patch({ autoCommentBankIds: [...ids] })}
+                        className="w-full basis-full"
+                    />
+                </div>
+            )}
         </div>
     )
 }

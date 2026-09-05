@@ -1,0 +1,294 @@
+'use client'
+
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { TokenMintInput } from '@/components/trade/strategy-trade/TokenMintInput'
+import StrategyWalletSelector from '@/components/trade/strategy-trade/strategy-wallet-selector'
+import BotConfigPanel, { BotConfigState, DEFAULT_BOT_CONFIG } from './bot-config-panel'
+import BotStatusPanel, { BotStatusResponse } from './bot-status-panel'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { lamportsStringToBN } from '@/lib/lamports'
+import type { WalletRecord } from '@/lib/types/wallet'
+
+const POLL_INTERVAL_MS = 2_000
+
+function solToLamports(sol: string): number {
+    return Math.round(parseFloat(sol) * 1_000_000_000)
+}
+
+export default function TrendingVolumeWizard() {
+    const [tokenMint,     setTokenMint]     = useState('')
+    const [tokenResolved, setTokenResolved] = useState(false)
+    const [tokenName,     setTokenName]     = useState('')
+    const [tokenSymbol,   setTokenSymbol]   = useState('')
+
+    const [config, setConfig] = useState<BotConfigState>(DEFAULT_BOT_CONFIG)
+
+    const handleConfigChange = useCallback((key: keyof BotConfigState, value: string) => {
+        setConfig(prev => ({ ...prev, [key]: value }))
+    }, [])
+
+    const [wallets,         setWallets]         = useState<WalletRecord[]>([])
+    const [walletsLoading,  setWalletsLoading]  = useState(false)
+    const [fundingWalletId, setFundingWalletId] = useState('')
+    const [poolWalletIds,   setPoolWalletIds]   = useState<Set<string>>(new Set())
+
+    useEffect(() => {
+        setWalletsLoading(true)
+        fetch('/api/wallets/explorer')
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                if (!data) return
+                setWallets((data.wallets ?? []).map((w: WalletRecord & { solana_balance_in_lamports?: string }) => ({
+                    ...w,
+                    solana_balance_in_lamports: w.solana_balance_in_lamports != null
+                        ? lamportsStringToBN(String(w.solana_balance_in_lamports))
+                        : null,
+                })))
+            })
+            .catch(() => {})
+            .finally(() => setWalletsLoading(false))
+    }, [])
+
+    useEffect(() => {
+        if (fundingWalletId && poolWalletIds.has(fundingWalletId)) {
+            setPoolWalletIds(prev => {
+                const next = new Set(prev)
+                next.delete(fundingWalletId)
+                return next
+            })
+        }
+    }, [fundingWalletId, poolWalletIds])
+
+    const [botStatus, setBotStatus] = useState<BotStatusResponse | null>(null)
+    const [isLoading, setIsLoading] = useState(false)
+    const [error,     setError]     = useState('')
+    const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+    const fetchStatus = useCallback(() => {
+        fetch('/api/auto/trending')
+            .then(r => r.ok ? r.json() : null)
+            .then(data => { if (data) setBotStatus(data) })
+            .catch(() => {})
+    }, [])
+
+    useEffect(() => { fetchStatus() }, [fetchStatus])
+
+    useEffect(() => {
+        if (botStatus?.running) {
+            pollRef.current = setInterval(fetchStatus, POLL_INTERVAL_MS)
+        } else {
+            if (pollRef.current) clearInterval(pollRef.current)
+        }
+        return () => { if (pollRef.current) clearInterval(pollRef.current) }
+    }, [botStatus?.running, fetchStatus])
+
+    const isRunning     = botStatus?.running ?? false
+    const fundingWallet = wallets.find(w => w.id === fundingWalletId)
+    const canStart       = tokenResolved && !!fundingWalletId && poolWalletIds.size >= 1 && !isRunning
+
+    async function handleStart() {
+        if (!canStart || !fundingWallet) return
+        setError('')
+        setIsLoading(true)
+        try {
+            const walletsList = Array.from(poolWalletIds)
+                .filter(id => id !== fundingWalletId)
+                .map(id => wallets.find(w => w.id === id))
+                .filter((w): w is WalletRecord => !!w)
+                .map(w => ({ id: w.id, publicKey: w.public_key }))
+
+            const body = {
+                tokenMint,
+                fundingWallet: { id: fundingWallet.id, publicKey: fundingWallet.public_key },
+                walletsList,
+                solAmountLamports: {
+                    min: solToLamports(config.solAmountMinSol),
+                    max: solToLamports(config.solAmountMaxSol),
+                },
+                jitoTipLamports:     solToLamports(config.jitoTipSol),
+                slippage:            (parseFloat(config.slippagePct) || 10) / 100,
+                totalRounds:         parseInt(config.totalRounds),
+                roundIntervalMs:     parseInt(config.roundIntervalMs),
+                roundJitterMs:       parseInt(config.roundJitterMs),
+                walletsPerRoundMin:  parseInt(config.walletsPerRoundMin),
+                walletsPerRoundMax:  parseInt(config.walletsPerRoundMax),
+                minWalletLamports:   solToLamports(config.minWalletSol),
+                txFeeBufferLamports: solToLamports(config.txFeeBufferSol),
+            }
+
+            const res  = await fetch('/api/auto/trending', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify(body),
+            })
+            const data = await res.json()
+            if (!res.ok) throw new Error(data.error ?? 'Failed to start bot')
+            fetchStatus()
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Start failed')
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    async function handleResume() {
+        setError('')
+        setIsLoading(true)
+        try {
+            const res  = await fetch('/api/auto/trending', { method: 'PATCH' })
+            const data = await res.json()
+            if (!res.ok) throw new Error(data.error ?? 'Resume failed')
+            fetchStatus()
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Resume failed')
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    async function handleShutdown() {
+        setError('')
+        setIsLoading(true)
+        try {
+            const res  = await fetch('/api/auto/trending?action=shutdown', { method: 'DELETE' })
+            const data = await res.json()
+            if (!res.ok) throw new Error(data.error ?? 'Shutdown failed')
+            fetchStatus()
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Shutdown failed')
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    async function handleStop() {
+        setError('')
+        setIsLoading(true)
+        try {
+            const res  = await fetch('/api/auto/trending?action=stop', { method: 'DELETE' })
+            const data = await res.json()
+            if (!res.ok) throw new Error(data.error ?? 'Stop failed')
+            fetchStatus()
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Stop failed')
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    return (
+        <div className="flex flex-col gap-6 w-full min-h-0">
+            <p className="text-xs text-muted-foreground">
+                Each active wallet buys then immediately sells the full amount back, both instructions atomic in one transaction, submitted as its own single-tx Jito bundle — generates trading volume with no net position held. Bonding-curve tokens only; costs real SOL per round (fees + slippage on both legs + tip), it is not free volume.
+            </p>
+
+            {error && (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                    {error}
+                </div>
+            )}
+
+            <div className="rounded-lg border border-border p-4">
+                <BotStatusPanel
+                    status={botStatus}
+                    isLoading={isLoading}
+                    canStart={canStart}
+                    onStart={handleStart}
+                    onResume={handleResume}
+                    onShutdown={handleShutdown}
+                    onStop={handleStop}
+                />
+            </div>
+
+            <div className="rounded-lg border border-border p-4">
+                <p className="text-xs font-semibold mb-4">Target</p>
+                <div className="flex flex-wrap gap-6">
+                    <div className="flex flex-col gap-1.5 flex-1 min-w-52">
+                        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                            Token
+                        </label>
+                        <TokenMintInput
+                            onTokenChange={(mint, resolved, name, symbol) => {
+                                setTokenMint(mint)
+                                setTokenResolved(resolved)
+                                setTokenName(name ?? '')
+                                setTokenSymbol(symbol ?? '')
+                            }}
+                        />
+                        {tokenResolved && (
+                            <p className="text-xs text-muted-foreground font-mono">
+                                {tokenSymbol && <span className="font-semibold text-foreground">{tokenSymbol}</span>}
+                                {tokenName  && <span className="ml-1.5">{tokenName}</span>}
+                            </p>
+                        )}
+                    </div>
+
+                    <div className="flex flex-col gap-1.5 flex-1 min-w-52">
+                        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                            Funding Wallet
+                        </label>
+                        <Select
+                            value={fundingWalletId}
+                            onValueChange={setFundingWalletId}
+                            disabled={isRunning || walletsLoading}
+                        >
+                            <SelectTrigger className="h-9 text-xs w-full">
+                                <SelectValue
+                                    placeholder={walletsLoading ? 'Loading wallets…' : 'Select funding wallet'}
+                                />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {wallets.map(w => (
+                                    <SelectItem key={w.id} value={w.id} className="text-xs">
+                                        <span className="font-mono">
+                                            {w.public_key.slice(0, 7)}…{w.public_key.slice(-5)}
+                                        </span>
+                                        {w.label && (
+                                            <span className="ml-2 text-muted-foreground">{w.label}</span>
+                                        )}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        {fundingWallet && (
+                            <p className="text-xs text-muted-foreground font-mono break-all">
+                                {fundingWallet.public_key}
+                            </p>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            <div className="rounded-lg border border-border p-4">
+                <p className="text-xs font-semibold mb-4">Bot Configuration</p>
+                <BotConfigPanel
+                    config={config}
+                    onChange={handleConfigChange}
+                    disabled={isRunning}
+                />
+            </div>
+
+            <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold">Pool Wallets</p>
+                    <span className="text-xs text-muted-foreground">
+                        {poolWalletIds.size >= 1
+                            ? `${poolWalletIds.size} selected`
+                            : `${poolWalletIds.size} selected — need at least 1`}
+                    </span>
+                </div>
+                <StrategyWalletSelector
+                    selectedIds={poolWalletIds}
+                    onSelectionChange={setPoolWalletIds}
+                    onTradeAmountChange={() => {}}
+                    onTradeAmountReset={() => {}}
+                    defaultTypeName="Volume"
+                    tradeType="buy"
+                    hideSupplyColumn={true}
+                    hideTradeAmountColumn={true}
+                />
+            </div>
+
+        </div>
+    )
+}

@@ -268,6 +268,17 @@ export function AppSidebar() {
                   className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
                   asChild
                 >
+                  <Link href="/protected/tokens/comment-banks">
+                    <List />
+                    <span>Comment Banks</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+               <SidebarMenuItem>
+                <SidebarMenuButton
+                  className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
+                  asChild
+                >
                   <Link href="/protected/tokens/clone">
                     <Copy />
                     <span>Clone</span>

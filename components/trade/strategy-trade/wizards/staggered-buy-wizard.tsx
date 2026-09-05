@@ -8,6 +8,11 @@ import { solStringToLamports, lamportsBNToSolDisplay, lamportsStringToBN } from 
 import { WalletRecord } from '@/lib/types/wallet'
 import { SlippageControl } from '@/components/trade/trade/SlippageControl'
 import { TokenMintInput } from '@/components/trade/strategy-trade/TokenMintInput'
+import { stratifiedInterleave } from '@/lib/trade/stratified-interleave'
+import BankPicker from '@/components/tokens/comment-bank/bank-picker'
+import CommentActivityFeed from '@/components/tokens/comment-bank/comment-activity-feed'
+import { useRelayEvent } from '@/hooks/use-relay-event'
+import type { TokenTransactionEvent } from '@/lib/wss/types'
 
 type TradeType  = 'buy' | 'sell'
 type ExecPhase  = 'idle' | 'running' | 'paused' | 'done' | 'cancelled'
@@ -127,6 +132,18 @@ export default function StaggeredBuyWizard() {
     const [errorWalletIds, setErrorWalletIds]   = useState<Set<string>>(new Set())
     const [nextError, setNextError]             = useState<{ id: string; label: string }[]>([])
 
+    const [autoCommentEnabled, setAutoCommentEnabled]           = useState(false)
+    const [autoCommentDelayMinSec, setAutoCommentDelayMinSec]   = useState('180')
+    const [autoCommentDelayMaxSec, setAutoCommentDelayMaxSec]   = useState('1800')
+    const [autoCommentProbabilityPct, setAutoCommentProbabilityPct] = useState('100')
+    const [autoCommentBankIds, setAutoCommentBankIds]           = useState<Set<string>>(new Set())
+
+    // Front-running protection — auto-pause on foreign trades detected mid-run
+    const [autoHaltEnabled, setAutoHaltEnabled] = useState(false)
+    const [haltThreshold, setHaltThreshold]     = useState('2')
+    const [haltWindowSec, setHaltWindowSec]     = useState('10')
+    const [haltAlert, setHaltAlert]             = useState<string | null>(null)
+
     // Schedule (generated once when leaving Parameters step)
     const [schedule, setSchedule] = useState<ScheduleEntry[]>([])
 
@@ -137,6 +154,40 @@ export default function StaggeredBuyWizard() {
     const [execNextWalletId, setExecNextWalletId] = useState<string | null>(null)
     const abortRef = useRef(false)
     const pauseRef = useRef(false)
+
+    // Run-scoped, non-rendered state for the auto-halt detector — mutated
+    // directly by executeAll(), read by the relay-event handler below.
+    const autoHaltActiveRef        = useRef(false)
+    const runWalletKeysRef         = useRef<Set<string>>(new Set())
+    const foreignTradeTimestampsRef = useRef<number[]>([])
+
+    // Watches every live trade for the current mint (the relay broadcasts to
+    // all connected clients — filtering by mint/wallet happens here, same
+    // pattern as launch-trade-feed-panel.tsx). A trade from a wallet that
+    // ISN'T part of this run's own schedule counts as "foreign"; enough of
+    // those in a short trailing window auto-pauses so a human can judge
+    // whether it's a real sniper before deciding to resume or cancel.
+    useRelayEvent('token-transaction', (e: TokenTransactionEvent) => {
+        if (!autoHaltActiveRef.current || !autoHaltEnabled) return
+        if (e.mint !== tokenMint) return
+        if (runWalletKeysRef.current.has(e.wallet)) return
+
+        const windowMs = (parseFloat(haltWindowSec) || 10) * 1000
+        const threshold = parseInt(haltThreshold) || 2
+        const now = Date.now()
+        const pruned = [...foreignTradeTimestampsRef.current, now].filter((t) => now - t <= windowMs)
+        foreignTradeTimestampsRef.current = pruned
+
+        if (pruned.length >= threshold) {
+            foreignTradeTimestampsRef.current = []
+            pauseRef.current = true
+            setExecPhase('paused')
+            setHaltAlert(
+                `Auto-paused — ${pruned.length} external trade${pruned.length !== 1 ? 's' : ''} on this token in the last ${windowMs / 1000}s ` +
+                `(most recent: ${e.wallet.slice(0, 4)}…${e.wallet.slice(-4)}, ${e.txType} ${Math.abs(e.tokenAmount).toLocaleString(undefined, { maximumFractionDigits: 2 })} tokens)`
+            )
+        }
+    })
 
     useEffect(() => {
         fetch('/api/wallets/explorer')
@@ -183,8 +234,14 @@ export default function StaggeredBuyWizard() {
 
     function buildSchedule(): ScheduleEntry[] {
         const delay = validDelayRange() ?? { minMs: 5000, maxMs: 30000 }
-        // Shuffle wallet order for human-like randomness
-        const shuffled = [...selectedWallets].sort(() => Math.random() - 0.5)
+        // Stratified interleave, not a plain shuffle — spreads large trade
+        // amounts evenly across the run instead of leaving it to chance
+        // whether they cluster together. A monotonic size ramp in either
+        // direction is itself a detectable pattern to sniper/copy-trade bots.
+        const shuffled = stratifiedInterleave(
+            [...selectedWallets],
+            (id) => parseFloat(tradeAmounts[id] ?? '0') || 0,
+        )
         return shuffled.map((id, i): ScheduleEntry => ({
             walletId:     id,
             delayMsAfter: i < shuffled.length - 1
@@ -302,8 +359,21 @@ export default function StaggeredBuyWizard() {
         if (slippage <= 0) return false
         if (!validDelayRange()) return false
         if (selectedWallets.size === 0) return false
+        if (autoCommentEnabled) {
+            const dMin = parseFloat(autoCommentDelayMinSec), dMax = parseFloat(autoCommentDelayMaxSec)
+            const prob = parseFloat(autoCommentProbabilityPct)
+            if (isNaN(dMin) || isNaN(dMax) || dMax < dMin || dMin < 0) return false
+            if (isNaN(prob) || prob < 0 || prob > 100) return false
+            if (autoCommentBankIds.size === 0) return false
+        }
+        if (autoHaltEnabled) {
+            const threshold = parseInt(haltThreshold)
+            const window = parseFloat(haltWindowSec)
+            if (isNaN(threshold) || threshold < 1) return false
+            if (isNaN(window) || window <= 0) return false
+        }
         return true
-    }, [step, tokenResolved, randomRange, rangeMin, rangeMax, maxSolEnabled, maxSolTotal, slippage, delayMin, delayMax, selectedWallets])
+    }, [step, tokenResolved, randomRange, rangeMin, rangeMax, maxSolEnabled, maxSolTotal, slippage, delayMin, delayMax, selectedWallets, autoCommentEnabled, autoCommentDelayMinSec, autoCommentDelayMaxSec, autoCommentProbabilityPct, autoCommentBankIds, autoHaltEnabled, haltThreshold, haltWindowSec])
 
     function handleNext() {
         if (step === 0 && tradeType === 'buy') {
@@ -348,6 +418,7 @@ export default function StaggeredBuyWizard() {
 
     function handleResume() {
         pauseRef.current = false
+        setHaltAlert(null)
         setExecPhase('running')
     }
 
@@ -359,8 +430,37 @@ export default function StaggeredBuyWizard() {
     async function executeAll() {
         abortRef.current = false
         pauseRef.current = false
+        setHaltAlert(null)
         setExecPhase('running')
         setExecState(schedule.map((e) => ({ walletId: e.walletId, status: 'pending' })))
+
+        // Build this run's own wallet-pubkey set so the relay-event handler
+        // can tell "one of ours" from "foreign" — deliberately narrower than
+        // the platform-wide wallet list, scoped to just this run's schedule.
+        runWalletKeysRef.current = new Set(
+            schedule
+                .map((e) => wallets.find((w) => w.id === e.walletId)?.public_key)
+                .filter((pk): pk is string => !!pk),
+        )
+        foreignTradeTimestampsRef.current = []
+
+        if (autoHaltEnabled) {
+            // Await confirmation the relay is actually watching this mint
+            // BEFORE any buy fires — a fire-and-forget watch call leaves a
+            // race window where an early foreign trade could land before
+            // we're subscribed to see it.
+            try {
+                await fetch('/api/wss/tokens/watch', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({ mint: tokenMint }),
+                })
+            } catch {
+                // Best-effort — proceed without auto-halt protection rather
+                // than block the run on a relay hiccup.
+            }
+        }
+        autoHaltActiveRef.current = autoHaltEnabled
 
         for (let i = 0; i < schedule.length; i++) {
             // Wait out any pause before starting the next trade
@@ -384,7 +484,21 @@ export default function StaggeredBuyWizard() {
                     const res      = await fetch('/api/trade/staggered/buy', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ walletId: entry.walletId, mintAddress: tokenMint, solAmountLamports: lamports, slippage }),
+                        body: JSON.stringify({
+                            walletId: entry.walletId,
+                            mintAddress: tokenMint,
+                            solAmountLamports: lamports,
+                            slippage,
+                            ...(autoCommentEnabled ? {
+                                autoComment: {
+                                    enabled:     true,
+                                    delayMinMs:  (parseFloat(autoCommentDelayMinSec) || 0) * 1000,
+                                    delayMaxMs:  (parseFloat(autoCommentDelayMaxSec) || 0) * 1000,
+                                    probability: (parseFloat(autoCommentProbabilityPct) || 0) / 100,
+                                    bankIds:     [...autoCommentBankIds],
+                                },
+                            } : {}),
+                        }),
                     })
                     apiResult = await res.json()
                 } else {
@@ -418,6 +532,15 @@ export default function StaggeredBuyWizard() {
                 setExecCountdownMs(null)
                 setExecNextWalletId(null)
             }
+        }
+
+        autoHaltActiveRef.current = false
+        if (autoHaltEnabled) {
+            fetch('/api/wss/tokens/unwatch', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ mint: tokenMint }),
+            }).catch(() => {})
         }
 
         // Mark any still-pending/executing entries as cancelled
@@ -572,6 +695,63 @@ export default function StaggeredBuyWizard() {
                                             </div>
                                         )}
                                     </div>
+
+                                    {/* Auto-Comment */}
+                                    <div className="flex flex-col gap-1.5">
+                                        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Auto-Comment</span>
+                                        <label className="flex items-center gap-2 cursor-pointer select-none h-9">
+                                            <input
+                                                type="checkbox"
+                                                checked={autoCommentEnabled}
+                                                onChange={(e) => setAutoCommentEnabled(e.target.checked)}
+                                                className="size-4 rounded border border-input accent-blue-500"
+                                            />
+                                            <span className="text-xs font-medium text-muted-foreground">Enable</span>
+                                        </label>
+                                        {autoCommentEnabled && (
+                                            <div className="flex flex-col gap-1.5">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="flex flex-col gap-1">
+                                                        <span className="text-[10px] text-muted-foreground">Delay min (sec)</span>
+                                                        <input
+                                                            type="number" min={0}
+                                                            value={autoCommentDelayMinSec}
+                                                            onChange={(e) => setAutoCommentDelayMinSec(e.target.value)}
+                                                            className="w-20 rounded border border-input bg-transparent px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                        />
+                                                    </div>
+                                                    <span className="text-muted-foreground text-sm mt-3">–</span>
+                                                    <div className="flex flex-col gap-1">
+                                                        <span className="text-[10px] text-muted-foreground">Delay max (sec)</span>
+                                                        <input
+                                                            type="number" min={0}
+                                                            value={autoCommentDelayMaxSec}
+                                                            onChange={(e) => setAutoCommentDelayMaxSec(e.target.value)}
+                                                            className="w-20 rounded border border-input bg-transparent px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="text-[10px] text-muted-foreground">Chance to comment (%)</span>
+                                                    <input
+                                                        type="number" min={0} max={100}
+                                                        value={autoCommentProbabilityPct}
+                                                        onChange={(e) => setAutoCommentProbabilityPct(e.target.value)}
+                                                        className="w-20 rounded border border-input bg-transparent px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                    />
+                                                </div>
+                                                <p className="text-[10px] text-muted-foreground max-w-52">
+                                                    Requires the wallet to still hold the token — disappears from pump.fun if it later sells. Below 100%, the rate rolls toward the target instead of an independent flip per wallet.
+                                                </p>
+                                                <BankPicker
+                                                    mintAddress={tokenResolved ? tokenMint : undefined}
+                                                    selectedBankIds={autoCommentBankIds}
+                                                    onChange={setAutoCommentBankIds}
+                                                    className="w-64"
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
                                 </>
                             ) : (
                                 /* Sell percentage */
@@ -641,6 +821,53 @@ export default function StaggeredBuyWizard() {
                                     </span>
                                 )}
                             </div>
+                        </div>
+
+                        {/* Front-Running Protection */}
+                        <div className="flex flex-col gap-1.5">
+                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Front-Running Protection</span>
+                            <label className="flex items-center gap-2 cursor-pointer select-none h-9">
+                                <input
+                                    type="checkbox"
+                                    checked={autoHaltEnabled}
+                                    onChange={(e) => setAutoHaltEnabled(e.target.checked)}
+                                    className="size-4 rounded border border-input accent-blue-500"
+                                />
+                                <span className="text-xs font-medium text-muted-foreground">Enable</span>
+                            </label>
+                            {autoHaltEnabled && (
+                                <div className="flex flex-col gap-1.5">
+                                    <div className="flex items-end gap-3">
+                                        <div className="flex flex-col gap-1">
+                                            <span className="text-[10px] text-muted-foreground">Trigger after</span>
+                                            <div className="flex items-center gap-1.5">
+                                                <input
+                                                    type="number" min={1} step={1}
+                                                    value={haltThreshold}
+                                                    onChange={(e) => setHaltThreshold(e.target.value)}
+                                                    className="w-16 rounded border border-input bg-transparent px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                />
+                                                <span className="text-[10px] text-muted-foreground">external trades</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-col gap-1">
+                                            <span className="text-[10px] text-muted-foreground">within</span>
+                                            <div className="flex items-center gap-1.5">
+                                                <input
+                                                    type="number" min={1} step={1}
+                                                    value={haltWindowSec}
+                                                    onChange={(e) => setHaltWindowSec(e.target.value)}
+                                                    className="w-16 rounded border border-input bg-transparent px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                />
+                                                <span className="text-[10px] text-muted-foreground">seconds</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <p className="text-[10px] text-muted-foreground max-w-md">
+                                        Watches this token&apos;s live trades while the run is active. A trade from a wallet outside this run counts as external — enough of those in the trailing window auto-pauses (not cancels) so you can judge whether it&apos;s a real sniper before resuming or cancelling.
+                                    </p>
+                                </div>
+                            )}
                         </div>
 
                         {/* Wallet selector */}
@@ -789,6 +1016,22 @@ export default function StaggeredBuyWizard() {
                                         <span className="w-32 shrink-0 font-medium text-muted-foreground">Max SOL Split</span>
                                         <span className="tabular-nums text-foreground">
                                             {maxSolTotal} SOL ÷ {selectedWallets.size} = {(parseFloat(maxSolTotal) / selectedWallets.size).toFixed(4)} each
+                                        </span>
+                                    </div>
+                                )}
+                                {tradeType === 'buy' && autoCommentEnabled && (
+                                    <div className="flex items-center gap-3 px-4 py-2.5 bg-muted/20">
+                                        <span className="w-32 shrink-0 font-medium text-muted-foreground">Auto-Comment</span>
+                                        <span className="tabular-nums text-foreground">
+                                            {autoCommentDelayMinSec}–{autoCommentDelayMaxSec}s delay, {autoCommentProbabilityPct}% of wallets, {autoCommentBankIds.size} bank{autoCommentBankIds.size !== 1 ? 's' : ''}
+                                        </span>
+                                    </div>
+                                )}
+                                {autoHaltEnabled && (
+                                    <div className="flex items-center gap-3 px-4 py-2.5 bg-muted/20">
+                                        <span className="w-32 shrink-0 font-medium text-muted-foreground">Front-Run Protection</span>
+                                        <span className="tabular-nums text-foreground">
+                                            auto-pause after {haltThreshold} external trades / {haltWindowSec}s
                                         </span>
                                     </div>
                                 )}
@@ -945,6 +1188,20 @@ export default function StaggeredBuyWizard() {
                             )}
                         </div>
 
+                        {/* Auto-halt alert — distinct from a manual pause */}
+                        {haltAlert && (
+                            <div role="alert" className="flex gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-destructive">
+                                <svg className="mt-0.5 size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                    <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+                                </svg>
+                                <div className="flex flex-col gap-1">
+                                    <p className="text-xs font-semibold leading-none">Front-running protection triggered</p>
+                                    <p className="text-xs text-destructive/80">{haltAlert}</p>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Countdown / paused banner */}
                         {execCountdownMs !== null && execNextWalletId && (
                             execPhase === 'paused' ? (
@@ -1058,6 +1315,17 @@ export default function StaggeredBuyWizard() {
                                     </tbody>
                                 </table>
                             </div>
+                        )}
+
+                        {/* Auto-comment activity — comments fire on their own durable
+                            schedule well after a buy lands, so this keeps polling
+                            regardless of execPhase; not gated on 'running'. */}
+                        {autoCommentEnabled && tokenResolved && (
+                            <CommentActivityFeed
+                                mintAddress={tokenMint}
+                                walletIds={selectedWallets}
+                                wallets={wallets}
+                            />
                         )}
                     </div>
                 )}

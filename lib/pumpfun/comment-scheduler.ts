@@ -33,6 +33,7 @@ interface ClaimedRow {
   user_id:      string
   wallet_id:    string
   mint_address: string
+  bank_ids:     string[]
   attempts:     number
 }
 
@@ -115,7 +116,7 @@ class CommentScheduler {
   }
 
   private async processRow(admin: ReturnType<typeof createAdminClient>, row: ClaimedRow): Promise<void> {
-    const { id, user_id, wallet_id, mint_address } = row
+    const { id, wallet_id, mint_address, bank_ids } = row
 
     let keypair: Keypair | null = null
     try {
@@ -129,7 +130,7 @@ class CommentScheduler {
       }
 
       const { data: bankEntry, error: bankErr } = await admin
-        .rpc('claim_comment_bank_entry', { p_user_id: user_id })
+        .rpc('claim_comment_bank_entry', { p_bank_ids: bank_ids })
         .maybeSingle()
 
       if (bankErr || !bankEntry) {
@@ -176,6 +177,8 @@ export interface EnqueueCommentParams {
   mintAddress: string
   /** Absolute fire time. Callers should randomize this (see delayMinMs/delayMaxMs helpers below). */
   scheduledFor: Date
+  /** Bank(s) to pull from at fire time — required, non-empty. */
+  bankIds:     string[]
   source?:     string
 }
 
@@ -184,6 +187,10 @@ export interface EnqueueCommentParams {
  * loop is running. Call this from any buy route right after a confirmed buy.
  */
 export async function enqueueComment(params: EnqueueCommentParams): Promise<{ enqueued: boolean; error?: string }> {
+  if (params.bankIds.length === 0) {
+    return { enqueued: false, error: 'bankIds must be non-empty' }
+  }
+
   const admin = createAdminClient()
 
   const { data, error } = await admin.rpc('enqueue_comment_schedule', {
@@ -191,6 +198,7 @@ export async function enqueueComment(params: EnqueueCommentParams): Promise<{ en
     p_wallet_id:      params.walletId,
     p_mint_address:   params.mintAddress,
     p_scheduled_for:  params.scheduledFor.toISOString(),
+    p_bank_ids:       params.bankIds,
     p_source:         params.source ?? null,
   })
 
@@ -213,9 +221,9 @@ export function randomScheduledTime(delayMinMs: number, delayMaxMs: number): Dat
 /**
  * Convenience wrapper for buy routes: resolves the wallet's owner (no
  * session/auth.uid() needed — see get_wallet_owner() in comment_schedule.sql),
- * rolls `probability`, and enqueues if it hits. Swallows all errors to
- * console — a scheduling failure must never turn a successful buy into an
- * error response.
+ * rolls the (rolling-window-corrected) `probability`, and enqueues if it
+ * hits. Swallows all errors to console — a scheduling failure must never
+ * turn a successful buy into an error response.
  */
 export async function maybeEnqueueCommentAfterBuy(
   walletId:    string,
@@ -224,7 +232,12 @@ export async function maybeEnqueueCommentAfterBuy(
   source:      string,
 ): Promise<void> {
   if (!options.enabled) return
-  if (Math.random() >= (options.probability ?? 1)) return
+  if (options.bankIds.length === 0) {
+    console.error(`[comment-scheduler] wallet=${walletId} autoComment enabled with no bankIds — skipped`)
+    return
+  }
+
+  const target = options.probability ?? 1
 
   try {
     const admin = createAdminClient()
@@ -234,11 +247,31 @@ export async function maybeEnqueueCommentAfterBuy(
       return
     }
 
+    // Below 100% target, use the rolling controller (roll_auto_comment_decision)
+    // instead of an independent per-wallet coin flip — a flat Math.random() <
+    // probability check is bursty at real batch sizes (a 30% target across 5
+    // wallets can easily land 0 or 4-5 by chance), which is exactly the kind
+    // of clustered pattern that reads as automated. At 100% there's nothing
+    // to correct for, so skip the extra round trip.
+    if (target < 1) {
+      const { data: shouldComment, error: rollError } = await admin.rpc('roll_auto_comment_decision', {
+        p_user_id:            userId,
+        p_mint_address:       mintAddress,
+        p_target_probability: target,
+      })
+      if (rollError) {
+        console.error(`[comment-scheduler] roll_auto_comment_decision failed wallet=${walletId}:`, rollError.message)
+        return
+      }
+      if (!shouldComment) return
+    }
+
     const result = await enqueueComment({
       userId:       userId as string,
       walletId,
       mintAddress,
       scheduledFor: randomScheduledTime(options.delayMinMs, options.delayMaxMs),
+      bankIds:      options.bankIds,
       source,
     })
     if (!result.enqueued && !result.error) {

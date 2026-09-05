@@ -1,9 +1,19 @@
 // lib/types/comment-bank.ts
 
+export interface CommentBank {
+  id:           string
+  name:         string
+  description:  string | null
+  /** null = generic (usable for any token). Set = only offered for this mint. */
+  mint_address: string | null
+  entry_count:  number
+  created_at:   string
+}
+
 export interface CommentBankEntry {
   id:           string
+  bank_id:      string
   text:         string
-  tag:          string | null
   source:       string
   is_active:    boolean
   used_count:   number
@@ -19,6 +29,8 @@ export interface CommentScheduleEntry {
   scheduled_for:   string
   posted_at:       string | null
   comment_bank_id: string | null
+  /** The exact text posted — joined from the claimed comment_bank entry. Null until status reaches 'posted'. */
+  comment_text:    string | null
   callout_id:      string | null
   attempts:        number
   last_error:      string | null

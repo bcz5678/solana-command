@@ -15,6 +15,9 @@ import LaunchBuilderCanvas from './launch-builder-canvas'
 import LaunchBuilderToolbar from './launch-builder-toolbar'
 import NodeConfigDialog from './node-config-dialog'
 import BundleLoopPanel, { type BundleLoopState, type BundleLoopRow } from './bundle-loop-panel'
+import { stratifiedInterleave } from '@/lib/trade/stratified-interleave'
+import { useRelayEvent } from '@/hooks/use-relay-event'
+import type { TokenTransactionEvent } from '@/lib/wss/types'
 import LaunchTradeFeedPanel from '@/components/tokens/launch/launch-trade-feed-panel'
 import { BuilderNodeData, ParsedBundledWallet } from './types'
 import { buildLaunchProfile, applyLaunchProfile, type LaunchProfile } from './launch-profile'
@@ -98,6 +101,10 @@ function LaunchBuilderInner() {
     const [launchedToken, setLaunchedToken] = useState<{ mintAddress: string; tokenSymbol: string | null } | null>(null)
     const [ourWallets, setOurWallets]             = useState<Set<string>>(new Set())
     const [ourWalletLabels, setOurWalletLabels]   = useState<Record<string, string>>({})
+    // walletId -> publicKey, so callStaggeredTrade (a plain async fn, not a
+    // component) can resolve which live trades belong to its own run without
+    // re-fetching — populated by the same explorer call as ourWallets above.
+    const walletIdToPublicKeyRef = useRef<Map<string, string>>(new Map())
 
     useEffect(() => {
         if (!launchedToken) return
@@ -105,14 +112,43 @@ function LaunchBuilderInner() {
             .then((r) => (r.ok ? r.json() : null))
             .then((data) => {
                 if (!data) return
-                const wallets = (data.wallets ?? []) as { public_key: string; label: string | null }[]
+                const wallets = (data.wallets ?? []) as { id: string; public_key: string; label: string | null }[]
                 setOurWallets(new Set(wallets.map((w) => w.public_key)))
                 const labels: Record<string, string> = {}
                 for (const w of wallets) if (w.label) labels[w.public_key] = w.label
                 setOurWalletLabels(labels)
+                walletIdToPublicKeyRef.current = new Map(wallets.map((w) => [w.id, w.public_key]))
             })
             .catch(() => {})
     }, [launchedToken])
+
+    // Front-running auto-halt (staggered nodes only — see callStaggeredTrade).
+    // Keyed by nodeId since more than one staggered node could theoretically
+    // run concurrently; each entry tracks its own run's wallet set and
+    // trailing foreign-trade timestamps so runs never interfere with each
+    // other. A plain mutable ref, not state — read/written from inside the
+    // relay handler and the non-reactive callStaggeredTrade loop, neither of
+    // which should trigger a re-render.
+    const autoHaltRunsRef = useRef<Map<string, {
+        mintAddress: string
+        ourWalletKeys: Set<string>
+        thresholdCount: number
+        windowMs: number
+        foreignTimestamps: number[]
+        triggered: boolean
+    }>>(new Map())
+
+    useRelayEvent('token-transaction', (e: TokenTransactionEvent) => {
+        for (const run of autoHaltRunsRef.current.values()) {
+            if (run.triggered) continue
+            if (run.mintAddress !== e.mint) continue
+            if (run.ourWalletKeys.has(e.wallet)) continue
+            const nowMs = e.timestamp * 1000
+            run.foreignTimestamps.push(nowMs)
+            run.foreignTimestamps = run.foreignTimestamps.filter((t) => nowMs - t <= run.windowMs)
+            if (run.foreignTimestamps.length >= run.thresholdCount) run.triggered = true
+        }
+    })
 
     const [bundleLoop, setBundleLoop] = useState<BundleLoopState | null>(null)
     const bundleLoopDecisionRef = useRef<Map<string, (action: 'retry' | 'skip') => void>>(new Map())
@@ -397,14 +433,69 @@ function LaunchBuilderInner() {
                 const delayMinMs = Number(config.delayMinSeconds ?? 5) * 1000
                 const delayMaxMs = Number(config.delayMaxSeconds ?? 30) * 1000
 
-                // Shuffle so wallet order isn't predictable on-chain, same as the wizard.
-                const order = [...selectedWalletIds].sort(() => Math.random() - 0.5)
+                // Stratified interleave, not a plain shuffle — same as the wizard.
+                // Spreads large trade amounts evenly across the run instead of
+                // leaving it to chance whether they cluster together; a
+                // monotonic size ramp in either direction is itself a
+                // detectable pattern to sniper/copy-trade bots.
+                const order = stratifiedInterleave(
+                    selectedWalletIds,
+                    (id) => parseFloat(tradeAmounts[id] ?? '0') || 0,
+                )
                 const endpoint = subtype === 'staggeredBuy' ? '/api/trade/staggered/buy' : '/api/trade/staggered/sell'
                 let failCount = 0
                 let lastSignature: string | undefined
                 let lastError: string | undefined
 
+                const autoCommentEnabled = subtype === 'staggeredBuy' && ((config.autoCommentEnabled as boolean | undefined) ?? false)
+                const autoComment = autoCommentEnabled ? {
+                    enabled:     true,
+                    delayMinMs:  (Number(config.autoCommentDelayMinSec) || 180) * 1000,
+                    delayMaxMs:  (Number(config.autoCommentDelayMaxSec) || 1800) * 1000,
+                    probability: (Number(config.autoCommentProbabilityPct) || 100) / 100,
+                    bankIds:     (config.autoCommentBankIds as string[] | undefined) ?? [],
+                } : undefined
+
+                // Front-running auto-halt — only meaningful for the two Staggered
+                // subtypes, which have a real gap between trades to react in;
+                // Sell Percent fires with no gap, same reasoning that already
+                // excludes the Bundled Jito loop (see its own comment above).
+                const haltEnabled = isStaggered && ((config.autoHaltEnabled as boolean | undefined) ?? false)
+                const haltThresholdCount = Math.max(1, Number(config.haltThreshold) || 2)
+                const haltWindowMs = Math.max(1, Number(config.haltWindowSec) || 10) * 1000
+                let haltedEarly = false
+
+                if (haltEnabled) {
+                    // Awaited, not fire-and-forget — a safety feature that's watching
+                    // for early snipers can't afford the race window of firing the
+                    // first trade before the relay subscription is actually live.
+                    await fetch('/api/wss/tokens/watch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ mint: mintAddress }),
+                    }).catch(() => {})
+
+                    autoHaltRunsRef.current.set(nodeId, {
+                        mintAddress,
+                        ourWalletKeys: new Set(
+                            order
+                                .map((id) => walletIdToPublicKeyRef.current.get(id))
+                                .filter((k): k is string => !!k),
+                        ),
+                        thresholdCount: haltThresholdCount,
+                        windowMs: haltWindowMs,
+                        foreignTimestamps: [],
+                        triggered: false,
+                    })
+                }
+
+                let ranCount = 0
                 for (let i = 0; i < order.length; i++) {
+                    if (haltEnabled && autoHaltRunsRef.current.get(nodeId)?.triggered) {
+                        haltedEarly = true
+                        break
+                    }
+
                     const walletId = order[i]
                     const body = subtype === 'staggeredBuy'
                         ? {
@@ -413,6 +504,7 @@ function LaunchBuilderInner() {
                             solAmountLamports: Math.round((parseFloat(tradeAmounts[walletId] ?? '0') || 0) * 1e9).toString(),
                             slippage,
                             dryRun: testModeRef.current,
+                            autoComment,
                         }
                         : {
                             walletId,
@@ -442,16 +534,34 @@ function LaunchBuilderInner() {
                         failCount++
                         lastError = String(err)
                     }
+                    ranCount++
 
                     if (isStaggered && i < order.length - 1) {
                         await wait(delayMinMs + Math.random() * (delayMaxMs - delayMinMs))
                     }
                 }
 
-                setResult(nodeId, failCount === 0
-                    ? { ok: true, message: `${order.length}/${order.length} ${testModeRef.current ? 'simulated' : 'landed'}`, signature: lastSignature }
-                    : { ok: false, message: `${failCount}/${order.length} failed — ${explainTradeError(lastError)}` })
-                if (failCount === 0) setVariable(varNameFor(nodeId), { ...config, signature: lastSignature, walletIds: order })
+                if (haltEnabled) {
+                    autoHaltRunsRef.current.delete(nodeId)
+                    void fetch('/api/wss/tokens/unwatch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ mint: mintAddress }),
+                    }).catch(() => {})
+                }
+
+                if (haltedEarly) {
+                    setResult(nodeId, {
+                        ok: false,
+                        message: `Halted after ${ranCount}/${order.length} — front-running protection triggered${failCount ? `, ${failCount} failed` : ''}`,
+                        signature: lastSignature,
+                    })
+                } else {
+                    setResult(nodeId, failCount === 0
+                        ? { ok: true, message: `${order.length}/${order.length} ${testModeRef.current ? 'simulated' : 'landed'}`, signature: lastSignature }
+                        : { ok: false, message: `${failCount}/${order.length} failed — ${explainTradeError(lastError)}` })
+                }
+                if (failCount === 0 && !haltedEarly) setVariable(varNameFor(nodeId), { ...config, signature: lastSignature, walletIds: order })
             }
 
             // Bundled Jito — QuickNode/Lil Jito path only, per scope. Wallets come
@@ -492,6 +602,15 @@ function LaunchBuilderInner() {
                 }
 
                 const jitoTipInLamports = jitoTipLamportsFromConfig(config)
+
+                const autoCommentEnabled = (config.autoCommentEnabled as boolean | undefined) ?? false
+                const autoComment = autoCommentEnabled ? {
+                    enabled:     true,
+                    delayMinMs:  (Number(config.autoCommentDelayMinSec) || 180) * 1000,
+                    delayMaxMs:  (Number(config.autoCommentDelayMaxSec) || 1800) * 1000,
+                    probability: (Number(config.autoCommentProbabilityPct) || 100) / 100,
+                    bankIds:     (config.autoCommentBankIds as string[] | undefined) ?? [],
+                } : undefined
 
                 // Local mirror of the dialog's rows — synchronous source of truth
                 // (React state updates are async/batched), pushed to the dialog via
@@ -538,6 +657,7 @@ function LaunchBuilderInner() {
                                 tradesList,
                                 useQuicknodeJito: true,
                                 dryRun: testModeRef.current,
+                                autoComment,
                             }),
                         })
                         const result = await res.json()

@@ -21,6 +21,8 @@ export interface AutoCommentOptions {
   delayMaxMs:   number
   /** 0-1, fraction of eligible wallets that get a comment scheduled at all. Defaults to 1. */
   probability?: number
+  /** Comment bank ids to pull from — required when enabled. Least-used-first across their union. */
+  bankIds:      string[]
 }
 
 export interface BundleBuyBody {

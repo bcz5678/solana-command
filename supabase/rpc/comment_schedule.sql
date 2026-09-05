@@ -266,6 +266,12 @@ REVOKE ALL ON FUNCTION public.mark_comment_schedule_failed(uuid,text) FROM anon;
 
 
 -- ── get_comment_schedule(): status panel read ────────────────────────
+-- comment_bank_id (despite the name — see mark_comment_schedule_posted's
+-- caller in comment-scheduler.ts) actually holds the CLAIMED ENTRY's id from
+-- private.comment_bank, not a private.comment_banks (named bank) id — so it
+-- joins straight to comment_bank.text, giving callers the exact text that
+-- was posted, not just which entry was used. comment_text is NULL until the
+-- row reaches 'posted' (comment_bank_id is null before then).
 DROP FUNCTION IF EXISTS public.get_comment_schedule(text,integer);
 
 CREATE OR REPLACE FUNCTION public.get_comment_schedule(
@@ -280,6 +286,7 @@ RETURNS TABLE (
   scheduled_for   timestamptz,
   posted_at       timestamptz,
   comment_bank_id uuid,
+  comment_text    text,
   callout_id      text,
   attempts        integer,
   last_error      text,
@@ -295,9 +302,10 @@ BEGIN
   IF (SELECT public.is_super_admin()) THEN
     RETURN QUERY
       SELECT cs.id, cs.wallet_id, cs.mint_address, cs.status, cs.scheduled_for,
-             cs.posted_at, cs.comment_bank_id, cs.callout_id, cs.attempts, cs.last_error,
+             cs.posted_at, cs.comment_bank_id, cb.text, cs.callout_id, cs.attempts, cs.last_error,
              cs.source, cs.created_at
       FROM private.comment_schedule cs
+      LEFT JOIN private.comment_bank cb ON cb.id = cs.comment_bank_id
       WHERE (p_status IS NULL OR cs.status = p_status)
       ORDER BY cs.scheduled_for DESC
       LIMIT p_limit;
@@ -305,9 +313,10 @@ BEGIN
   ELSIF auth.uid() IS NOT NULL THEN
     RETURN QUERY
       SELECT cs.id, cs.wallet_id, cs.mint_address, cs.status, cs.scheduled_for,
-             cs.posted_at, cs.comment_bank_id, cs.callout_id, cs.attempts, cs.last_error,
+             cs.posted_at, cs.comment_bank_id, cb.text, cs.callout_id, cs.attempts, cs.last_error,
              cs.source, cs.created_at
       FROM private.comment_schedule cs
+      LEFT JOIN private.comment_bank cb ON cb.id = cs.comment_bank_id
       WHERE cs.user_id = auth.uid()
         AND (p_status IS NULL OR cs.status = p_status)
       ORDER BY cs.scheduled_for DESC
