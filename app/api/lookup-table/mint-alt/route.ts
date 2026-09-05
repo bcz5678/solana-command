@@ -86,8 +86,11 @@ export async function POST(request: NextRequest) {
     const creator = new PublicKey(launchData.dev_wallet_public_key)
 
     // ── Resolve target wallets' public keys ─────────────────────
+    // Resolving specific already-known walletIds, not presenting a picker —
+    // must still resolve a wallet that's since been retired, or ALT builds
+    // referencing it would silently break.
     const { data: walletResults, error: walletsErr } = await supabase
-        .rpc('get_wallets', { target_user_id: null })
+        .rpc('get_wallets', { target_user_id: null, p_active_only: false })
 
     if (walletsErr) {
         return NextResponse.json({ error: `Failed to load wallets: ${walletsErr.message}` }, { status: 500 })

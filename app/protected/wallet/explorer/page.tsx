@@ -17,7 +17,10 @@ export default function Page() {
   const [isLoading, setIsLoading]     = useState(true)
 
   function refreshWallets() {
-    return fetch('/api/wallets/explorer')
+    // This page manages retired wallets too (its own Status dropdown filters
+    // client-side, defaulting to Active) — every other wallet-picker
+    // consumer relies on the API's own default (active-only) instead.
+    return fetch('/api/wallets/explorer?activeOnly=false')
       .then((r) => r.json())
       .then(({ wallets, walletTypes, owners, groups }) => {
         const parsed: WalletRecord[] = (wallets ?? []).map((w: any) => ({

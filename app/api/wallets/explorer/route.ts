@@ -20,9 +20,14 @@ export async function GET(req: NextRequest) {
   // must be createClient(), not createAdminClient()
   const supabase = await createClient()
 
-  // ── 3. Optional filter by user ────────────────────────────
+  // ── 3. Optional filters ────────────────────────────────────
   const { searchParams } = new URL(req.url)
   const targetUserId     = searchParams.get('userId') ?? null
+  // Every wallet-picker consumer wants active-only by default (retired
+  // wallets shouldn't be selectable for a new trade/transfer/comment) — the
+  // Wallet Explorer page is the one exception, passing activeOnly=false so
+  // its own Status dropdown can still show retired wallets on request.
+  const activeOnly       = searchParams.get('activeOnly') !== 'false'
 
   const { data: walletTypes,  error: typesError }   =  await supabase.from('wallet_types').select('*');
   const { data: walletOwners, error: groupsError }  =  await supabase.from('wallet_owners').select('*');
@@ -39,7 +44,8 @@ export async function GET(req: NextRequest) {
   //   is_super_admin() = false → returns own wallets only (targetUserId ignored)
   const { data: walletResults, error: walletResultsError } = await supabase
     .rpc('get_wallets', {
-      target_user_id: targetUserId    // null = all wallets
+      target_user_id: targetUserId,   // null = all wallets
+      p_active_only:  activeOnly,
     })
 
   if (walletResultsError) {

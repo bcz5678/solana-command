@@ -1,4 +1,5 @@
 import TradeRunTable from '@/components/trade/control-center/trade-run-table'
+import BotStatusSection from '@/components/trade/control-center/bot-status-section'
 
 export default function ControlCenterPage() {
     return (
@@ -10,6 +11,7 @@ export default function ControlCenterPage() {
                     progresses. Pause/Resume/Cancel only take effect while the tab that started a run is still open and polling.
                 </p>
             </div>
+            <BotStatusSection />
             <TradeRunTable />
         </div>
     )

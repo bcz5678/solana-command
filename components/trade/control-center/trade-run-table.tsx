@@ -2,6 +2,8 @@
 
 import { Fragment, useEffect, useState } from 'react'
 import type { TradeRun, TradeRunStep, TradeRunSurface, TradeRunStatus } from '@/lib/types/trade-run'
+import type { WalletRecord } from '@/lib/types/wallet'
+import CommentActivityFeed from '@/components/tokens/comment-bank/comment-activity-feed'
 
 // No push event exists for "a run's step changed" — same reasoning as
 // comment-activity-feed.tsx's own polling, mirrored here at the same cadence.
@@ -56,6 +58,9 @@ export default function TradeRunTable() {
     const [steps, setSteps]         = useState<TradeRunStep[]>([])
     const [stepsLoading, setStepsLoading] = useState(false)
     const [busyId, setBusyId]       = useState<string | null>(null)
+    // For CommentActivityFeed's wallet labels only — fetched once, same
+    // /api/wallets/explorer call the wizards themselves already make.
+    const [wallets, setWallets]     = useState<WalletRecord[]>([])
 
     async function refreshRuns() {
         try {
@@ -84,6 +89,13 @@ export default function TradeRunTable() {
             setStepsLoading(false)
         }
     }
+
+    useEffect(() => {
+        fetch('/api/wallets/explorer')
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data) => { if (data) setWallets((data.wallets ?? []) as WalletRecord[]) })
+            .catch(() => {})
+    }, [])
 
     useEffect(() => {
         refreshRuns()
@@ -268,6 +280,14 @@ export default function TradeRunTable() {
                                                             )}
                                                         </div>
                                                     ))}
+                                                </div>
+                                            )}
+                                            {/* Separate durable record (private.comment_schedule) — a run's
+                                                trade steps and its auto-comments live on independent
+                                                lifecycles, only loosely linked by sharing this mint. */}
+                                            {run.mint_address && (
+                                                <div className="mt-3">
+                                                    <CommentActivityFeed mintAddress={run.mint_address} wallets={wallets} />
                                                 </div>
                                             )}
                                         </td>
