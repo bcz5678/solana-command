@@ -41,7 +41,8 @@ import {
     FileBracesCornerIcon,
     PackagePlus,
     Radio,
-    MessageSquare
+    MessageSquare,
+    Activity
 } from "lucide-react"
 import { RelayStatusIndicator } from "@/components/wss/relay-status-indicator"
 
@@ -326,6 +327,17 @@ export function AppSidebar() {
                   <Link href="/protected/trade/trade">
                     <Repeat />
                     <span>Single Trade</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
+                  asChild
+                >
+                  <Link href="/protected/trade/control-center">
+                    <Activity />
+                    <span>Control Center</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

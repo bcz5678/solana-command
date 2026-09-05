@@ -21,9 +21,10 @@ import type { TokenTransactionEvent } from '@/lib/wss/types'
 import LaunchTradeFeedPanel from '@/components/tokens/launch/launch-trade-feed-panel'
 import { BuilderNodeData, ParsedBundledWallet } from './types'
 import { buildLaunchProfile, applyLaunchProfile, type LaunchProfile } from './launch-profile'
-import { getExecEntryNodeIds, getDownstreamNodeIds, getDownstreamNodeIdsByHandle, buildDataNodePayload, findTokenNodeData } from './handle-types'
+import { getExecEntryNodeIds, getDownstreamNodeIds, getDownstreamNodeIdsByHandle, getReachableNodeIds, buildDataNodePayload, findTokenNodeData } from './handle-types'
 import { LaunchType } from '@/components/tokens/launch/types'
 import { solStringToLamports } from '@/lib/lamports'
+import { createTradeRun, upsertTradeRunStep, getTradeRun, requestTradeRunControl, finishTradeRun } from '@/lib/trade/trade-run-client'
 
 const DEFAULT_JITO_TIP_SOL = '0.001'
 
@@ -165,7 +166,7 @@ function LaunchBuilderInner() {
     const onCloseBundleLoop = useCallback(() => setBundleLoop(null), [])
 
     const runDryRun = useCallback(
-        (execNodeId: string) => {
+        async (execNodeId: string) => {
             const entryIds = getExecEntryNodeIds(execNodeId, edgesRef.current)
             if (entryIds.length === 0) return
 
@@ -174,6 +175,31 @@ function LaunchBuilderInner() {
                 selected: false,
                 data: { ...n.data, awaitingContinue: false, runCountdown: undefined, executionResult: undefined },
             })))
+
+            // Durable run record — created before any node executes so every
+            // setResult() below has somewhere to attach its step. `cancelled`
+            // is a plain local (this whole function body is one run's private
+            // scope, same as executionResults/resetCounts/variables below),
+            // flipped by the poll when the Trade Control Center (a second
+            // tab) requests a cancel; walk() checks it before visiting each
+            // new node. total_steps is a FLOOR (getReachableNodeIds can't
+            // know Loop/BranchReset iteration counts ahead of time).
+            let cancelled = false
+            const runTokenData = findTokenNodeData(execNodeId, nodesRef.current, edgesRef.current)
+            const runId = await createTradeRun(
+                'launch_builder',
+                (runTokenData?.config?.tokenMint as string | undefined) ?? null,
+                (runTokenData?.config?.tokenSymbol as string | undefined) ?? (runTokenData?.config?.tokenName as string | undefined) ?? null,
+                getReachableNodeIds(entryIds, edgesRef.current).length,
+            )
+            const controlPollId = setInterval(async () => {
+                if (!runId) return
+                const run = await getTradeRun(runId)
+                if (run?.control === 'cancel_requested') {
+                    cancelled = true
+                    requestTradeRunControl(runId, 'none')
+                }
+            }, 3000)
 
             // Each branch walks independently on its own timer — a Human In The
             // Loop pause or a Timer countdown only blocks the branch it's on,
@@ -186,6 +212,14 @@ function LaunchBuilderInner() {
             // it) would actually land. Reading from nodesRef here would almost
             // always see the pre-result stale state.
             const executionResults = new Map<string, { ok: boolean; status?: number; message: string; signature?: string }>()
+            // How many times setResult() has fired for a given node id in this
+            // run — a Loop body or a BranchReset target legitimately calls
+            // setResult() more than once for the SAME node id across the run
+            // (once per iteration/re-entry). step_key disambiguates those as
+            // separate trade_run_steps rows instead of one being overwritten
+            // by the next, without threading an iteration number through
+            // walk()/runLoop()/runBranchReset()'s signatures.
+            const stepVisitCounts = new Map<string, number>()
             // Keyed by Branch Reset node id — persists across an entire Run, since
             // a single Branch Reset node can be re-entered many times via its own
             // cycle-back edge (that's the whole point of the node).
@@ -240,9 +274,7 @@ function LaunchBuilderInner() {
                 const url = (webhookConfig.url as string | undefined)?.trim()
                 if (!url) {
                     console.warn(`[launch-builder] Webhook node ${nodeId} has no URL configured — skipping call.`)
-                    setNodes((nds) => nds.map((n) => (n.id === nodeId
-                        ? { ...n, data: { ...n.data, executionResult: { ok: false, message: 'No URL configured' } } }
-                        : n)))
+                    setResult(nodeId, { ok: false, message: 'No URL configured' })
                     return
                 }
 
@@ -289,28 +321,27 @@ function LaunchBuilderInner() {
                     const result = await res.json()
                     console.log(`[launch-builder] Webhook POST ${url} →`, { status: res.status, ok: res.ok, payload, response: result })
 
-                    setNodes((nds) => nds.map((n) => (n.id === nodeId
-                        ? {
-                            ...n,
-                            data: {
-                                ...n.data,
-                                executionResult: res.ok
-                                    ? { ok: true, status: result.status, message: `${result.status} OK` }
-                                    : { ok: false, status: result.status, message: result.error ?? `HTTP ${res.status}` },
-                            },
-                        }
-                        : n)))
+                    setResult(nodeId, res.ok
+                        ? { ok: true, status: result.status, message: `${result.status} OK` }
+                        : { ok: false, status: result.status, message: result.error ?? `HTTP ${res.status}` })
                 } catch (err) {
                     console.error(`[launch-builder] Webhook POST ${url} failed`, err)
-                    setNodes((nds) => nds.map((n) => (n.id === nodeId
-                        ? { ...n, data: { ...n.data, executionResult: { ok: false, message: String(err) } } }
-                        : n)))
+                    setResult(nodeId, { ok: false, message: String(err) })
                 }
             }
 
             const setResult = (nodeId: string, result: { ok: boolean; status?: number; message: string; signature?: string }) => {
                 executionResults.set(nodeId, result)
                 setNodes((nds) => nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, executionResult: result } } : n)))
+
+                const visitCount = (stepVisitCounts.get(nodeId) ?? 0) + 1
+                stepVisitCounts.set(nodeId, visitCount)
+                upsertTradeRunStep(runId, {
+                    stepKey:   visitCount === 1 ? nodeId : `${nodeId}:${visitCount}`,
+                    status:    result.ok ? 'success' : 'error',
+                    signature: result.signature,
+                    error:     result.ok ? null : result.message,
+                })
             }
 
             // A trade node reads REAL on-chain bonding-curve state to price a
@@ -1037,6 +1068,10 @@ function LaunchBuilderInner() {
 
             const walk = async (nodeId: string, visited: Set<string>) => {
                 if (visited.has(nodeId)) return
+                // A remote cancel stops new node visits from firing; any
+                // already-in-flight call above this point completes naturally
+                // — same accepted semantics as the staggered wizard's cancel.
+                if (cancelled) return
                 visited.add(nodeId)
 
                 activeIds.add(nodeId)
@@ -1117,7 +1152,15 @@ function LaunchBuilderInner() {
             }
 
             const sessionVisited = new Set<string>()
-            void Promise.all(entryIds.map((id) => walk(id, sessionVisited)))
+            Promise.all(entryIds.map((id) => walk(id, sessionVisited)))
+                .then(() => {
+                    clearInterval(controlPollId)
+                    finishTradeRun(runId, cancelled ? 'cancelled' : 'done')
+                })
+                .catch(() => {
+                    clearInterval(controlPollId)
+                    finishTradeRun(runId, 'error')
+                })
         },
         [setNodes],
     )

@@ -13,6 +13,7 @@ import BankPicker from '@/components/tokens/comment-bank/bank-picker'
 import CommentActivityFeed from '@/components/tokens/comment-bank/comment-activity-feed'
 import { useRelayEvent } from '@/hooks/use-relay-event'
 import type { TokenTransactionEvent } from '@/lib/wss/types'
+import { createTradeRun, upsertTradeRunStep, getTradeRun, requestTradeRunControl, finishTradeRun } from '@/lib/trade/trade-run-client'
 
 type TradeType  = 'buy' | 'sell'
 type ExecPhase  = 'idle' | 'running' | 'paused' | 'done' | 'cancelled'
@@ -154,6 +155,11 @@ export default function StaggeredBuyWizard() {
     const [execNextWalletId, setExecNextWalletId] = useState<string | null>(null)
     const abortRef = useRef(false)
     const pauseRef = useRef(false)
+    // Durable record of this run — lets a second tab (the Trade Control
+    // Center) see this run's progress and request pause/cancel even if this
+    // tab is later lost. Set once at the start of executeAll(), read by the
+    // remote-control poll below.
+    const runIdRef = useRef<string | null>(null)
 
     // Run-scoped, non-rendered state for the auto-halt detector — mutated
     // directly by executeAll(), read by the relay-event handler below.
@@ -215,6 +221,37 @@ export default function StaggeredBuyWizard() {
         setNextError([])
         setErrorWalletIds(new Set())
     }, [tradeAmounts, selectedWallets, slippage, tradeType])
+
+    // Remote control poll — lets the Trade Control Center (a second tab)
+    // pause/cancel this run. Mirrors the front-run auto-halt handler above:
+    // an external async source mutating pauseRef/abortRef directly, which
+    // the existing pause-wait loop and countdownSleep already pick up within
+    // 100ms from anywhere. Stays active while paused (not just while
+    // running) so a remote Resume request is still observed.
+    useEffect(() => {
+        if (execPhase !== 'running' && execPhase !== 'paused') return
+        const id = setInterval(async () => {
+            const runId = runIdRef.current
+            if (!runId) return
+            const run = await getTradeRun(runId)
+            if (!run) return
+            if (run.control === 'pause_requested') {
+                pauseRef.current = true
+                setExecPhase('paused')
+                requestTradeRunControl(runId, 'none')
+            } else if (run.control === 'resume_requested') {
+                pauseRef.current = false
+                setHaltAlert(null)
+                setExecPhase('running')
+                requestTradeRunControl(runId, 'none')
+            } else if (run.control === 'cancel_requested') {
+                abortRef.current = true
+                pauseRef.current = false
+                requestTradeRunControl(runId, 'none')
+            }
+        }, 3000)
+        return () => clearInterval(id)
+    }, [execPhase])
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -434,6 +471,13 @@ export default function StaggeredBuyWizard() {
         setExecPhase('running')
         setExecState(schedule.map((e) => ({ walletId: e.walletId, status: 'pending' })))
 
+        runIdRef.current = await createTradeRun(
+            tradeType === 'buy' ? 'staggered_buy' : 'staggered_sell',
+            tokenMint,
+            tokenSymbol || tokenName || null,
+            schedule.length,
+        )
+
         // Build this run's own wallet-pubkey set so the relay-event handler
         // can tell "one of ours" from "foreign" — deliberately narrower than
         // the platform-wide wallet list, scoped to just this run's schedule.
@@ -474,6 +518,10 @@ export default function StaggeredBuyWizard() {
             setExecState((prev) => prev.map((s) =>
                 s.walletId === entry.walletId ? { ...s, status: 'executing' } : s
             ))
+            upsertTradeRunStep(runIdRef.current, {
+                stepKey: entry.walletId, stepIndex: i, walletId: entry.walletId,
+                status: 'running', amount: formatAmount(entry.walletId),
+            })
 
             try {
                 let apiResult: { success: boolean; signature?: string; error?: string }
@@ -517,12 +565,22 @@ export default function StaggeredBuyWizard() {
                         ? { ...s, status: apiResult.success ? 'success' : 'error', signature: apiResult.signature, error: apiResult.error }
                         : s
                 ))
+                upsertTradeRunStep(runIdRef.current, {
+                    stepKey: entry.walletId, stepIndex: i, walletId: entry.walletId,
+                    status: apiResult.success ? 'success' : 'error',
+                    amount: formatAmount(entry.walletId), signature: apiResult.signature, error: apiResult.error,
+                })
             } catch (err) {
+                const message = err instanceof Error ? err.message : 'Network error'
                 setExecState((prev) => prev.map((s) =>
                     s.walletId === entry.walletId
-                        ? { ...s, status: 'error', error: err instanceof Error ? err.message : 'Network error' }
+                        ? { ...s, status: 'error', error: message }
                         : s
                 ))
+                upsertTradeRunStep(runIdRef.current, {
+                    stepKey: entry.walletId, stepIndex: i, walletId: entry.walletId,
+                    status: 'error', amount: formatAmount(entry.walletId), error: message,
+                })
             }
 
             // Countdown before the next trade (pause-aware)
@@ -545,14 +603,24 @@ export default function StaggeredBuyWizard() {
 
         // Mark any still-pending/executing entries as cancelled
         if (abortRef.current) {
-            setExecState((prev) => prev.map((s) =>
-                s.status === 'pending' || s.status === 'executing' ? { ...s, status: 'cancelled' } : s
-            ))
+            setExecState((prev) => {
+                const next = prev.map((s) =>
+                    s.status === 'pending' || s.status === 'executing' ? { ...s, status: 'cancelled' as const } : s
+                )
+                next.forEach((s, i) => {
+                    if (s.status === 'cancelled') {
+                        upsertTradeRunStep(runIdRef.current, { stepKey: s.walletId, stepIndex: i, walletId: s.walletId, status: 'cancelled' })
+                    }
+                })
+                return next
+            })
             setExecCountdownMs(null)
             setExecNextWalletId(null)
             setExecPhase('cancelled')
+            finishTradeRun(runIdRef.current, 'cancelled')
         } else {
             setExecPhase('done')
+            finishTradeRun(runIdRef.current, 'done')
         }
     }
 
@@ -1218,6 +1286,10 @@ export default function StaggeredBuyWizard() {
                                                 const w = wallets.find(wl => wl.id === execNextWalletId)
                                                 return w ? (w.label ?? maskPubKey(w.public_key)) : maskPubKey(execNextWalletId)
                                             })()}
+                                            {(() => {
+                                                const amt = formatAmount(execNextWalletId)
+                                                return amt ? ` · ${amt}` : ''
+                                            })()}
                                         </span>
                                     </div>
                                 </div>
@@ -1232,6 +1304,10 @@ export default function StaggeredBuyWizard() {
                                             Next: {(() => {
                                                 const w = wallets.find(wl => wl.id === execNextWalletId)
                                                 return w ? (w.label ?? maskPubKey(w.public_key)) : maskPubKey(execNextWalletId)
+                                            })()}
+                                            {(() => {
+                                                const amt = formatAmount(execNextWalletId)
+                                                return amt ? ` · ${amt}` : ''
                                             })()}
                                         </span>
                                     </div>

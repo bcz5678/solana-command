@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import BN from 'bn.js'
 import WizardShell, { WizardStep } from './wizard-shell'
 import StrategyWalletSelector from '@/components/trade/strategy-trade/strategy-wallet-selector'
@@ -9,6 +9,7 @@ import { WalletRecord } from '@/lib/types/wallet'
 import { SlippageControl } from '@/components/trade/trade/SlippageControl'
 import { TokenMintInput } from '@/components/trade/strategy-trade/TokenMintInput'
 import BankPicker from '@/components/tokens/comment-bank/bank-picker'
+import { createTradeRun, upsertTradeRunStep, finishTradeRun } from '@/lib/trade/trade-run-client'
 
 const steps: WizardStep[] = [
     {
@@ -131,6 +132,10 @@ export default function BundleTradesWizard() {
     const [autoCommentDelayMaxSec, setAutoCommentDelayMaxSec]   = useState('1800')
     const [autoCommentProbabilityPct, setAutoCommentProbabilityPct] = useState('100')
     const [autoCommentBankIds, setAutoCommentBankIds]           = useState<Set<string>>(new Set())
+
+    // Durable run record — visibility only for this wizard (see fireSellChunk/
+    // handleExecute comments below for why no pause/cancel is wired in here).
+    const runIdRef = useRef<string | null>(null)
 
     useEffect(() => {
         fetch('/api/wallets/explorer')
@@ -412,6 +417,7 @@ export default function BundleTradesWizard() {
         const chunkIds = rows[i].walletIds
         rows[i] = { ...rows[i], status: 'running', error: undefined }
         setBundleLoopRows([...rows])
+        upsertTradeRunStep(runIdRef.current, { stepKey: `chunk-${i}`, stepIndex: i, status: 'running' })
 
         const tradesList = chunkIds.map((id) => ({
             walletId:    id,
@@ -440,6 +446,11 @@ export default function BundleTradesWizard() {
             rows[i] = { ...rows[i], status: 'failed', error: err instanceof Error ? err.message : 'Network error' }
         }
         setBundleLoopRows([...rows])
+        upsertTradeRunStep(runIdRef.current, {
+            stepKey: `chunk-${i}`, stepIndex: i,
+            status: rows[i].status === 'landed' ? 'success' : 'error',
+            signature: rows[i].bundleId, error: rows[i].error,
+        })
     }
 
     // Splits however many wallets are selling into BUNDLE_CHUNK_SIZE-wallet
@@ -456,6 +467,8 @@ export default function BundleTradesWizard() {
         const rows: BundleChunkRow[] = chunks.map((c) => ({ walletIds: c, status: 'pending' }))
         setBundleLoopRows([...rows])
 
+        runIdRef.current = await createTradeRun('bundle_sell', tokenMint, tokenSymbol || tokenName || null, chunks.length)
+
         const firing: Promise<void>[] = []
         for (let i = 0; i < chunks.length; i++) {
             firing.push(fireSellChunk(rows, i))
@@ -469,6 +482,7 @@ export default function BundleTradesWizard() {
         } else {
             setBundleResult({ bundleId: rows[rows.length - 1]?.bundleId ?? '', status: 'landed' })
         }
+        finishTradeRun(runIdRef.current, failCount > 0 ? 'error' : 'done')
     }
 
     async function retryFailedChunks() {
@@ -493,6 +507,9 @@ export default function BundleTradesWizard() {
             } else {
                 setBundleResult({ bundleId: rows[rows.length - 1]?.bundleId ?? '', status: 'landed' })
             }
+            // Re-flips the same run's status — retries can turn a prior
+            // failure into success, so this isn't a one-shot terminal call.
+            finishTradeRun(runIdRef.current, failCount > 0 ? 'error' : 'done')
         } finally {
             setExecuting(false)
         }
@@ -510,6 +527,8 @@ export default function BundleTradesWizard() {
                 await executeSellChunks([...selectedWallets])
                 return
             }
+
+            runIdRef.current = await createTradeRun('bundle_buy', tokenMint, tokenSymbol || tokenName || null, 1)
 
             const tradesList = [...selectedWallets].map((id) => ({
                 walletId:    id,
@@ -540,12 +559,19 @@ export default function BundleTradesWizard() {
 
             if (!res.ok || !data.success) {
                 setExecuteError(data.error ?? 'Bundle submission failed')
+                upsertTradeRunStep(runIdRef.current, { stepKey: 'bundle', status: 'error', error: data.error })
+                finishTradeRun(runIdRef.current, 'error')
                 return
             }
 
             setBundleResult({ bundleId: data.bundleId, status: data.status })
+            upsertTradeRunStep(runIdRef.current, { stepKey: 'bundle', status: 'success', signature: data.bundleId })
+            finishTradeRun(runIdRef.current, 'done')
         } catch (err) {
-            setExecuteError(err instanceof Error ? err.message : 'Network error')
+            const message = err instanceof Error ? err.message : 'Network error'
+            setExecuteError(message)
+            upsertTradeRunStep(runIdRef.current, { stepKey: 'bundle', status: 'error', error: message })
+            finishTradeRun(runIdRef.current, 'error')
         } finally {
             setExecuting(false)
         }

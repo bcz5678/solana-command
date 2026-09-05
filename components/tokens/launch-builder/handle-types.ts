@@ -99,6 +99,28 @@ export function getDownstreamNodeIdsByHandle(nodeId: string, edges: Edge[], sour
 }
 
 /**
+ * Every distinct node id reachable by following `getDownstreamNodeIds` edges
+ * forward from a set of entry nodes, any number of hops (BFS, entry ids
+ * included). Used only to estimate a run's `total_steps` for the Trade
+ * Control Center — a FLOOR, not an exact count: Loop/BranchReset nodes
+ * re-visit the same ids they're bounded to here potentially many times at
+ * run time (once per iteration/reset), which this can't know in advance.
+ */
+export function getReachableNodeIds(entryIds: string[], edges: Edge[]): string[] {
+    const visited = new Set<string>(entryIds)
+    const queue = [...entryIds]
+    while (queue.length > 0) {
+        const current = queue.shift() as string
+        for (const id of getDownstreamNodeIds(current, edges)) {
+            if (visited.has(id)) continue
+            visited.add(id)
+            queue.push(id)
+        }
+    }
+    return Array.from(visited)
+}
+
+/**
  * Builds the flat JSON payload a Data node resolves to — purely from its own
  * custom fields, nothing implicit. A field value of `{{name}}`/`{{name.path}}`
  * is left as-is here; the dry-run engine resolves those against the named
