@@ -229,6 +229,9 @@ export default function TransferForm() {
     const [launchTotalsJson, setLaunchTotalsJson]       = useState('')
     const [launchTotalsCopied, setLaunchTotalsCopied]   = useState(false)
     const [solUsdPrice, setSolUsdPrice]                 = useState<number | null>(null)
+    const [evenSplitWalletCount, setEvenSplitWalletCount] = useState('')
+    const [evenSplitTotalSol, setEvenSplitTotalSol]       = useState('')
+    const [evenSplitMsg, setEvenSplitMsg]                 = useState('')
 
     useEffect(() => {
         fetch('/api/wallets/explorer')
@@ -446,6 +449,97 @@ export default function TransferForm() {
         }
     }
 
+    // Tiered split — NOT an even split. Funding every wallet with the exact
+    // same amount is its own detectable pattern (identical funding across
+    // many wallets is as much a bot signature as a smooth size ramp is) —
+    // so instead this spreads the total across Small/Medium/Large tiers,
+    // same philosophy as stratified-interleave.ts's tiering for the
+    // staggered wizard's trade ORDER, just applied here to the funding
+    // AMOUNT each wallet gets. Auto-selects `count` wallets from the same
+    // candidate pool the receiver table shows (visibleWallets), assigns each
+    // one to a tier (guaranteed some in every tier, tiers shuffled onto
+    // wallets so they're not grouped in list order), draws a random weight
+    // within that tier's range, then scales every weight so the total lands
+    // exactly on the requested SOL amount. Produces the same "Launch Totals
+    // JSON" shape the Bundled Jito node config already imports.
+    const TIER_WEIGHT_RANGE = {
+        small:  { min: 0.5, max: 0.8 },
+        medium: { min: 0.9, max: 1.2 },
+        large:  { min: 1.3, max: 1.8 },
+    } as const
+    type FundingTier = keyof typeof TIER_WEIGHT_RANGE
+
+    function assignTiers(count: number): FundingTier[] {
+        const tiers: FundingTier[] = ['small', 'medium', 'large']
+        const assignment = Array.from({ length: count }, (_, i) => tiers[i % 3])
+        for (let i = assignment.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1))
+            ;[assignment[i], assignment[j]] = [assignment[j], assignment[i]]
+        }
+        return assignment
+    }
+
+    function applyTieredSplit() {
+        setEvenSplitMsg('')
+        setLaunchTotalsJson('')
+
+        const count = parseInt(evenSplitWalletCount, 10)
+        if (!count || count <= 0) {
+            setEvenSplitMsg('Enter a wallet count greater than 0.')
+            return
+        }
+        const totalSol = parseFloat(evenSplitTotalSol)
+        if (!totalSol || totalSol <= 0) {
+            setEvenSplitMsg('Enter a total SOL amount greater than 0.')
+            return
+        }
+
+        const candidates = visibleWallets.slice(0, count)
+        if (candidates.length === 0) {
+            setEvenSplitMsg('No receiver wallets available to select — check the Sender/filters above.')
+            return
+        }
+
+        const mean = totalSol / candidates.length
+        const tiers = assignTiers(candidates.length)
+        const rawWeights = tiers.map((t) => {
+            const { min, max } = TIER_WEIGHT_RANGE[t]
+            return mean * (min + Math.random() * (max - min))
+        })
+        const rawSum = rawWeights.reduce((a, b) => a + b, 0)
+        const scale = totalSol / rawSum
+        const amounts = rawWeights.map((w) => w * scale)
+
+        setSelectedReceivers(new Set(candidates.map((w) => w.id)))
+        setReceiverAmounts(() => {
+            const next: Record<string, string> = {}
+            candidates.forEach((w, i) => { next[w.id] = amounts[i].toFixed(9) })
+            return next
+        })
+
+        setLaunchTotalsJson(JSON.stringify({
+            wallets: candidates.map((w, i) => ({
+                label:         w.label,
+                publicKey:     w.public_key,
+                buyAmountSol:  Number(amounts[i].toFixed(9)),
+                fundAmountSol: Number(amounts[i].toFixed(9)),
+            })),
+            totals: {
+                buySol:  Number(totalSol.toFixed(9)),
+                fundSol: Number(totalSol.toFixed(9)),
+            },
+        }, null, 2))
+
+        const tierCounts = tiers.reduce((acc, t) => { acc[t] = (acc[t] ?? 0) + 1; return acc }, {} as Record<FundingTier, number>)
+        const usd = formatUsd(totalSol, solUsdPrice)
+        setEvenSplitMsg(
+            `Selected ${candidates.length} wallet${candidates.length !== 1 ? 's' : ''} — ${totalSol.toFixed(4)} SOL total` +
+            (usd ? ` (~${usd})` : '') +
+            ` — ${tierCounts.small ?? 0} small / ${tierCounts.medium ?? 0} medium / ${tierCounts.large ?? 0} large.` +
+            (candidates.length < count ? ` Only ${candidates.length} wallet(s) were available (requested ${count}).` : '')
+        )
+    }
+
     function openPreview() {
         setValidationError('')
         if (senderWalletIds.size === 0) { setValidationError('Select at least one sender wallet.'); return }
@@ -497,6 +591,9 @@ export default function TransferForm() {
         setReceiverAmounts({})
         setActiveFilters([])
         setBondingCurveMsg('')
+        setEvenSplitMsg('')
+        setEvenSplitWalletCount('')
+        setEvenSplitTotalSol('')
     }
 
     async function sendLegBatch(senderWalletId: string, batch: FundingLeg[]) {
@@ -855,6 +952,61 @@ export default function TransferForm() {
                                 {launchTotalsCopied ? 'Copied!' : 'Copy Launch Totals'}
                             </Button>
                         </div>
+                    )}
+                </div>
+
+                {/* Tiered split funding — S/M/L, not an even split */}
+                <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/20 p-4">
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                        <div className="flex flex-col gap-0.5">
+                            <p className="text-sm font-medium">Tiered Split Funding (S/M/L)</p>
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                                Splits a total SOL amount across a set number of wallets — auto-selects that many wallets
+                                below (from the current filter) — but spreads the amounts across Small/Medium/Large tiers
+                                instead of an even split, so funding sizes don&apos;t look identical or ramped. Guaranteed
+                                some wallets in every tier; totals still sum exactly to the amount entered. Also fills the
+                                same Launch Totals JSON as the calculator above.
+                            </p>
+                        </div>
+                        <div className="flex items-end gap-2 shrink-0">
+                            <div className="flex flex-col gap-1">
+                                <label htmlFor="even-split-total" className="text-xs text-muted-foreground whitespace-nowrap">Total SOL</label>
+                                <input
+                                    id="even-split-total"
+                                    type="number"
+                                    min={0}
+                                    step={0.0001}
+                                    placeholder="30"
+                                    value={evenSplitTotalSol}
+                                    onChange={(e) => setEvenSplitTotalSol(e.target.value)}
+                                    className="w-24 rounded border border-input bg-background px-2 py-1 text-right text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <label htmlFor="even-split-count" className="text-xs text-muted-foreground whitespace-nowrap">Wallets</label>
+                                <input
+                                    id="even-split-count"
+                                    type="number"
+                                    min={1}
+                                    step={1}
+                                    placeholder="50"
+                                    value={evenSplitWalletCount}
+                                    onChange={(e) => setEvenSplitWalletCount(e.target.value)}
+                                    className="w-20 rounded border border-input bg-background px-2 py-1 text-right text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                />
+                            </div>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={applyTieredSplit}
+                            >
+                                Generate Tiered Split
+                            </Button>
+                        </div>
+                    </div>
+                    {evenSplitMsg && (
+                        <p className="text-xs text-muted-foreground">{evenSplitMsg}</p>
                     )}
                 </div>
 

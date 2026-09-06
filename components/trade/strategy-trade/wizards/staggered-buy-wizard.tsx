@@ -82,6 +82,10 @@ function rawPctAmount(rawBalance: string, pct: number): string {
     return (BigInt(rawBalance) * pctScaled / 100_000n).toString()
 }
 
+function sleep(ms: number): Promise<void> {
+    return new Promise((r) => setTimeout(r, ms))
+}
+
 // Countdown that respects pause and abort. Tracks actual elapsed time so
 // paused duration is never counted against the remaining wait.
 function countdownSleep(
@@ -160,6 +164,28 @@ export default function StaggeredBuyWizard() {
     // tab is later lost. Set once at the start of executeAll(), read by the
     // remote-control poll below.
     const runIdRef = useRef<string | null>(null)
+
+    // Sniper-shakeout flush/rebuy — a manual side-flow available while paused.
+    // Fully independent of pauseRef/abortRef: every candidate here is a
+    // wallet the main loop has already finished with (status 'success' in
+    // execState) and will never revisit, so there's no possible collision
+    // with the paused loop regardless of timing. Persists across a
+    // pause->resume->pause cycle within the same run (only reset when a new
+    // run starts) so prior flush history is still visible on a repeat pause.
+    type FlushSubStatus =
+        | 'idle' | 'selling' | 'sold' | 'error-selling'
+        | 'rebuying' | 'rebought' | 'error-rebuying'
+    type FlushEntry = {
+        walletId:        string
+        subStatus:       FlushSubStatus
+        sellSignature?:  string
+        rebuySignature?: string
+        error?:          string
+    }
+    const [flushSelectedIds, setFlushSelectedIds] = useState<Set<string>>(new Set())
+    const [flushSellPct, setFlushSellPct]         = useState('50')
+    const [flushEntries, setFlushEntries]         = useState<FlushEntry[]>([])
+    const [flushBusy, setFlushBusy]               = useState<'selling' | 'rebuying' | null>(null)
 
     // Run-scoped, non-rendered state for the auto-halt detector — mutated
     // directly by executeAll(), read by the relay-event handler below.
@@ -470,6 +496,8 @@ export default function StaggeredBuyWizard() {
         setHaltAlert(null)
         setExecPhase('running')
         setExecState(schedule.map((e) => ({ walletId: e.walletId, status: 'pending' })))
+        setFlushEntries([])
+        setFlushSelectedIds(new Set())
 
         runIdRef.current = await createTradeRun(
             tradeType === 'buy' ? 'staggered_buy' : 'staggered_sell',
@@ -624,6 +652,68 @@ export default function StaggeredBuyWizard() {
         }
     }
 
+    // ── sniper-shakeout flush/rebuy ──────────────────────────────────────────
+
+    async function sellSelectedForFlush(pct: number) {
+        const ids = [...flushSelectedIds]
+        setFlushBusy('selling')
+        for (let i = 0; i < ids.length; i++) {
+            const walletId = ids[i]
+            setFlushEntries((prev) => [...prev.filter((e) => e.walletId !== walletId), { walletId, subStatus: 'selling' }])
+            try {
+                const res = await fetch('/api/trade/staggered/sell', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ walletId, mintAddress: tokenMint, slippage, sellPct: pct }),
+                })
+                const result = await res.json()
+                setFlushEntries((prev) => prev.map((e) => e.walletId === walletId
+                    ? { ...e, subStatus: result.success ? 'sold' : 'error-selling', sellSignature: result.signature, error: result.error } : e))
+                upsertTradeRunStep(runIdRef.current, {
+                    stepKey: `${walletId}:flush-sell`, walletId,
+                    status: result.success ? 'success' : 'error',
+                    amount: `${pct}% flush-sell`, signature: result.signature, error: result.error,
+                })
+            } catch (err) {
+                const message = err instanceof Error ? err.message : 'Network error'
+                setFlushEntries((prev) => prev.map((e) => e.walletId === walletId ? { ...e, subStatus: 'error-selling', error: message } : e))
+                upsertTradeRunStep(runIdRef.current, { stepKey: `${walletId}:flush-sell`, walletId, status: 'error', error: message })
+            }
+            if (i < ids.length - 1) await sleep(500)
+        }
+        setFlushBusy(null)
+    }
+
+    async function rebuySelectedForFlush() {
+        const ids = flushEntries.filter((e) => e.subStatus === 'sold' && flushSelectedIds.has(e.walletId)).map((e) => e.walletId)
+        setFlushBusy('rebuying')
+        for (let i = 0; i < ids.length; i++) {
+            const walletId = ids[i]
+            setFlushEntries((prev) => prev.map((e) => e.walletId === walletId ? { ...e, subStatus: 'rebuying' } : e))
+            try {
+                const solAmt   = tradeAmounts[walletId] ?? '0'   // original buy amount — restores full position
+                const lamports = Math.round(parseFloat(solAmt) * 1_000_000_000).toString()
+                const res = await fetch('/api/trade/staggered/buy', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ walletId, mintAddress: tokenMint, solAmountLamports: lamports, slippage }),
+                })
+                const result = await res.json()
+                setFlushEntries((prev) => prev.map((e) => e.walletId === walletId
+                    ? { ...e, subStatus: result.success ? 'rebought' : 'error-rebuying', rebuySignature: result.signature, error: result.error } : e))
+                upsertTradeRunStep(runIdRef.current, {
+                    stepKey: `${walletId}:flush-buy`, walletId,
+                    status: result.success ? 'success' : 'error',
+                    amount: formatAmount(walletId), signature: result.signature, error: result.error,
+                })
+            } catch (err) {
+                const message = err instanceof Error ? err.message : 'Network error'
+                setFlushEntries((prev) => prev.map((e) => e.walletId === walletId ? { ...e, subStatus: 'error-rebuying', error: message } : e))
+                upsertTradeRunStep(runIdRef.current, { stepKey: `${walletId}:flush-buy`, walletId, status: 'error', error: message })
+            }
+            if (i < ids.length - 1) await sleep(500)
+        }
+        setFlushBusy(null)
+    }
+
     // ── render helpers ────────────────────────────────────────────────────────
 
     function formatAmount(walletId: string): string | null {
@@ -633,6 +723,20 @@ export default function StaggeredBuyWizard() {
         const ui = Number(amt) / Math.pow(10, tokenDecimals)
         return ui.toLocaleString(undefined, { maximumFractionDigits: Math.min(tokenDecimals, 6) }) + ` ${tokenSymbol || 'tokens'}`
     }
+
+    // Flush/rebuy candidates — already-successful wallets, biggest buys first
+    // (matches "sell some of the bigger ones" — no separate UI needed to
+    // explain the ordering).
+    const flushCandidates = useMemo(() => {
+        return execState
+            .filter((e) => e.status === 'success')
+            .map((e) => ({
+                walletId: e.walletId,
+                wallet:   wallets.find((w) => w.id === e.walletId),
+                amountSol: parseFloat(tradeAmounts[e.walletId] ?? '0') || 0,
+            }))
+            .sort((a, b) => b.amountSol - a.amountSol)
+    }, [execState, wallets, tradeAmounts])
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -1313,6 +1417,88 @@ export default function StaggeredBuyWizard() {
                                     </div>
                                 </div>
                             )
+                        )}
+
+                        {/* Sniper-shakeout flush/rebuy — manual sub-flow, independent of
+                            the main paused loop. Persists across a pause -> resume ->
+                            pause cycle within the same run (only cleared at the start of
+                            a new executeAll()), so history reappears if the run pauses
+                            again later. */}
+                        {execPhase === 'paused' && tradeType === 'buy' && flushCandidates.length > 0 && (
+                            <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/10 p-4">
+                                <div className="flex flex-col gap-1">
+                                    <span className="text-xs font-semibold text-foreground">Sell &amp; Rebuy (shake out a sniper)</span>
+                                    <p className="text-[10px] text-muted-foreground max-w-lg">
+                                        Sell a slice of a few already-bought wallets to push the price down, then rebuy them back to
+                                        restore their position before hitting Resume. This doesn&apos;t touch or restart the paused
+                                        schedule — it only fires extra trades on wallets already marked successful below. Each sell +
+                                        rebuy pair costs slippage and fees twice, and isn&apos;t guaranteed to shake out a determined sniper.
+                                    </p>
+                                </div>
+
+                                <div className="flex items-center gap-2 rounded-lg border border-input bg-transparent px-3 h-9 w-fit focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30">
+                                    <input
+                                        type="number" min={1} max={99} step={1} placeholder="50"
+                                        value={flushSellPct}
+                                        onChange={(e) => setFlushSellPct(e.target.value)}
+                                        className="w-16 bg-transparent text-xs outline-none placeholder:text-muted-foreground [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    />
+                                    <span className="text-xs text-muted-foreground shrink-0">% to sell</span>
+                                </div>
+
+                                <div className="flex flex-col gap-1.5">
+                                    {flushCandidates.map(({ walletId, wallet, amountSol }) => {
+                                        const entry = flushEntries.find((f) => f.walletId === walletId)
+                                        return (
+                                            <label key={walletId} className="flex items-center gap-2.5 rounded-md border border-border/60 px-2.5 py-1.5 text-xs cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={flushSelectedIds.has(walletId)}
+                                                    onChange={(e) => {
+                                                        const next = new Set(flushSelectedIds)
+                                                        e.target.checked ? next.add(walletId) : next.delete(walletId)
+                                                        setFlushSelectedIds(next)
+                                                    }}
+                                                    className="size-4 rounded border border-input accent-blue-500"
+                                                />
+                                                <span className="font-mono flex-1 min-w-0 truncate">
+                                                    {wallet?.label && <span className="font-sans font-medium text-foreground">{wallet.label} · </span>}
+                                                    {wallet ? maskPubKey(wallet.public_key) : maskPubKey(walletId)}
+                                                </span>
+                                                <span className="tabular-nums text-green-500 font-medium">{amountSol.toFixed(4)} SOL</span>
+                                                <span className="w-24 text-right shrink-0">
+                                                    {(!entry || entry.subStatus === 'idle') && <span className="text-muted-foreground/50">—</span>}
+                                                    {entry?.subStatus === 'selling'        && <span className="text-blue-500">selling…</span>}
+                                                    {entry?.subStatus === 'sold'           && <span className="text-amber-500">sold</span>}
+                                                    {entry?.subStatus === 'error-selling'  && <span className="text-destructive" title={entry.error}>sell failed</span>}
+                                                    {entry?.subStatus === 'rebuying'       && <span className="text-blue-500">rebuying…</span>}
+                                                    {entry?.subStatus === 'rebought'       && <span className="text-green-500">✓ rebought</span>}
+                                                    {entry?.subStatus === 'error-rebuying' && <span className="text-destructive" title={entry.error}>rebuy failed</span>}
+                                                </span>
+                                            </label>
+                                        )
+                                    })}
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        disabled={flushBusy !== null || flushSelectedIds.size === 0 || !flushSellPct || isNaN(parseFloat(flushSellPct))}
+                                        onClick={() => sellSelectedForFlush(parseFloat(flushSellPct))}
+                                        className="px-3 py-1.5 rounded-lg border border-red-500/60 bg-red-500/10 text-red-500 text-xs font-medium hover:bg-red-500/20 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                                    >
+                                        {flushBusy === 'selling' ? 'Selling…' : `Sell ${flushSellPct || 0}% from selected`}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={flushBusy !== null || flushEntries.filter((e) => e.subStatus === 'sold' && flushSelectedIds.has(e.walletId)).length === 0}
+                                        onClick={rebuySelectedForFlush}
+                                        className="px-3 py-1.5 rounded-lg border border-green-500/60 bg-green-500/10 text-green-500 text-xs font-medium hover:bg-green-500/20 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                                    >
+                                        {flushBusy === 'rebuying' ? 'Rebuying…' : 'Rebuy sold wallets back'}
+                                    </button>
+                                </div>
+                            </div>
                         )}
 
                         {/* Per-wallet status table */}
