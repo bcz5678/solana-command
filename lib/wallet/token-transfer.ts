@@ -26,13 +26,15 @@ import { resolveTokenProgram } from '@/lib/trade/wallet-balance'
 export interface MintInfo {
   programId: PublicKey
   decimals:  number
+  /** Raw base-unit total supply — straight off getMint(), previously unused. */
+  supply:    bigint
 }
 
-/** Resolves which token program a mint belongs to and its decimals, in one round trip. */
+/** Resolves which token program a mint belongs to, its decimals, and total supply, in one round trip. */
 export async function resolveMintInfo(connection: Connection, mint: PublicKey): Promise<MintInfo> {
   const programId = await resolveTokenProgram(connection, mint)
   const mintAccount = await getMint(connection, mint, undefined, programId)
-  return { programId, decimals: mintAccount.decimals }
+  return { programId, decimals: mintAccount.decimals, supply: mintAccount.supply }
 }
 
 /**

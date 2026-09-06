@@ -1,6 +1,7 @@
 import { PublicKey } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
-import { initializeConnection } from '@/app/api/utils/helpers';
+import { initializeConnection, parseAndValidateAddress } from '@/app/api/utils/helpers';
+import { resolveMintInfo } from '@/lib/wallet/token-transfer';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +27,13 @@ export async function POST(request: Request) {
     try {
         const connection = initializeConnection()
 
+        // A direct mint read — strictly more reliable for `decimals` than the
+        // per-wallet fallback below (which only knew it if some wallet
+        // happened to hold the token), and the only way to get total supply
+        // at all (used by the Rebalance tool's cap calculation).
+        const mintPubkey = await parseAndValidateAddress(mintAddress)
+        const mintInfo   = await resolveMintInfo(connection, mintPubkey)
+
         // Fetch all parsed token accounts for each wallet, batched — each wallet
         // fires 2 RPC calls (SPL Token + Token-2022), so an unbatched Promise.all
         // over e.g. 100 wallets fires 200 concurrent requests at once. QuickNode
@@ -49,23 +57,20 @@ export async function POST(request: Request) {
         }
 
         const balances: Record<string, string> = {}
-        let decimals = 6
 
         for (const { addr, accounts } of walletResults) {
             const match = accounts.find(({ account }) => {
                 const info = (account.data as any).parsed?.info
                 return info?.mint === mintAddress
             })
-            if (match) {
-                const info = (match.account.data as any).parsed.info
-                balances[addr] = info.tokenAmount.amount as string
-                decimals = info.tokenAmount.decimals as number
-            } else {
-                balances[addr] = '0'
-            }
+            balances[addr] = match ? ((match.account.data as any).parsed.info.tokenAmount.amount as string) : '0'
         }
 
-        return new Response(JSON.stringify({ balances, decimals }), {
+        return new Response(JSON.stringify({
+            balances,
+            decimals:    mintInfo.decimals,
+            totalSupply: mintInfo.supply.toString(),
+        }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
         })

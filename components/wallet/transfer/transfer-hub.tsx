@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ArrowLeft, Send, ArrowDownToLine, ArrowUpToLine, Users, Coins, Banknote, Shuffle } from 'lucide-react'
+import { ArrowLeft, Send, ArrowDownToLine, ArrowUpToLine, Users, Coins, Banknote, Shuffle, Scale } from 'lucide-react'
 import TransferForm from './transfer-form'
 import FundOneToManyForm from './fund-one-to-many-form'
 import SingleTransferForm from './single-transfer-form'
@@ -9,8 +9,9 @@ import ConsolidateForm from './consolidate-form'
 import SingleTokenTransferForm from './single-token-transfer-form'
 import FundOneToManyTokenForm from './fund-one-to-many-token-form'
 import ManyToManyTokenForm from './many-to-many-token-form'
+import TokenRebalanceForm from './token-rebalance-form'
 
-type Mode = 'single' | 'fund' | 'fund-one-to-many' | 'consolidate' | 'token-single' | 'token-fund-one-to-many' | 'token-many-to-many'
+type Mode = 'single' | 'fund' | 'fund-one-to-many' | 'consolidate' | 'token-single' | 'token-fund-one-to-many' | 'token-many-to-many' | 'token-rebalance'
 
 const MODES: { id: Mode; icon: React.ElementType; title: string; description: string }[] = [
     {
@@ -54,6 +55,12 @@ const MODES: { id: Mode; icon: React.ElementType; title: string; description: st
         icon:        Shuffle,
         title:       'Many-to-Many Token Transfer',
         description: 'Move one SPL token between any number of wallets — build a list of from/to/amount transfers and send them all at once.',
+    },
+    {
+        id:          'token-rebalance',
+        icon:        Scale,
+        title:       'Rebalance Token Holdings',
+        description: 'Move excess token supply off wallets holding more than a cap (e.g. 1%) onto zero-balance wallets you pick.',
     },
 ]
 
@@ -132,6 +139,15 @@ export default function TransferHub() {
             <div>
                 <BackButton onBack={() => setMode(null)} />
                 <ManyToManyTokenForm />
+            </div>
+        )
+    }
+
+    if (mode === 'token-rebalance') {
+        return (
+            <div>
+                <BackButton onBack={() => setMode(null)} />
+                <TokenRebalanceForm />
             </div>
         )
     }
