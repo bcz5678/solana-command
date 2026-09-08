@@ -14,6 +14,7 @@ import CommentActivityFeed from '@/components/tokens/comment-bank/comment-activi
 import LaunchTradeFeedPanel from '@/components/tokens/launch/launch-trade-feed-panel'
 import { useRelayEvent } from '@/hooks/use-relay-event'
 import type { TokenTransactionEvent } from '@/lib/wss/types'
+import { isKnownPumpfunSystemWallet } from '@/lib/pumpfun/known-system-wallets'
 import { createTradeRun, upsertTradeRunStep, getTradeRun, requestTradeRunControl, finishTradeRun } from '@/lib/trade/trade-run-client'
 
 type TradeType  = 'buy' | 'sell'
@@ -261,6 +262,10 @@ export default function StaggeredBuyWizard() {
         if (!autoHaltActiveRef.current || !autoHaltEnabled) return
         if (e.mint !== tokenMint) return
         if (runWalletKeysRef.current.has(e.wallet)) return
+        // Pump.fun's own fee/system authority buys and sells for protocol
+        // maintenance, not real trading — without this it reads as a sniper
+        // and trips the auto-halt on every run. See known-system-wallets.ts.
+        if (isKnownPumpfunSystemWallet(e.wallet)) return
 
         const windowMs = (parseFloat(haltWindowSec) || 10) * 1000
         const threshold = parseInt(haltThreshold) || 2

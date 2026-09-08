@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Minus, ChevronUp, X, ExternalLink } from 'lucide-react'
 import { useRelayEvent, useRelayStatus } from '@/hooks/use-relay-event'
 import type { TokenTransactionEvent } from '@/lib/wss/types'
+import { isKnownPumpfunSystemWallet } from '@/lib/pumpfun/known-system-wallets'
 
 const MAX_TRADES = 200
 
@@ -138,6 +139,7 @@ export default function LaunchTradeFeedPanel({ mintAddress, tokenSymbol, ourWall
                 {trades.map((t) => {
                     const isOurs = ourWallets?.has(t.wallet) ?? false
                     const ourLabel = isOurs ? ourWalletLabels?.[t.wallet] : undefined
+                    const isSystem = !isOurs && isKnownPumpfunSystemWallet(t.wallet)
                     return (
                     <div
                         key={t.signature}
@@ -153,6 +155,11 @@ export default function LaunchTradeFeedPanel({ mintAddress, tokenSymbol, ourWall
                                 {isOurs && (
                                     <span className="shrink-0 rounded px-1 py-0.5 text-[9px] font-semibold bg-blue-500/20 text-blue-500">
                                         OURS
+                                    </span>
+                                )}
+                                {isSystem && (
+                                    <span className="shrink-0 rounded px-1 py-0.5 text-[9px] font-semibold bg-muted text-muted-foreground" title="Pump.fun's own fee/system authority — not a real trader">
+                                        SYSTEM
                                     </span>
                                 )}
                             </p>
