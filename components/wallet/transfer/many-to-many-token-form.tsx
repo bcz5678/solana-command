@@ -24,7 +24,7 @@ import {
     DialogFooter,
     DialogClose,
 } from '@/components/ui/dialog'
-import { Plus, X } from 'lucide-react'
+import { Plus, X, Copy } from 'lucide-react'
 import TokenPicker, { type TokenPickerValue } from './token-picker'
 
 function maskPubKey(key: string) {
@@ -131,6 +131,17 @@ export default function ManyToManyTokenForm() {
 
     function addRow() {
         setRows((prev) => [...prev, emptyRow()])
+    }
+
+    // Copies the last row's From/To selections (and amount) into a new row —
+    // for repeatedly transferring the same wallet pair (or just the same
+    // sender) without re-picking both dropdowns each time.
+    function duplicateLastRow() {
+        setRows((prev) => {
+            const last = prev[prev.length - 1]
+            if (!last) return prev
+            return [...prev, { ...last, key: newRowKey() }]
+        })
     }
 
     function removeRow(key: string) {
@@ -362,15 +373,26 @@ export default function ManyToManyTokenForm() {
 
                                     {/* Amount */}
                                     <div className="flex w-32 shrink-0 flex-col gap-1">
-                                        <Input
-                                            type="number"
-                                            min={0}
-                                            step="any"
-                                            placeholder="0.00"
-                                            value={row.amount}
-                                            onChange={(e) => updateRow(row.key, { amount: e.target.value })}
-                                            className="text-right tabular-nums"
-                                        />
+                                        <div className="flex items-center gap-1">
+                                            <Input
+                                                type="number"
+                                                min={0}
+                                                step="any"
+                                                placeholder="0.00"
+                                                value={row.amount}
+                                                onChange={(e) => updateRow(row.key, { amount: e.target.value })}
+                                                className="text-right tabular-nums"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => updateRow(row.key, { amount: String(fromBalance) })}
+                                                disabled={fromBalance == null || fromBalance <= 0}
+                                                title="Use this wallet's full balance"
+                                                className="shrink-0 rounded border border-border px-1.5 py-1.5 text-[10px] font-medium text-muted-foreground hover:text-blue-500 hover:border-blue-500 transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                                            >
+                                                Max
+                                            </button>
+                                        </div>
                                     </div>
 
                                     <button
@@ -387,10 +409,16 @@ export default function ManyToManyTokenForm() {
                         })}
                     </div>
 
-                    <Button variant="outline" size="sm" onClick={addRow} className="w-fit gap-1.5">
-                        <Plus className="size-3.5" />
-                        Add Transfer
-                    </Button>
+                    <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={addRow} className="w-fit gap-1.5">
+                            <Plus className="size-3.5" />
+                            Add Transfer
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={duplicateLastRow} className="w-fit gap-1.5">
+                            <Copy className="size-3.5" />
+                            Duplicate Last Transfer
+                        </Button>
+                    </div>
                 </div>
 
                 {/* Validation error */}

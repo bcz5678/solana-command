@@ -56,6 +56,21 @@ function advanceBuyCurve(curve: BondingCurve, tokenAmount: BN): BondingCurve {
 
 export const dynamic = 'force-dynamic';
 
+// Not every throw in this file (or the SDKs it calls) is a real Error —
+// a bare string or plain object has no `.message`, and `(err as Error).message`
+// on one of those silently evaluates to `undefined`, which then renders as the
+// literal text "undefined" in the client-facing error. This makes sure the
+// caller — and the server log — always gets SOMETHING useful instead.
+function errorMessage(err: unknown): string {
+    if (err instanceof Error) return err.message || err.name || 'Unknown error';
+    if (typeof err === 'string') return err;
+    try {
+        return JSON.stringify(err);
+    } catch {
+        return String(err);
+    }
+}
+
 // ── Connection (module-scoped, reused across requests) ─────────
 const quicknodeSolana = initializeQuickNodeSolana();
 const onlineSdk       = new OnlinePumpSdk(quicknodeSolana.connection);
@@ -298,12 +313,12 @@ async function processLaunchBlock0(
         if (!dryRun) {
             const { error: revertErr } = await admin.rpc('fail_token_launch', {
                 p_mint_id: mintId,
-                p_reason:  `key load failed: ${(err as Error).message}`
+                p_reason:  `key load failed: ${errorMessage(err)}`
             });
             console.log(`[launch:block0] reverted mintId=${mintId} launch_status -> draft (key load failure)${revertErr ? ` — REVERT ITSELF FAILED: ${revertErr.message}` : ''}`);
         }
 
-        const reason = (err as Error).message;
+        const reason = errorMessage(err);
         console.error(`[launch:block0] key load error mintId=${mintId}:`, reason);
         return Response.json(
             { error: `Failed to load signing keys: ${reason}` },
@@ -515,14 +530,26 @@ async function processLaunchBlock0(
                 })];
 
             } else if (soloDevBuy) {
-                // Dev wallet is the sole buyer — create + buy in one transaction
+                // Dev wallet is the sole buyer — create + buy in one transaction.
+                // feeConfig/mintSupply MUST be the real fetched values here, same
+                // as the bundle path a few dozen lines up — passing null (as this
+                // used to) falls back to computeFeesBps's generic default fee,
+                // understating the true fee for a brand-new curve. That understated
+                // fee then prices tokenAmount too high for the solAmount actually
+                // paid, so the real on-chain cost (solAmount + real fee) exceeds
+                // createV2AndBuyInstructions' own hardcoded 1% slippage cap and the
+                // whole transaction reverts — this was the actual root cause of a
+                // launch that returned a signature but failed on-chain.
                 const solAmount    = launchConfig.walletTrades[0].buyAmountInSOL;
-                const global       = await onlineSdk.fetchGlobal();
+                const [global, feeConfig] = await Promise.all([
+                    onlineSdk.fetchGlobal(),
+                    onlineSdk.fetchFeeConfig(),
+                ]);
                 const bondingCurve = newBondingCurve(global);
                 const tokenAmount  = getBuyTokenAmountFromSolAmount({
                     global,
-                    feeConfig:   null,
-                    mintSupply:  null,
+                    feeConfig,
+                    mintSupply:  global.tokenTotalSupply,
                     bondingCurve,
                     amount:      solAmount,
                 });
@@ -585,7 +612,17 @@ async function processLaunchBlock0(
                 const latestBlockhash = await quicknodeSolana.connection
                     .getLatestBlockhash('confirmed');
 
-                await quicknodeSolana.connection.confirmTransaction(
+                // confirmTransaction() only THROWS on timeout/RPC failure — a
+                // transaction that landed but failed execution (e.g. an
+                // instruction hit insufficient funds mid-tx) resolves here
+                // normally with .value.err set, not a thrown error. Solana
+                // reverts the ENTIRE transaction on any instruction failure,
+                // so a "successful" CreateV2 log earlier in this same tx does
+                // NOT mean the token actually got created if a later
+                // instruction (e.g. the bundled dev buy) failed — must check
+                // this explicitly or a failed launch gets reported as success
+                // (this was silently discarding a real error before).
+                const confirmation = await quicknodeSolana.connection.confirmTransaction(
                     {
                         signature,
                         blockhash:            latestBlockhash.blockhash,
@@ -593,6 +630,9 @@ async function processLaunchBlock0(
                     },
                     'confirmed'
                 );
+                if (confirmation.value.err) {
+                    throw new Error(`Transaction failed on-chain: ${JSON.stringify(confirmation.value.err)}`);
+                }
             }
         }
 
@@ -601,13 +641,13 @@ async function processLaunchBlock0(
         creator.secretKey.fill(0);
         mint.secretKey.fill(0);
 
-        console.error(`[launch:block0] FAILED mintId=${mintId} soloDevBuy=${soloDevBuy} bundleLaunch=${bundleLaunch} legsBuilt=${bundleLegs.length}:`, (err as Error).message);
+        console.error(`[launch:block0] FAILED mintId=${mintId} soloDevBuy=${soloDevBuy} bundleLaunch=${bundleLaunch} legsBuilt=${bundleLegs.length}:`, errorMessage(err), err);
 
         // Nothing to revert in dry-run mode — the draft was never locked.
         if (!dryRun) {
             const { error: revertErr } = await admin.rpc('fail_token_launch', {
                 p_mint_id: mintId,
-                p_reason:  `tx failed: ${(err as Error).message}`
+                p_reason:  `tx failed: ${errorMessage(err)}`
             });
             // fail_token_launch only reverts rows currently at 'launching' — if this
             // errors OR the row was already something else (race, or mark_token_launching
@@ -629,7 +669,7 @@ async function processLaunchBlock0(
                 mintId,
                 amountSol:    buySolAmount ? lamportsBNToSolNumber(buySolAmount) : null,
                 status:       'failed',
-                errorMessage: (err as Error).message,
+                errorMessage: errorMessage(err),
             })
         } else if (bundleLaunch && !dryRun && bundleLegs.length > 0) {
             await Promise.all(bundleLegs.map((leg) => logTrade({
@@ -642,13 +682,13 @@ async function processLaunchBlock0(
                 amountSol:    lamportsBNToSolNumber(leg.solAmount),
                 quantity:     leg.tokenAmount.toNumber(),
                 status:       'failed',
-                errorMessage: (err as Error).message,
+                errorMessage: errorMessage(err),
             })))
         }
 
-        console.error('[launch] tx error:', (err as Error).message);
+        console.error('[launch] tx error:', errorMessage(err), err);
         return Response.json(
-            { error: `Launch transaction failed: ${(err as Error).message}` },
+            { error: `Launch transaction failed: ${errorMessage(err)}` },
             { status: 500 }
         );
 

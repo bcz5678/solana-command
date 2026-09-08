@@ -229,7 +229,6 @@ export default function TransferForm() {
     const [launchTotalsJson, setLaunchTotalsJson]       = useState('')
     const [launchTotalsCopied, setLaunchTotalsCopied]   = useState(false)
     const [solUsdPrice, setSolUsdPrice]                 = useState<number | null>(null)
-    const [evenSplitWalletCount, setEvenSplitWalletCount] = useState('')
     const [evenSplitTotalSol, setEvenSplitTotalSol]       = useState('')
     const [evenSplitMsg, setEvenSplitMsg]                 = useState('')
 
@@ -364,7 +363,13 @@ export default function TransferForm() {
         setBondingCurveMsg('')
         setLaunchTotalsJson('')
 
-        const checkedVisible = visibleWallets.filter((w) => selectedReceivers.has(w.id))
+        // Sourced from the full `wallets` list, not visibleWallets — a
+        // checked wallet shouldn't silently drop out just because a type
+        // filter chip was changed after it was checked (see the same fix's
+        // comment on applyEvenSplit/applyTieredSplit above for the failure
+        // this caused: openPreview() validates the full selection, so a
+        // dropped wallet fails with "Enter an amount greater than 0").
+        const checkedVisible = wallets.filter((w) => selectedReceivers.has(w.id) && !senderWalletIds.has(w.id))
         const checkedTrading = checkedVisible
             .map((w) => ({ wallet: w, num: parseWalletNumber(w.label) }))
             .filter((x): x is { wallet: WalletRecord; num: number } => x.num !== null)
@@ -483,20 +488,23 @@ export default function TransferForm() {
         setEvenSplitMsg('')
         setLaunchTotalsJson('')
 
-        const count = parseInt(evenSplitWalletCount, 10)
-        if (!count || count <= 0) {
-            setEvenSplitMsg('Enter a wallet count greater than 0.')
-            return
-        }
         const totalSol = parseFloat(evenSplitTotalSol)
         if (!totalSol || totalSol <= 0) {
             setEvenSplitMsg('Enter a total SOL amount greater than 0.')
             return
         }
 
-        const candidates = visibleWallets.slice(0, count)
+        // Splits among whichever receiver wallets are already checked —
+        // sourced from the full `wallets` list, not `visibleWallets`, since
+        // a checked wallet can currently be excluded from visibleWallets for
+        // reasons that don't un-select it: it's a Dev wallet (checked via
+        // the separate Dev Wallets table above, which visibleWallets always
+        // excludes), or a type filter chip was changed after it was checked.
+        // openPreview() validates every id in `selectedReceivers`, so any
+        // wallet skipped here would fail that check with no amount set.
+        const candidates = wallets.filter((w) => selectedReceivers.has(w.id))
         if (candidates.length === 0) {
-            setEvenSplitMsg('No receiver wallets available to select — check the Sender/filters above.')
+            setEvenSplitMsg('No receiver wallets are checked below — check the ones you want funded, then Generate Tiered Split.')
             return
         }
 
@@ -510,7 +518,6 @@ export default function TransferForm() {
         const scale = totalSol / rawSum
         const amounts = rawWeights.map((w) => w * scale)
 
-        setSelectedReceivers(new Set(candidates.map((w) => w.id)))
         setReceiverAmounts(() => {
             const next: Record<string, string> = {}
             candidates.forEach((w, i) => { next[w.id] = amounts[i].toFixed(9) })
@@ -533,10 +540,9 @@ export default function TransferForm() {
         const tierCounts = tiers.reduce((acc, t) => { acc[t] = (acc[t] ?? 0) + 1; return acc }, {} as Record<FundingTier, number>)
         const usd = formatUsd(totalSol, solUsdPrice)
         setEvenSplitMsg(
-            `Selected ${candidates.length} wallet${candidates.length !== 1 ? 's' : ''} — ${totalSol.toFixed(4)} SOL total` +
+            `Split across ${candidates.length} checked wallet${candidates.length !== 1 ? 's' : ''} — ${totalSol.toFixed(4)} SOL total` +
             (usd ? ` (~${usd})` : '') +
-            ` — ${tierCounts.small ?? 0} small / ${tierCounts.medium ?? 0} medium / ${tierCounts.large ?? 0} large.` +
-            (candidates.length < count ? ` Only ${candidates.length} wallet(s) were available (requested ${count}).` : '')
+            ` — ${tierCounts.small ?? 0} small / ${tierCounts.medium ?? 0} medium / ${tierCounts.large ?? 0} large.`
         )
     }
 
@@ -592,7 +598,6 @@ export default function TransferForm() {
         setActiveFilters([])
         setBondingCurveMsg('')
         setEvenSplitMsg('')
-        setEvenSplitWalletCount('')
         setEvenSplitTotalSol('')
     }
 
@@ -961,11 +966,10 @@ export default function TransferForm() {
                         <div className="flex flex-col gap-0.5">
                             <p className="text-sm font-medium">Tiered Split Funding (S/M/L)</p>
                             <p className="text-xs text-muted-foreground leading-relaxed">
-                                Splits a total SOL amount across a set number of wallets — auto-selects that many wallets
-                                below (from the current filter) — but spreads the amounts across Small/Medium/Large tiers
-                                instead of an even split, so funding sizes don&apos;t look identical or ramped. Guaranteed
-                                some wallets in every tier; totals still sum exactly to the amount entered. Also fills the
-                                same Launch Totals JSON as the calculator above.
+                                Splits a total SOL amount across whichever receiver wallets you&apos;ve checked below — spreads
+                                the amounts across Small/Medium/Large tiers instead of an even split, so funding sizes don&apos;t
+                                look identical or ramped. Guaranteed some wallets in every tier; totals still sum exactly to
+                                the amount entered. Also fills the same Launch Totals JSON as the calculator above.
                             </p>
                         </div>
                         <div className="flex items-end gap-2 shrink-0">
@@ -980,19 +984,6 @@ export default function TransferForm() {
                                     value={evenSplitTotalSol}
                                     onChange={(e) => setEvenSplitTotalSol(e.target.value)}
                                     className="w-24 rounded border border-input bg-background px-2 py-1 text-right text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                />
-                            </div>
-                            <div className="flex flex-col gap-1">
-                                <label htmlFor="even-split-count" className="text-xs text-muted-foreground whitespace-nowrap">Wallets</label>
-                                <input
-                                    id="even-split-count"
-                                    type="number"
-                                    min={1}
-                                    step={1}
-                                    placeholder="50"
-                                    value={evenSplitWalletCount}
-                                    onChange={(e) => setEvenSplitWalletCount(e.target.value)}
-                                    className="w-20 rounded border border-input bg-background px-2 py-1 text-right text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                 />
                             </div>
                             <Button

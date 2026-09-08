@@ -47,6 +47,81 @@ function inputAmountFromGross(amount: BN, protocolFeeBps: BN, creatorFeeBps: BN)
   return amount.subn(1).muln(10_000).div(totalFeeBps.addn(10_000))
 }
 
+// A dev buy is, by definition, the very first buy a token's bonding curve
+// ever sees — so its fee bps can always be computed against the FRESH/
+// initial curve state, no live RPC read needed (same reasoning
+// computeBondingCurveFunding's own loop already relies on for wallet #1).
+function initialDevBuyFeeBps(): { protocolFeeBps: BN; creatorFeeBps: BN } {
+  return computeFeesBps({
+    global: global_,
+    feeConfig,
+    mintSupply: global_.tokenTotalSupply,
+    virtualSolReserves: global_.initialVirtualSolReserves,
+    virtualTokenReserves: global_.initialVirtualTokenReserves,
+  })
+}
+
+export interface DevBuyFeeEstimate {
+  feeLamports:       BN
+  /** ATA rent + base tx fee + (mint/metadata/bonding-curve creation rent, if this is the creator wallet) — real costs the same wallet also pays in the same transaction, on top of the pump.fun fee. */
+  extraLamports:     BN
+  totalCostLamports: BN
+  totalFeeBps:       number
+}
+
+// Every buyer's own associated token account gets created in the same tx
+// (createAssociatedTokenAccountIdempotentInstruction), so every buy — dev or
+// bundle wallet — needs this reserved, not just the pump.fun fee.
+const ATA_RENT_LAMPORTS = new BN(2_039_280)
+const BASE_TX_FEE_LAMPORTS = new BN(5_000)
+// Mint + metadata + bonding curve account rent — only the creator/dev wallet
+// pays this, since createV2Instruction (token creation) is bundled into the
+// SAME transaction as its buy. Matches DEV_CREATION_COST_SOL below.
+const DEV_CREATION_COST_LAMPORTS = new BN(20_000_000)
+
+function extraCostLamports(isCreator: boolean): BN {
+  return ATA_RENT_LAMPORTS.add(BASE_TX_FEE_LAMPORTS).add(isCreator ? DEV_CREATION_COST_LAMPORTS : new BN(0))
+}
+
+/** What a dev-buy input of `buyInputLamports` will actually cost this wallet
+ *  once pump.fun's protocol + creator fee AND the same-transaction ATA rent
+ *  (plus mint-creation rent, if `isCreator`) are added on top. */
+export function estimateDevBuyFee(buyInputLamports: BN, opts: { isCreator?: boolean } = {}): DevBuyFeeEstimate {
+  const { protocolFeeBps, creatorFeeBps } = initialDevBuyFeeBps()
+  const totalFeeBps = protocolFeeBps.add(creatorFeeBps)
+  const feeLamports = buyInputLamports.mul(totalFeeBps).divn(10_000)
+  const extraLamports = extraCostLamports(!!opts.isCreator)
+  return {
+    feeLamports,
+    extraLamports,
+    totalCostLamports: buyInputLamports.add(feeLamports).add(extraLamports),
+    totalFeeBps: totalFeeBps.toNumber(),
+  }
+}
+
+// Extra headroom beyond the bare minimums extraCostLamports() already
+// reserves, same "don't leave zero margin" reasoning as MAX_RESERVE_LAMPORTS
+// in strategy-wallet-selector.tsx.
+const MAX_BUY_SAFETY_MARGIN_LAMPORTS = new BN(5_000)
+
+/** Largest dev-buy input `availableLamports` can safely cover once the
+ *  protocol + creator fee, this wallet's own ATA rent, and (if `isCreator`)
+ *  the mint/metadata/bonding-curve creation rent are all added on top —
+ *  every one of those is paid by this SAME wallet in the SAME transaction as
+ *  the buy, so leaving them out (as this used to) let Max fill the buy
+ *  amount right up to the wallet's balance with nothing left for rent,
+ *  reliably failing the dev's own create+buy tx. Floor-rounded (never rounds
+ *  up), so the result always clears the actual on-chain cost with room to
+ *  spare. Doesn't reserve for a Jito tip — if this wallet also pays a bundle
+ *  tip, reserve that separately first. */
+export function computeMaxDevBuyLamports(availableLamports: BN, opts: { isCreator?: boolean } = {}): BN {
+  const reserve = extraCostLamports(!!opts.isCreator).add(MAX_BUY_SAFETY_MARGIN_LAMPORTS)
+  const spendable = availableLamports.sub(reserve)
+  if (spendable.lten(0)) return new BN(0)
+  const { protocolFeeBps, creatorFeeBps } = initialDevBuyFeeBps()
+  return inputAmountFromGross(spendable, protocolFeeBps, creatorFeeBps)
+}
+
 function lamportsToSol(bn: BN): number {
   return bn.toNumber() / 1e9
 }

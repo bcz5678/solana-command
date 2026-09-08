@@ -2,11 +2,20 @@
 
 import { useState } from 'react'
 import { Handle, Position } from '@xyflow/react'
-import { Settings2, Trash2, Play, Timer, CheckCircle2, XCircle, LucideIcon } from 'lucide-react'
+import { Settings2, Trash2, Play, Timer, CheckCircle2, XCircle, Copy, ExternalLink, LucideIcon } from 'lucide-react'
 import { Card } from '@/components/ui/card'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { BuilderNodeCategory, HandleDataType } from '../types'
 import { CATEGORY_ACCENT } from '../node-palette-config'
 import { HANDLE_TYPE_META } from '../handle-types'
+
+// A dry-run/simulated result carries a placeholder signature (`simulated-...`,
+// `already-launched-...`) that was never actually submitted to the chain —
+// nothing real exists at that "signature" on Solscan, so the copy/link
+// controls only make sense for a genuine transaction signature.
+function isRealSignature(sig: string | undefined): sig is string {
+    return !!sig && !sig.startsWith('simulated-') && !sig.startsWith('already-launched-')
+}
 
 // Shape encodes handle ROLE (input / output / exec-in); color (from
 // HANDLE_TYPE_META) encodes the data TYPE carried on the wire — the two are
@@ -59,8 +68,8 @@ type Props = {
     onContinue?: () => void
     /** Timer triggers only — whole seconds remaining while the dry-run engine counts down. */
     countdown?: number
-    /** Webhook node only — result of the last dry-run POST. */
-    resultBadge?: { ok: boolean; message: string }
+    /** Result of the node's last run — signature (if any) gets a copy/Solscan popout. */
+    resultBadge?: { ok: boolean; message: string; signature?: string }
 }
 
 export default function BaseNodeShell({
@@ -92,6 +101,14 @@ export default function BaseNodeShell({
 
     const [editingName, setEditingName] = useState(false)
     const [nameDraft, setNameDraft]     = useState(displayName ?? '')
+    const [sigCopied, setSigCopied]     = useState(false)
+
+    function copySignature(e: React.MouseEvent, sig: string) {
+        e.stopPropagation()
+        navigator.clipboard.writeText(sig)
+        setSigCopied(true)
+        setTimeout(() => setSigCopied(false), 2000)
+    }
 
     function startEditingName() {
         setNameDraft(displayName ?? '')
@@ -224,7 +241,43 @@ export default function BaseNodeShell({
                             ) : (
                                 <XCircle className="size-3 mt-0.5 shrink-0" />
                             )}
-                            <span className="break-words">{resultBadge.message}</span>
+                            <span className="break-words flex-1 min-w-0">{resultBadge.message}</span>
+                            {isRealSignature(resultBadge.signature) && (
+                                <span className="flex items-center gap-0.5 shrink-0">
+                                    <TooltipProvider>
+                                        <Tooltip open={sigCopied ? true : undefined}>
+                                            <TooltipTrigger asChild>
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => copySignature(e, resultBadge.signature!)}
+                                                    className="flex items-center justify-center rounded p-0.5 opacity-70 hover:opacity-100 transition-opacity"
+                                                    aria-label="Copy signature"
+                                                >
+                                                    <Copy className="size-3" />
+                                                </button>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="top">{sigCopied ? 'Copied to clipboard' : 'Copy signature'}</TooltipContent>
+                                        </Tooltip>
+                                    </TooltipProvider>
+                                    <TooltipProvider>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <a
+                                                    href={`https://solscan.io/tx/${resultBadge.signature}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    className="flex items-center justify-center rounded p-0.5 opacity-70 hover:opacity-100 transition-opacity"
+                                                    aria-label="View on Solscan"
+                                                >
+                                                    <ExternalLink className="size-3" />
+                                                </a>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="top">View on Solscan</TooltipContent>
+                                        </Tooltip>
+                                    </TooltipProvider>
+                                </span>
+                            )}
                         </div>
                     </div>
                 )}

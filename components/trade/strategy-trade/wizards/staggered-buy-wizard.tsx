@@ -11,13 +11,14 @@ import { TokenMintInput } from '@/components/trade/strategy-trade/TokenMintInput
 import { stratifiedInterleave } from '@/lib/trade/stratified-interleave'
 import BankPicker from '@/components/tokens/comment-bank/bank-picker'
 import CommentActivityFeed from '@/components/tokens/comment-bank/comment-activity-feed'
+import LaunchTradeFeedPanel from '@/components/tokens/launch/launch-trade-feed-panel'
 import { useRelayEvent } from '@/hooks/use-relay-event'
 import type { TokenTransactionEvent } from '@/lib/wss/types'
 import { createTradeRun, upsertTradeRunStep, getTradeRun, requestTradeRunControl, finishTradeRun } from '@/lib/trade/trade-run-client'
 
 type TradeType  = 'buy' | 'sell'
 type ExecPhase  = 'idle' | 'running' | 'paused' | 'done' | 'cancelled'
-type ExecStatus = 'pending' | 'executing' | 'success' | 'error' | 'cancelled'
+type ExecStatus = 'pending' | 'executing' | 'success' | 'error' | 'cancelled' | 'retrying'
 
 type ScheduleEntry = {
     walletId:    string
@@ -149,8 +150,28 @@ export default function StaggeredBuyWizard() {
     const [haltWindowSec, setHaltWindowSec]     = useState('10')
     const [haltAlert, setHaltAlert]             = useState<string | null>(null)
 
+    // Test mode — every trade call gets dryRun:true, same convention as
+    // Launch Builder's testMode. The route still does everything except
+    // broadcast: real bonding-curve reads, real quote math, a real signed
+    // (but simulated, not sent) transaction — so schedule building,
+    // interleaving, pause/resume, front-run auto-halt (a real relay
+    // subscription against the real mint), and the flush/rebuy panel all
+    // exercise exactly as they would live, without spending real SOL or
+    // moving real supply. Defaults on, matching Launch Builder's own default.
+    const [testMode, setTestMode] = useState(true)
+
     // Schedule (generated once when leaving Parameters step)
     const [schedule, setSchedule] = useState<ScheduleEntry[]>([])
+
+    // executeAll() is one long-running async closure started by a single
+    // button click — its references to `slippage`/`schedule` are captured
+    // from THAT render and stay stale for the closure's whole lifetime, so a
+    // later setSlippage()/setSchedule() (e.g. from the paused-state "Adjust
+    // Run" panel below) would silently never reach the in-flight loop
+    // without these. Kept in sync via the effect further down; the loop
+    // reads .current instead of the state variable directly.
+    const slippageRef = useRef(slippage)
+    const scheduleRef = useRef<ScheduleEntry[]>(schedule)
 
     // Live execution state
     const [execState, setExecState]             = useState<ExecEntry[]>([])
@@ -182,16 +203,43 @@ export default function StaggeredBuyWizard() {
         rebuySignature?: string
         error?:          string
     }
-    const [flushSelectedIds, setFlushSelectedIds] = useState<Set<string>>(new Set())
+    // Separate selection sets for the Sell and Rebuy sections — sharing one
+    // set used to mean re-checking a wallet to sell MORE later would also
+    // re-include every already-sold wallet still checked from the first
+    // wave, silently re-selling them on the next "Sell" click. Splitting
+    // these means the two sections can't step on each other: selecting more
+    // sell targets never touches which sold wallets are queued for rebuy.
+    const [flushSellSelectedIds, setFlushSellSelectedIds]   = useState<Set<string>>(new Set())
+    const [flushRebuySelectedIds, setFlushRebuySelectedIds] = useState<Set<string>>(new Set())
     const [flushSellPct, setFlushSellPct]         = useState('50')
+    // Own slippage, deliberately separate from the run's slippage (see
+    // slippageRef) and defaulted looser — a flush-sell intentionally craters
+    // the price to shake out a sniper, so the rebuy immediately after faces
+    // far more price movement than the run's steady-state trades ever did.
+    // Reusing the run's normal (often tight) slippage for the rebuy was
+    // exactly why "lots of rebuys fail": it was never sized for buying back
+    // through a dip this sub-flow itself just caused.
+    const [flushSlippage, setFlushSlippage]       = useState('10')
     const [flushEntries, setFlushEntries]         = useState<FlushEntry[]>([])
     const [flushBusy, setFlushBusy]               = useState<'selling' | 'rebuying' | null>(null)
+
+    // Per-wallet slippage override for retrying a single failed trade — keyed
+    // by walletId, percent string (e.g. "8" for 8%). Blank means "use the
+    // run's current slippage" (slippageRef.current, itself live-adjustable
+    // via the Adjust Run panel). Retrying fires its own independent fetch,
+    // deliberately NOT routed through executeAll()'s loop or pauseRef/
+    // abortRef — the whole point is retrying one wallet shouldn't require
+    // pausing (or even affect) every other wallet still mid-run.
+    const [retrySlippage, setRetrySlippage] = useState<Record<string, string>>({})
 
     // Run-scoped, non-rendered state for the auto-halt detector — mutated
     // directly by executeAll(), read by the relay-event handler below.
     const autoHaltActiveRef        = useRef(false)
     const runWalletKeysRef         = useRef<Set<string>>(new Set())
     const foreignTradeTimestampsRef = useRef<number[]>([])
+
+    useEffect(() => { slippageRef.current = slippage }, [slippage])
+    useEffect(() => { scheduleRef.current = schedule }, [schedule])
 
     // Watches every live trade for the current mint (the relay broadcasts to
     // all connected clients — filtering by mint/wallet happens here, same
@@ -220,6 +268,17 @@ export default function StaggeredBuyWizard() {
             )
         }
     })
+
+    // For LaunchTradeFeedPanel's "OURS" tag — every platform wallet, not just
+    // this run's schedule (runWalletKeysRef above is deliberately narrower,
+    // scoped to auto-halt's own foreign-trade detection). Same convention as
+    // app/protected/tokens/live-trades/page.tsx.
+    const ourWallets = useMemo(() => new Set(wallets.map((w) => w.public_key)), [wallets])
+    const ourWalletLabels = useMemo(() => {
+        const map: Record<string, string> = {}
+        for (const w of wallets) if (w.label) map[w.public_key] = w.label
+        return map
+    }, [wallets])
 
     useEffect(() => {
         fetch('/api/wallets/explorer')
@@ -490,6 +549,109 @@ export default function StaggeredBuyWizard() {
         pauseRef.current = false   // unblock any paused wait so the loop can exit
     }
 
+    // Re-rolls delayMsAfter (within the CURRENT delayMin/delayMax, which the
+    // Adjust Run panel just edited) for every trade that hasn't fired yet —
+    // identified via execState, not array position, since that's the only
+    // reliable "not yet executed" signal once a run is underway. Trades that
+    // already landed (or are the one about to fire when this returns) keep
+    // whatever delay they were already assigned; only genuinely future ones
+    // change. Safe to call from the paused-state panel: executeAll() reads
+    // scheduleRef.current, so this takes effect the moment the run resumes.
+    function applyDelayRangeToRemaining() {
+        const delay = validDelayRange()
+        if (!delay) return
+        const pendingWalletIds = new Set(
+            execState.filter((s) => s.status === 'pending').map((s) => s.walletId)
+        )
+        setSchedule((prev) => prev.map((entry, i) => {
+            if (!pendingWalletIds.has(entry.walletId)) return entry
+            const isLast = i === prev.length - 1
+            return {
+                ...entry,
+                delayMsAfter: isLast ? 0 : Math.round(Math.random() * (delay.maxMs - delay.minMs) + delay.minMs),
+            }
+        }))
+    }
+
+    // Retries ONE failed wallet's trade in place — independent of executeAll()'s
+    // main loop, so it can fire while other wallets are still executing (no
+    // pause needed) and can't collide with them: a wallet only ever shows
+    // 'error' after the main loop has already moved past its index for good,
+    // so the loop will never revisit it concurrently with this. Usually
+    // exactly the scenario the user's describing — another trade landed
+    // around this wallet's attempt and pushed it past its slippage tolerance —
+    // so this takes an optional per-wallet slippage override instead of
+    // forcing a pause to retune the whole run's slippage for one retry.
+    async function retryTrade(walletId: string) {
+        if (execState.find((s) => s.walletId === walletId)?.status === 'retrying') return
+
+        const overridePct   = parseFloat(retrySlippage[walletId] ?? '')
+        const slippageToUse = !isNaN(overridePct) && overridePct > 0 ? overridePct / 100 : slippageRef.current
+
+        setExecState((prev) => prev.map((s) => s.walletId === walletId ? { ...s, status: 'retrying', error: undefined } : s))
+        upsertTradeRunStep(runIdRef.current, { stepKey: walletId, walletId, status: 'running', amount: formatAmount(walletId) })
+
+        try {
+            let apiResult: { success: boolean; signature?: string; error?: string }
+
+            if (tradeType === 'buy') {
+                const solAmt   = tradeAmounts[walletId] ?? '0'
+                const lamports = Math.round(parseFloat(solAmt) * 1_000_000_000).toString()
+                const res = await fetch('/api/trade/staggered/buy', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({
+                        walletId,
+                        mintAddress: tokenMint,
+                        solAmountLamports: lamports,
+                        slippage: slippageToUse,
+                        dryRun: testMode,
+                        ...(autoCommentEnabled ? {
+                            autoComment: {
+                                enabled:     true,
+                                delayMinMs:  (parseFloat(autoCommentDelayMinSec) || 0) * 1000,
+                                delayMaxMs:  (parseFloat(autoCommentDelayMaxSec) || 0) * 1000,
+                                probability: (parseFloat(autoCommentProbabilityPct) || 0) / 100,
+                                bankIds:     [...autoCommentBankIds],
+                            },
+                        } : {}),
+                    }),
+                })
+                apiResult = await res.json()
+            } else {
+                const tokenAmt = tradeAmounts[walletId] ?? '0'
+                const pct      = parseFloat(sellPct)
+                const res = await fetch('/api/trade/staggered/sell', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({ walletId, mintAddress: tokenMint, tokenAmount: tokenAmt, slippage: slippageToUse, sellPct: isNaN(pct) ? undefined : pct, dryRun: testMode }),
+                })
+                apiResult = await res.json()
+            }
+
+            setExecState((prev) => prev.map((s) =>
+                s.walletId === walletId
+                    ? { ...s, status: apiResult.success ? 'success' : 'error', signature: apiResult.signature, error: apiResult.error }
+                    : s
+            ))
+            upsertTradeRunStep(runIdRef.current, {
+                stepKey: walletId, walletId,
+                status: apiResult.success ? 'success' : 'error',
+                amount: formatAmount(walletId), signature: apiResult.signature, error: apiResult.error,
+            })
+            if (apiResult.success) {
+                setRetrySlippage((prev) => {
+                    const { [walletId]: _drop, ...rest } = prev
+                    return rest
+                })
+            }
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'Network error'
+            setExecState((prev) => prev.map((s) => s.walletId === walletId ? { ...s, status: 'error', error: message } : s))
+            upsertTradeRunStep(runIdRef.current, { stepKey: walletId, walletId, status: 'error', amount: formatAmount(walletId), error: message })
+        }
+    }
+
     async function executeAll() {
         abortRef.current = false
         pauseRef.current = false
@@ -497,7 +659,8 @@ export default function StaggeredBuyWizard() {
         setExecPhase('running')
         setExecState(schedule.map((e) => ({ walletId: e.walletId, status: 'pending' })))
         setFlushEntries([])
-        setFlushSelectedIds(new Set())
+        setFlushSellSelectedIds(new Set())
+        setFlushRebuySelectedIds(new Set())
 
         runIdRef.current = await createTradeRun(
             tradeType === 'buy' ? 'staggered_buy' : 'staggered_sell',
@@ -541,7 +704,10 @@ export default function StaggeredBuyWizard() {
             }
             if (abortRef.current) break
 
-            const entry = schedule[i]
+            // .current, not the closed-over schedule — so a delay-range edit
+            // made in the paused-state Adjust Run panel below is visible to
+            // THIS iteration the moment it resumes, not just to future runs.
+            const entry = scheduleRef.current[i]
 
             setExecState((prev) => prev.map((s) =>
                 s.walletId === entry.walletId ? { ...s, status: 'executing' } : s
@@ -564,7 +730,8 @@ export default function StaggeredBuyWizard() {
                             walletId: entry.walletId,
                             mintAddress: tokenMint,
                             solAmountLamports: lamports,
-                            slippage,
+                            slippage: slippageRef.current,
+                            dryRun: testMode,
                             ...(autoCommentEnabled ? {
                                 autoComment: {
                                     enabled:     true,
@@ -583,7 +750,7 @@ export default function StaggeredBuyWizard() {
                     const res      = await fetch('/api/trade/staggered/sell', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ walletId: entry.walletId, mintAddress: tokenMint, tokenAmount: tokenAmt, slippage, sellPct: isNaN(pct) ? undefined : pct }),
+                        body: JSON.stringify({ walletId: entry.walletId, mintAddress: tokenMint, tokenAmount: tokenAmt, slippage: slippageRef.current, sellPct: isNaN(pct) ? undefined : pct, dryRun: testMode }),
                     })
                     apiResult = await res.json()
                 }
@@ -613,7 +780,7 @@ export default function StaggeredBuyWizard() {
 
             // Countdown before the next trade (pause-aware)
             if (i < schedule.length - 1 && entry.delayMsAfter > 0 && !abortRef.current) {
-                setExecNextWalletId(schedule[i + 1].walletId)
+                setExecNextWalletId(scheduleRef.current[i + 1].walletId)
                 await countdownSleep(entry.delayMsAfter, (remaining) => setExecCountdownMs(remaining), pauseRef, abortRef)
                 setExecCountdownMs(null)
                 setExecNextWalletId(null)
@@ -655,7 +822,8 @@ export default function StaggeredBuyWizard() {
     // ── sniper-shakeout flush/rebuy ──────────────────────────────────────────
 
     async function sellSelectedForFlush(pct: number) {
-        const ids = [...flushSelectedIds]
+        const ids  = [...flushSellSelectedIds]
+        const slip = (parseFloat(flushSlippage) || 10) / 100
         setFlushBusy('selling')
         for (let i = 0; i < ids.length; i++) {
             const walletId = ids[i]
@@ -663,7 +831,7 @@ export default function StaggeredBuyWizard() {
             try {
                 const res = await fetch('/api/trade/staggered/sell', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ walletId, mintAddress: tokenMint, slippage, sellPct: pct }),
+                    body: JSON.stringify({ walletId, mintAddress: tokenMint, slippage: slip, sellPct: pct, dryRun: testMode }),
                 })
                 const result = await res.json()
                 setFlushEntries((prev) => prev.map((e) => e.walletId === walletId
@@ -673,6 +841,16 @@ export default function StaggeredBuyWizard() {
                     status: result.success ? 'success' : 'error',
                     amount: `${pct}% flush-sell`, signature: result.signature, error: result.error,
                 })
+                if (result.success) {
+                    // Moves it out of Sell (so it can't be accidentally re-sold
+                    // on the next wave) and into Rebuy, pre-selected there.
+                    setFlushSellSelectedIds((prev) => {
+                        const next = new Set(prev)
+                        next.delete(walletId)
+                        return next
+                    })
+                    setFlushRebuySelectedIds((prev) => new Set(prev).add(walletId))
+                }
             } catch (err) {
                 const message = err instanceof Error ? err.message : 'Network error'
                 setFlushEntries((prev) => prev.map((e) => e.walletId === walletId ? { ...e, subStatus: 'error-selling', error: message } : e))
@@ -684,7 +862,10 @@ export default function StaggeredBuyWizard() {
     }
 
     async function rebuySelectedForFlush() {
-        const ids = flushEntries.filter((e) => e.subStatus === 'sold' && flushSelectedIds.has(e.walletId)).map((e) => e.walletId)
+        const ids  = flushEntries
+            .filter((e) => (e.subStatus === 'sold' || e.subStatus === 'error-rebuying') && flushRebuySelectedIds.has(e.walletId))
+            .map((e) => e.walletId)
+        const slip = (parseFloat(flushSlippage) || 10) / 100
         setFlushBusy('rebuying')
         for (let i = 0; i < ids.length; i++) {
             const walletId = ids[i]
@@ -694,7 +875,7 @@ export default function StaggeredBuyWizard() {
                 const lamports = Math.round(parseFloat(solAmt) * 1_000_000_000).toString()
                 const res = await fetch('/api/trade/staggered/buy', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ walletId, mintAddress: tokenMint, solAmountLamports: lamports, slippage }),
+                    body: JSON.stringify({ walletId, mintAddress: tokenMint, solAmountLamports: lamports, slippage: slip, dryRun: testMode }),
                 })
                 const result = await res.json()
                 setFlushEntries((prev) => prev.map((e) => e.walletId === walletId
@@ -738,6 +919,27 @@ export default function StaggeredBuyWizard() {
             .sort((a, b) => b.amountSol - a.amountSol)
     }, [execState, wallets, tradeAmounts])
 
+    // Splits flushCandidates by where each wallet is in the flush lifecycle —
+    // a wallet "moves" from Sell to Rebuy the moment its sell succeeds (and
+    // stays in Rebuy afterward even if the rebuy itself later fails; retrying
+    // that lives in the Rebuy section, not back in Sell). This is what keeps
+    // the two actions from interfering: selecting more not-yet-sold wallets
+    // to sell further never touches which already-sold wallets are queued to
+    // rebuy, and vice versa.
+    const flushSellCandidates = useMemo(() => {
+        return flushCandidates.filter(({ walletId }) => {
+            const entry = flushEntries.find((f) => f.walletId === walletId)
+            return !entry || entry.subStatus === 'idle' || entry.subStatus === 'selling' || entry.subStatus === 'error-selling'
+        })
+    }, [flushCandidates, flushEntries])
+
+    const flushRebuyCandidates = useMemo(() => {
+        return flushCandidates.filter(({ walletId }) => {
+            const entry = flushEntries.find((f) => f.walletId === walletId)
+            return !!entry && (entry.subStatus === 'sold' || entry.subStatus === 'rebuying' || entry.subStatus === 'rebought' || entry.subStatus === 'error-rebuying')
+        })
+    }, [flushCandidates, flushEntries])
+
     // ─────────────────────────────────────────────────────────────────────────
 
     return (
@@ -771,6 +973,25 @@ export default function StaggeredBuyWizard() {
                                     }}
                                 />
                             </div>
+                        </div>
+
+                        {/* Test Mode */}
+                        <div className="flex flex-col gap-1.5">
+                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Test Mode</span>
+                            <label className="flex items-center gap-2 cursor-pointer select-none h-9">
+                                <input
+                                    type="checkbox"
+                                    checked={testMode}
+                                    onChange={(e) => setTestMode(e.target.checked)}
+                                    className="size-4 rounded border border-input accent-amber-500"
+                                />
+                                <span className="text-xs font-medium text-muted-foreground">Enable</span>
+                            </label>
+                            <p className="text-[10px] text-muted-foreground max-w-md">
+                                Every trade (including Sell &amp; Rebuy) runs against a real, previously-launched token — real bonding-curve reads
+                                and quotes, real front-run detection — but the transaction is only simulated, never broadcast. Nothing is spent
+                                and no supply moves. Turn off to run for real.
+                            </p>
                         </div>
 
                         {/* Trade Type */}
@@ -1053,6 +1274,7 @@ export default function StaggeredBuyWizard() {
                             errorIds={errorWalletIds}
                             tradeType={tradeType}
                             tokenMint={tokenMint}
+                            slippage={slippage}
                             onBalancesLoaded={(balances, decimals) => {
                                 setTokenBalances(balances)
                                 setTokenDecimals(decimals)
@@ -1207,6 +1429,12 @@ export default function StaggeredBuyWizard() {
                                         </span>
                                     </div>
                                 )}
+                                {testMode && (
+                                    <div className="flex items-center gap-3 px-4 py-2.5 bg-amber-500/10">
+                                        <span className="w-32 shrink-0 font-medium text-amber-600 dark:text-amber-400">Test Mode</span>
+                                        <span className="text-amber-600 dark:text-amber-400">Enabled — trades will be simulated, not broadcast</span>
+                                    </div>
+                                )}
                                 <div className="flex items-center gap-3 px-4 py-2.5">
                                     <span className="w-32 shrink-0 font-medium text-muted-foreground">Slippage</span>
                                     <span className="tabular-nums text-foreground">{(slippage * 100).toFixed(1)}%</span>
@@ -1279,6 +1507,13 @@ export default function StaggeredBuyWizard() {
                 {/* ── Step 3: Execute ─────────────────────────────────────── */}
                 {step === 3 && (
                     <div className="flex flex-col gap-4">
+
+                        {testMode && (
+                            <div className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-600 dark:text-amber-400">
+                                <span className="inline-block size-2 rounded-full bg-amber-500 shrink-0" />
+                                TEST MODE — trades are simulated, nothing is broadcast or spent.
+                            </div>
+                        )}
 
                         {/* Control bar */}
                         <div className="flex items-center gap-2">
@@ -1419,83 +1654,243 @@ export default function StaggeredBuyWizard() {
                             )
                         )}
 
+                        {/* Adjust Run — lets you retune slippage, pacing, and front-running
+                            sensitivity mid-run without cancelling. Slippage and auto-halt
+                            fields are plain state the loop/relay-handler already read live
+                            (via slippageRef / handlerRef-forwarding); only the delay range
+                            needs an explicit "Apply" since it's baked into each remaining
+                            schedule entry rather than read fresh per-trade. */}
+                        {execPhase === 'paused' && (
+                            <div className="flex flex-col gap-4 rounded-lg border border-blue-500/20 bg-blue-500/5 p-4">
+                                <span className="text-xs font-semibold text-foreground">Adjust Run</span>
+                                <p className="text-[10px] text-muted-foreground -mt-2">
+                                    Changes apply to trades that haven&apos;t fired yet — nothing already executed is affected.
+                                </p>
+
+                                <div className="flex flex-wrap items-start gap-8">
+                                    <div className="flex flex-col gap-1.5 min-w-48">
+                                        <SlippageControl value={slippage} onChange={setSlippage} />
+                                    </div>
+
+                                    <div className="flex flex-col gap-1.5">
+                                        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Delay Between Trades</span>
+                                        <div className="flex items-end gap-2">
+                                            <div className="flex flex-col gap-1">
+                                                <span className="text-[10px] text-muted-foreground">Min (seconds)</span>
+                                                <input
+                                                    type="number" min={0} step={1} placeholder="5"
+                                                    value={delayMin}
+                                                    onChange={(e) => setDelayMin(e.target.value)}
+                                                    className="w-20 rounded border border-input bg-transparent px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                />
+                                            </div>
+                                            <span className="text-muted-foreground text-sm mb-1.5">–</span>
+                                            <div className="flex flex-col gap-1">
+                                                <span className="text-[10px] text-muted-foreground">Max (seconds)</span>
+                                                <input
+                                                    type="number" min={0} step={1} placeholder="30"
+                                                    value={delayMax}
+                                                    onChange={(e) => setDelayMax(e.target.value)}
+                                                    className="w-20 rounded border border-input bg-transparent px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                />
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={applyDelayRangeToRemaining}
+                                                disabled={!validDelayRange()}
+                                                className="mb-0.5 px-3 py-1.5 rounded-lg border border-blue-500/60 bg-blue-500/10 text-blue-500 text-xs font-medium hover:bg-blue-500/20 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                                            >
+                                                Apply to Remaining
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {autoHaltEnabled && (
+                                        <div className="flex flex-col gap-1.5">
+                                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Front-Running Sensitivity</span>
+                                            <div className="flex items-end gap-3">
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="text-[10px] text-muted-foreground">Trigger after</span>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <input
+                                                            type="number" min={1} step={1}
+                                                            value={haltThreshold}
+                                                            onChange={(e) => setHaltThreshold(e.target.value)}
+                                                            className="w-16 rounded border border-input bg-transparent px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                        />
+                                                        <span className="text-[10px] text-muted-foreground">trades</span>
+                                                    </div>
+                                                </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="text-[10px] text-muted-foreground">within</span>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <input
+                                                            type="number" min={1} step={1}
+                                                            value={haltWindowSec}
+                                                            onChange={(e) => setHaltWindowSec(e.target.value)}
+                                                            className="w-16 rounded border border-input bg-transparent px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                        />
+                                                        <span className="text-[10px] text-muted-foreground">seconds</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <p className="text-[10px] text-muted-foreground">Takes effect immediately — no Apply needed.</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
                         {/* Sniper-shakeout flush/rebuy — manual sub-flow, independent of
                             the main paused loop. Persists across a pause -> resume ->
                             pause cycle within the same run (only cleared at the start of
                             a new executeAll()), so history reappears if the run pauses
                             again later. */}
                         {execPhase === 'paused' && tradeType === 'buy' && flushCandidates.length > 0 && (
-                            <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/10 p-4">
+                            <div className="flex flex-col gap-4 rounded-lg border border-border bg-muted/10 p-4">
                                 <div className="flex flex-col gap-1">
                                     <span className="text-xs font-semibold text-foreground">Sell &amp; Rebuy (shake out a sniper)</span>
                                     <p className="text-[10px] text-muted-foreground max-w-lg">
                                         Sell a slice of a few already-bought wallets to push the price down, then rebuy them back to
                                         restore their position before hitting Resume. This doesn&apos;t touch or restart the paused
-                                        schedule — it only fires extra trades on wallets already marked successful below. Each sell +
-                                        rebuy pair costs slippage and fees twice, and isn&apos;t guaranteed to shake out a determined sniper.
+                                        schedule — it only fires extra trades on wallets already marked successful below. A sold wallet
+                                        moves into Rebuy below once its sell lands, so you can keep selecting more wallets to sell here
+                                        without it re-selling anything already sold. Each sell + rebuy pair costs slippage and fees
+                                        twice, and isn&apos;t guaranteed to shake out a determined sniper. The SOL amount shown per
+                                        wallet is what it originally bought with, not a token balance — the sell itself always resolves
+                                        against each wallet&apos;s real, live on-chain token balance.
                                     </p>
+                                    {testMode && (
+                                        <p className="text-[10px] text-amber-600 dark:text-amber-400 max-w-lg">
+                                            Test Mode is on — the original buys were simulated, never broadcast, so these wallets hold
+                                            zero real tokens on-chain. Every sell here will fail with &quot;no token balance to sell&quot;
+                                            until tested against a wallet that actually holds tokens from a real (non-dry-run) buy.
+                                        </p>
+                                    )}
                                 </div>
 
+                                {/* Own slippage — separate from the run's, and looser by default.
+                                    A flush-sell deliberately craters the price; the rebuy right after
+                                    needs room for that self-inflicted move, not the run's steady-state
+                                    tolerance. This was the actual cause of "lots of rebuys fail". */}
                                 <div className="flex items-center gap-2 rounded-lg border border-input bg-transparent px-3 h-9 w-fit focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30">
                                     <input
-                                        type="number" min={1} max={99} step={1} placeholder="50"
-                                        value={flushSellPct}
-                                        onChange={(e) => setFlushSellPct(e.target.value)}
+                                        type="number" min={0.1} max={50} step={0.5} placeholder="10"
+                                        value={flushSlippage}
+                                        onChange={(e) => setFlushSlippage(e.target.value)}
+                                        title="Slippage for both the flush-sell and the rebuy — separate from the run's own slippage"
                                         className="w-16 bg-transparent text-xs outline-none placeholder:text-muted-foreground [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                     />
-                                    <span className="text-xs text-muted-foreground shrink-0">% to sell</span>
+                                    <span className="text-xs text-muted-foreground shrink-0">% flush slippage (sell &amp; rebuy)</span>
                                 </div>
 
-                                <div className="flex flex-col gap-1.5">
-                                    {flushCandidates.map(({ walletId, wallet, amountSol }) => {
-                                        const entry = flushEntries.find((f) => f.walletId === walletId)
-                                        return (
-                                            <label key={walletId} className="flex items-center gap-2.5 rounded-md border border-border/60 px-2.5 py-1.5 text-xs cursor-pointer">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={flushSelectedIds.has(walletId)}
-                                                    onChange={(e) => {
-                                                        const next = new Set(flushSelectedIds)
-                                                        e.target.checked ? next.add(walletId) : next.delete(walletId)
-                                                        setFlushSelectedIds(next)
-                                                    }}
-                                                    className="size-4 rounded border border-input accent-blue-500"
-                                                />
-                                                <span className="font-mono flex-1 min-w-0 truncate">
-                                                    {wallet?.label && <span className="font-sans font-medium text-foreground">{wallet.label} · </span>}
-                                                    {wallet ? maskPubKey(wallet.public_key) : maskPubKey(walletId)}
-                                                </span>
-                                                <span className="tabular-nums text-green-500 font-medium">{amountSol.toFixed(4)} SOL</span>
-                                                <span className="w-24 text-right shrink-0">
-                                                    {(!entry || entry.subStatus === 'idle') && <span className="text-muted-foreground/50">—</span>}
-                                                    {entry?.subStatus === 'selling'        && <span className="text-blue-500">selling…</span>}
-                                                    {entry?.subStatus === 'sold'           && <span className="text-amber-500">sold</span>}
-                                                    {entry?.subStatus === 'error-selling'  && <span className="text-destructive" title={entry.error}>sell failed</span>}
-                                                    {entry?.subStatus === 'rebuying'       && <span className="text-blue-500">rebuying…</span>}
-                                                    {entry?.subStatus === 'rebought'       && <span className="text-green-500">✓ rebought</span>}
-                                                    {entry?.subStatus === 'error-rebuying' && <span className="text-destructive" title={entry.error}>rebuy failed</span>}
-                                                </span>
-                                            </label>
-                                        )
-                                    })}
-                                </div>
+                                {/* ── Sell ─────────────────────────────────────────────── */}
+                                <div className="flex flex-col gap-2 rounded-md border border-red-500/20 bg-red-500/5 p-3">
+                                    <span className="text-[11px] font-semibold uppercase tracking-wider text-red-500">Sell</span>
 
-                                <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 rounded-lg border border-input bg-transparent px-3 h-9 w-fit focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30">
+                                        <input
+                                            type="number" min={1} max={99} step={1} placeholder="50"
+                                            value={flushSellPct}
+                                            onChange={(e) => setFlushSellPct(e.target.value)}
+                                            className="w-16 bg-transparent text-xs outline-none placeholder:text-muted-foreground [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                        />
+                                        <span className="text-xs text-muted-foreground shrink-0">% to sell</span>
+                                    </div>
+
+                                    <div className="flex flex-col gap-1.5">
+                                        {flushSellCandidates.length === 0 && (
+                                            <p className="text-[10px] text-muted-foreground/70 py-1">
+                                                Nothing left to sell — every wallet below has already been sold.
+                                            </p>
+                                        )}
+                                        {flushSellCandidates.map(({ walletId, wallet, amountSol }) => {
+                                            const entry = flushEntries.find((f) => f.walletId === walletId)
+                                            return (
+                                                <label key={walletId} className="flex items-center gap-2.5 rounded-md border border-border/60 bg-background/50 px-2.5 py-1.5 text-xs cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={flushSellSelectedIds.has(walletId)}
+                                                        onChange={(e) => {
+                                                            const next = new Set(flushSellSelectedIds)
+                                                            e.target.checked ? next.add(walletId) : next.delete(walletId)
+                                                            setFlushSellSelectedIds(next)
+                                                        }}
+                                                        className="size-4 rounded border border-input accent-red-500"
+                                                    />
+                                                    <span className="font-mono flex-1 min-w-0 truncate">
+                                                        {wallet?.label && <span className="font-sans font-medium text-foreground">{wallet.label} · </span>}
+                                                        {wallet ? maskPubKey(wallet.public_key) : maskPubKey(walletId)}
+                                                    </span>
+                                                    <span className="tabular-nums text-green-500 font-medium">{amountSol.toFixed(4)} SOL</span>
+                                                    <span className="w-20 text-right shrink-0">
+                                                        {(!entry || entry.subStatus === 'idle') && <span className="text-muted-foreground/50">—</span>}
+                                                        {entry?.subStatus === 'selling'       && <span className="text-blue-500">selling…</span>}
+                                                        {entry?.subStatus === 'error-selling' && <span className="text-destructive" title={entry.error}>failed</span>}
+                                                    </span>
+                                                </label>
+                                            )
+                                        })}
+                                    </div>
+
                                     <button
                                         type="button"
-                                        disabled={flushBusy !== null || flushSelectedIds.size === 0 || !flushSellPct || isNaN(parseFloat(flushSellPct))}
+                                        disabled={flushBusy !== null || flushSellSelectedIds.size === 0 || !flushSellPct || isNaN(parseFloat(flushSellPct))}
                                         onClick={() => sellSelectedForFlush(parseFloat(flushSellPct))}
-                                        className="px-3 py-1.5 rounded-lg border border-red-500/60 bg-red-500/10 text-red-500 text-xs font-medium hover:bg-red-500/20 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                                        className="self-start px-3 py-1.5 rounded-lg border border-red-500/60 bg-red-500/10 text-red-500 text-xs font-medium hover:bg-red-500/20 transition-colors disabled:opacity-40 disabled:pointer-events-none"
                                     >
                                         {flushBusy === 'selling' ? 'Selling…' : `Sell ${flushSellPct || 0}% from selected`}
                                     </button>
+                                </div>
+
+                                {/* ── Rebuy ────────────────────────────────────────────── */}
+                                <div className="flex flex-col gap-2 rounded-md border border-green-500/20 bg-green-500/5 p-3">
+                                    <span className="text-[11px] font-semibold uppercase tracking-wider text-green-500">Rebuy</span>
+
+                                    <div className="flex flex-col gap-1.5">
+                                        {flushRebuyCandidates.length === 0 && (
+                                            <p className="text-[10px] text-muted-foreground/70 py-1">
+                                                Nothing here yet — sell something above first.
+                                            </p>
+                                        )}
+                                        {flushRebuyCandidates.map(({ walletId, wallet, amountSol }) => {
+                                            const entry = flushEntries.find((f) => f.walletId === walletId)
+                                            return (
+                                                <label key={walletId} className="flex items-center gap-2.5 rounded-md border border-border/60 bg-background/50 px-2.5 py-1.5 text-xs cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={flushRebuySelectedIds.has(walletId)}
+                                                        disabled={entry?.subStatus !== 'sold' && entry?.subStatus !== 'error-rebuying'}
+                                                        onChange={(e) => {
+                                                            const next = new Set(flushRebuySelectedIds)
+                                                            e.target.checked ? next.add(walletId) : next.delete(walletId)
+                                                            setFlushRebuySelectedIds(next)
+                                                        }}
+                                                        className="size-4 rounded border border-input accent-green-500 disabled:opacity-40"
+                                                    />
+                                                    <span className="font-mono flex-1 min-w-0 truncate">
+                                                        {wallet?.label && <span className="font-sans font-medium text-foreground">{wallet.label} · </span>}
+                                                        {wallet ? maskPubKey(wallet.public_key) : maskPubKey(walletId)}
+                                                    </span>
+                                                    <span className="tabular-nums text-green-500 font-medium">{amountSol.toFixed(4)} SOL</span>
+                                                    <span className="w-24 text-right shrink-0">
+                                                        {entry?.subStatus === 'sold'           && <span className="text-amber-500">sold</span>}
+                                                        {entry?.subStatus === 'rebuying'       && <span className="text-blue-500">rebuying…</span>}
+                                                        {entry?.subStatus === 'rebought'       && <span className="text-green-500">✓ rebought</span>}
+                                                        {entry?.subStatus === 'error-rebuying' && <span className="text-destructive" title={entry.error}>rebuy failed</span>}
+                                                    </span>
+                                                </label>
+                                            )
+                                        })}
+                                    </div>
+
                                     <button
                                         type="button"
-                                        disabled={flushBusy !== null || flushEntries.filter((e) => e.subStatus === 'sold' && flushSelectedIds.has(e.walletId)).length === 0}
+                                        disabled={flushBusy !== null || flushEntries.filter((e) => (e.subStatus === 'sold' || e.subStatus === 'error-rebuying') && flushRebuySelectedIds.has(e.walletId)).length === 0}
                                         onClick={rebuySelectedForFlush}
-                                        className="px-3 py-1.5 rounded-lg border border-green-500/60 bg-green-500/10 text-green-500 text-xs font-medium hover:bg-green-500/20 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                                        className="self-start px-3 py-1.5 rounded-lg border border-green-500/60 bg-green-500/10 text-green-500 text-xs font-medium hover:bg-green-500/20 transition-colors disabled:opacity-40 disabled:pointer-events-none"
                                     >
-                                        {flushBusy === 'rebuying' ? 'Rebuying…' : 'Rebuy sold wallets back'}
+                                        {flushBusy === 'rebuying' ? 'Rebuying…' : 'Rebuy selected'}
                                     </button>
                                 </div>
                             </div>
@@ -1524,6 +1919,7 @@ export default function StaggeredBuyWizard() {
                                                         entry.status === 'success'   ? 'bg-green-500/5' :
                                                         entry.status === 'error'     ? 'bg-destructive/5' :
                                                         entry.status === 'executing' ? 'bg-blue-500/5' :
+                                                        entry.status === 'retrying'  ? 'bg-blue-500/5' :
                                                         entry.status === 'cancelled' ? 'opacity-40' :
                                                         ''
                                                     }
@@ -1542,10 +1938,10 @@ export default function StaggeredBuyWizard() {
                                                         {entry.status === 'pending' && (
                                                             <span className="text-muted-foreground/50">pending</span>
                                                         )}
-                                                        {entry.status === 'executing' && (
+                                                        {(entry.status === 'executing' || entry.status === 'retrying') && (
                                                             <span className="flex items-center justify-end gap-1.5 text-blue-500">
                                                                 <span className="inline-block size-3 rounded-full border-2 border-blue-300 border-t-blue-500 animate-spin" />
-                                                                executing
+                                                                {entry.status === 'retrying' ? 'retrying' : 'executing'}
                                                             </span>
                                                         )}
                                                         {entry.status === 'success' && (
@@ -1563,9 +1959,29 @@ export default function StaggeredBuyWizard() {
                                                             )
                                                         )}
                                                         {entry.status === 'error' && (
-                                                            <span className="text-destructive" title={entry.error}>
-                                                                ✗ {(entry.error ?? 'failed').slice(0, 40)}
-                                                            </span>
+                                                            <div className="flex flex-col items-end gap-1.5 py-0.5">
+                                                                <span className="text-destructive" title={entry.error}>
+                                                                    ✗ {(entry.error ?? 'failed').slice(0, 40)}
+                                                                </span>
+                                                                <div className="flex items-center gap-1">
+                                                                    <input
+                                                                        type="number" min={0.1} max={50} step={0.1}
+                                                                        placeholder={(slippage * 100).toFixed(1)}
+                                                                        value={retrySlippage[entry.walletId] ?? ''}
+                                                                        onChange={(e) => setRetrySlippage((prev) => ({ ...prev, [entry.walletId]: e.target.value }))}
+                                                                        title="Slippage % for this retry only — blank uses the run's current slippage"
+                                                                        className="w-14 rounded border border-input bg-transparent px-1.5 py-1 text-right text-[10px] outline-none focus-visible:ring-1 focus-visible:ring-ring [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                                                    />
+                                                                    <span className="text-[10px] text-muted-foreground">%</span>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => retryTrade(entry.walletId)}
+                                                                        className="rounded border border-blue-500/60 bg-blue-500/10 px-2 py-1 text-[10px] font-medium text-blue-500 hover:bg-blue-500/20 transition-colors"
+                                                                    >
+                                                                        Retry
+                                                                    </button>
+                                                                </div>
+                                                            </div>
                                                         )}
                                                         {entry.status === 'cancelled' && (
                                                             <span className="text-muted-foreground">skipped</span>
@@ -1593,6 +2009,18 @@ export default function StaggeredBuyWizard() {
                 )}
 
             </WizardShell>
+
+            {/* Same live trade feed as the Launch Builder and standalone Live
+                Trades page — every trade on this mint, not just ours, so a
+                sniper shows up here in real time during execution. */}
+            {step === 2 && tokenMint && (
+                <LaunchTradeFeedPanel
+                    mintAddress={tokenMint}
+                    tokenSymbol={tokenSymbol || tokenName || null}
+                    ourWallets={ourWallets}
+                    ourWalletLabels={ourWalletLabels}
+                />
+            )}
         </div>
     )
 }

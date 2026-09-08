@@ -79,11 +79,6 @@ function randomInRange(min: number, max: number): string {
 // caps at 4 wallets/tx and 5 chunks = 5 tx at worst). Sell isn't chunked
 // there today — this wizard is where it gets fixed.
 const BUNDLE_CHUNK_SIZE = 5
-// Same anti-sniper reasoning as the buy loop: fire every chunk back-to-back
-// with only a dispatch stagger, not a wait for each to land, so a large sell
-// doesn't leave a multi-second window where part of it is already visible
-// on-chain while the rest hasn't fired yet.
-const FIRE_STAGGER_MS = 15
 
 type ChunkStatus = 'pending' | 'running' | 'landed' | 'failed'
 
@@ -454,10 +449,25 @@ export default function BundleTradesWizard() {
     }
 
     // Splits however many wallets are selling into BUNDLE_CHUNK_SIZE-wallet
-    // bundles and fires them all — this is the actual fix for "sell all
-    // fails past the Jito limit": no single /api/trade/bundle/sell call ever
-    // carries more wallets than reliably fits in one bundle, regardless of
-    // how many wallets are selected.
+    // bundles and fires them SEQUENTIALLY — this used to fire every chunk
+    // back-to-back with only a ~15ms dispatch stagger (no wait for landing),
+    // on the theory that a large sell shouldn't leave a multi-second window
+    // where part of it is visible on-chain before the rest fires. That
+    // theory doesn't survive contact with how each chunk is priced: every
+    // /api/trade/bundle/sell call independently reads the CURRENT on-chain
+    // bonding curve and locally simulates only ITS OWN wallets selling
+    // sequentially — it has no idea another chunk is about to land seconds
+    // apart and deplete the same curve further. Whichever chunk actually
+    // landed second (or later) in real block order then hit a curve that had
+    // already moved past what it priced against, tripped its own
+    // min_sol_output/slippage floor, and reverted the WHOLE bundle (Jito
+    // bundles are all-or-nothing) — cascading into every chunk but the first
+    // failing, which is exactly "we can't get any of the bundles out."
+    // /api/trade/bundle/sell already blocks until its bundle actually lands
+    // (QuicknodeJitoExecutor.sendPrebuiltBundle polls to completion before
+    // resolving), so simply awaiting each chunk before firing the next is
+    // enough to make every chunk's curve read see the real post-prior-chunk
+    // state — no extra wait needed beyond that.
     async function executeSellChunks(walletIds: string[]) {
         const chunks: string[][] = []
         for (let i = 0; i < walletIds.length; i += BUNDLE_CHUNK_SIZE) {
@@ -469,12 +479,9 @@ export default function BundleTradesWizard() {
 
         runIdRef.current = await createTradeRun('bundle_sell', tokenMint, tokenSymbol || tokenName || null, chunks.length)
 
-        const firing: Promise<void>[] = []
         for (let i = 0; i < chunks.length; i++) {
-            firing.push(fireSellChunk(rows, i))
-            if (i < chunks.length - 1) await new Promise((r) => setTimeout(r, FIRE_STAGGER_MS))
+            await fireSellChunk(rows, i)
         }
-        await Promise.allSettled(firing)
 
         const failCount = rows.filter((r) => r.status === 'failed').length
         if (failCount > 0) {
@@ -494,12 +501,12 @@ export default function BundleTradesWizard() {
         setExecuting(true)
         setExecuteError(null)
         try {
-            const firing: Promise<void>[] = []
+            // Sequential for the same reason as executeSellChunks above — each
+            // retried chunk's curve read must see the real state left by
+            // whichever chunk (retried or not) landed most recently.
             for (const i of failedIndexes) {
-                firing.push(fireSellChunk(rows, i))
-                await new Promise((r) => setTimeout(r, FIRE_STAGGER_MS))
+                await fireSellChunk(rows, i)
             }
-            await Promise.allSettled(firing)
 
             const failCount = rows.filter((r) => r.status === 'failed').length
             if (failCount > 0) {

@@ -68,8 +68,46 @@ function wait(ms: number) {
 // normal return value instead of a throw. Only the former is worth retrying —
 // retrying a real rejection would just burn attempts on something a new IP
 // can't fix.
-function isProxyNetworkError(err: unknown): boolean {
-  return err instanceof TypeError && err.message === 'fetch failed'
+//
+// A THIRD case looks like a real rejection but isn't: Cloudflare (sitting in
+// front of pump.fun) occasionally edge-blocks a specific exit IP and serves
+// an HTML challenge/redirect page (to static.pump.fun/blocked) instead of
+// ever reaching pump.fun's app — confirmed live 2026-09-07, a 403 with that
+// exact HTML body while other wallets on the same proxy gateway succeeded
+// minutes earlier. That's an IP-reputation problem a fresh rotated exit is
+// likely to fix, so it's treated as retryable via CloudflareBlockError below
+// instead of the generic non-ok-response path.
+class CloudflareBlockError extends Error {
+  constructor(status: number, context: string) {
+    super(`pump.fun edge-blocked this proxy exit during ${context}: HTTP ${status} (Cloudflare challenge page, not pump.fun's API)`)
+    this.name = 'CloudflareBlockError'
+  }
+}
+
+function looksLikeCloudflareBlock(bodyText: string): boolean {
+  const t = bodyText.trimStart()
+  return t.startsWith('<!DOCTYPE') || t.startsWith('<html')
+    || bodyText.includes('static.pump.fun/blocked') || bodyText.includes('challenge-platform')
+}
+
+function isRetryableProxyFailure(err: unknown): boolean {
+  return err instanceof CloudflareBlockError
+    || (err instanceof TypeError && err.message === 'fetch failed')
+}
+
+/** Parses a JSON response body, but throws CloudflareBlockError first if the
+ *  body is actually an HTML edge-block page — callers must not silently
+ *  treat that as "pump.fun returned no useful JSON" and give up. */
+async function readJsonOrThrowIfBlocked(res: ProxyFetchResponse, context: string): Promise<any> {
+  const bodyText = await res.text().catch(() => '')
+  if (looksLikeCloudflareBlock(bodyText)) {
+    throw new CloudflareBlockError(res.status, context)
+  }
+  try {
+    return bodyText ? JSON.parse(bodyText) : null
+  } catch {
+    return null
+  }
 }
 
 const PROXY_MAX_ATTEMPTS = 3
@@ -82,8 +120,9 @@ async function withProxyRetry<T>(fn: (dispatcher: Dispatcher) => Promise<T>): Pr
     try {
       return await fn(getProxyDispatcher())
     } catch (err) {
-      if (!isProxyNetworkError(err) || attempt === PROXY_MAX_ATTEMPTS) throw err
-      console.warn(`[comment-bot] proxy connection failed (attempt ${attempt}/${PROXY_MAX_ATTEMPTS}), retrying with a new exit IP:`, (err as Error).message)
+      if (!isRetryableProxyFailure(err) || attempt === PROXY_MAX_ATTEMPTS) throw err
+      const reason = err instanceof CloudflareBlockError ? 'Cloudflare edge-blocked this exit IP' : 'proxy connection failed'
+      console.warn(`[comment-bot] ${reason} (attempt ${attempt}/${PROXY_MAX_ATTEMPTS}), retrying with a new exit IP:`, (err as Error).message)
       await wait(300 + Math.random() * 500)
     }
   }
@@ -147,6 +186,10 @@ async function loginToPumpFun(keypair: Keypair, dispatcher: Dispatcher): Promise
 
   if (!res.ok) {
     const bodyText = await res.text().catch(() => '')
+    if (looksLikeCloudflareBlock(bodyText)) {
+      console.warn(`[comment-bot] login edge-blocked by Cloudflare: ${res.status}`)
+      throw new CloudflareBlockError(res.status, 'login')
+    }
     console.error(`[comment-bot] login failed: ${res.status} ${bodyText}`)
     throw new Error(`pump.fun login failed: ${res.status} ${bodyText}`)
   }
@@ -167,7 +210,7 @@ async function createCallout(authToken: string, mint: string, text: string, disp
     dispatcher,
   })
 
-  const raw = await res.json().catch(() => null) as { callout?: { calloutId?: string }; message?: string } | null
+  const raw = await readJsonOrThrowIfBlocked(res, 'callout/create') as { callout?: { calloutId?: string }; message?: string } | null
 
   if (!res.ok) {
     const error = `callout/create failed: ${res.status} ${raw?.message ?? ''}`.trim()
@@ -190,7 +233,7 @@ async function createCalloutReply(authToken: string, calloutId: string, text: st
     dispatcher,
   })
 
-  const raw = await res.json().catch(() => null) as { replyId?: string; message?: string } | null
+  const raw = await readJsonOrThrowIfBlocked(res, 'callout/replies') as { replyId?: string; message?: string } | null
 
   if (!res.ok) {
     const error = `callout/${calloutId}/replies failed: ${res.status} ${raw?.message ?? ''}`.trim()
@@ -220,7 +263,7 @@ async function fetchOwnCalloutId(authToken: string, mint: string, dispatcher: Di
     headers: { ...BROWSER_HEADERS, Cookie: `auth_token=${authToken}` },
     dispatcher,
   })
-  const raw = await res.json().catch(() => null) as {
+  const raw = await readJsonOrThrowIfBlocked(res, 'callout/eligibility') as {
     reason?: { type?: string; existingCallout?: { calloutId?: string; thesis?: string } }
   } | null
 

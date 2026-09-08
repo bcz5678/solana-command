@@ -90,7 +90,14 @@ export default function LiveTradesPage() {
         setPreviewLoading(true)
         setPreviewError('')
         setPreview(null)
-        setShowFeed(false)
+        // Auto-show, matching the Launch Builder's version of this same panel
+        // (which mounts automatically, not behind a click) — the feed's own
+        // refresh mechanism is identical either way (pure WSS push, see
+        // launch-trade-feed-panel.tsx), but requiring an extra click here
+        // delayed the watchMint() subscription itself, so this page's feed
+        // started from an empty history later than launch-builder's did,
+        // which read as "slower" even though nothing about its speed differs.
+        setShowFeed(true)
         try {
             const res = await fetch(`/api/pumpfun/token-info?mintAddress=${encodeURIComponent(mint)}`)
             if (!res.ok) {

@@ -66,6 +66,28 @@ function Dash() {
     return <span className="block w-2.5 h-0.5 bg-white rounded" />
 }
 
+// Randomized split — same S/M/L tiering idea as the Fund Launch Wallets
+// page's Tiered Split Funding tool (transfer-form.tsx), but wider ranges:
+// that tool has to stay close to a 1%-of-supply target per wallet, this one
+// has no cap to respect, so it can spread amounts much further apart for
+// more convincing randomization.
+const RANDOM_SPLIT_TIER_RANGE = {
+    small:  { min: 0.3, max: 0.7 },
+    medium: { min: 0.8, max: 1.4 },
+    large:  { min: 1.5, max: 2.8 },
+} as const
+type RandomSplitTier = keyof typeof RANDOM_SPLIT_TIER_RANGE
+
+function assignRandomSplitTiers(count: number): RandomSplitTier[] {
+    const tiers: RandomSplitTier[] = ['small', 'medium', 'large']
+    const assignment = Array.from({ length: count }, (_, i) => tiers[i % 3])
+    for (let i = assignment.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        ;[assignment[i], assignment[j]] = [assignment[j], assignment[i]]
+    }
+    return assignment
+}
+
 export default function FundOneToManyForm() {
     const [wallets, setWallets]                   = useState<WalletRecord[]>([])
     const [walletTypes, setWalletTypes]           = useState<WalletTypeRow[]>([])
@@ -81,6 +103,8 @@ export default function FundOneToManyForm() {
     const [transfersDone, setTransfersDone]       = useState(false)
     const [validationError, setValidationError]   = useState('')
     const [copiedId, setCopiedId]                  = useState<string | null>(null)
+    const [randomSplitTotalSol, setRandomSplitTotalSol] = useState('')
+    const [randomSplitMsg, setRandomSplitMsg]           = useState('')
 
     useEffect(() => {
         fetch('/api/wallets/explorer')
@@ -188,6 +212,47 @@ export default function FundOneToManyForm() {
         setSelectedReceivers(next)
     }
 
+    // Splits a total SOL amount across whichever receiver wallets are
+    // already checked below, sized with the wide S/M/L variance above
+    // instead of an even split, so amounts don't look uniform or ramped.
+    function applyRandomSplit() {
+        setRandomSplitMsg('')
+
+        const totalSol = parseFloat(randomSplitTotalSol)
+        if (!totalSol || totalSol <= 0) {
+            setRandomSplitMsg('Enter a total SOL amount greater than 0.')
+            return
+        }
+
+        const candidates = visibleWallets.filter((w) => selectedReceivers.has(w.id))
+        if (candidates.length === 0) {
+            setRandomSplitMsg('No receiver wallets are checked below — check the ones you want funded, then Randomize Split.')
+            return
+        }
+
+        const mean = totalSol / candidates.length
+        const tiers = assignRandomSplitTiers(candidates.length)
+        const rawWeights = tiers.map((t) => {
+            const { min, max } = RANDOM_SPLIT_TIER_RANGE[t]
+            return mean * (min + Math.random() * (max - min))
+        })
+        const rawSum = rawWeights.reduce((a, b) => a + b, 0)
+        const scale  = totalSol / rawSum
+        const amounts = rawWeights.map((w) => w * scale)
+
+        setReceiverAmounts(() => {
+            const next: Record<string, string> = {}
+            candidates.forEach((w, i) => { next[w.id] = amounts[i].toFixed(9) })
+            return next
+        })
+
+        const tierCounts = tiers.reduce((acc, t) => { acc[t] = (acc[t] ?? 0) + 1; return acc }, {} as Record<RandomSplitTier, number>)
+        setRandomSplitMsg(
+            `Split across ${candidates.length} checked wallet${candidates.length !== 1 ? 's' : ''} — ${totalSol.toFixed(4)} SOL total` +
+            ` — ${tierCounts.small ?? 0} small / ${tierCounts.medium ?? 0} medium / ${tierCounts.large ?? 0} large.`
+        )
+    }
+
     function handleSubmit() {
         setValidationError('')
         if (!senderWalletId) { setValidationError('Select a sender wallet.'); return }
@@ -217,6 +282,8 @@ export default function FundOneToManyForm() {
         setActiveTransfer(null)
         setReceiverStatuses({})
         setTransfersDone(false)
+        setRandomSplitTotalSol('')
+        setRandomSplitMsg('')
     }
 
     async function executeTransfers() {
@@ -430,6 +497,46 @@ export default function FundOneToManyForm() {
                             ))}
                         </SelectContent>
                     </Select>
+                </div>
+
+                {/* Randomized split */}
+                <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/20 p-4">
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                        <div className="flex flex-col gap-0.5">
+                            <p className="text-sm font-medium">Randomized Split</p>
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                                Splits a total SOL amount across whichever receiver wallets you&apos;ve checked below —
+                                e.g. 30 SOL into 10 wallets — using a wide Small/Medium/Large spread rather than an
+                                even split, so amounts don&apos;t look uniform. Totals still sum exactly to the amount entered.
+                            </p>
+                        </div>
+                        <div className="flex items-end gap-2 shrink-0">
+                            <div className="flex flex-col gap-1">
+                                <label htmlFor="random-split-total" className="text-xs text-muted-foreground whitespace-nowrap">Total SOL</label>
+                                <input
+                                    id="random-split-total"
+                                    type="number"
+                                    min={0}
+                                    step={0.0001}
+                                    placeholder="30"
+                                    value={randomSplitTotalSol}
+                                    onChange={(e) => setRandomSplitTotalSol(e.target.value)}
+                                    className="w-24 rounded border border-input bg-background px-2 py-1 text-right text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                />
+                            </div>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={applyRandomSplit}
+                            >
+                                Randomize Split
+                            </Button>
+                        </div>
+                    </div>
+                    {randomSplitMsg && (
+                        <p className="text-xs text-muted-foreground">{randomSplitMsg}</p>
+                    )}
                 </div>
 
                 {/* Receiver table */}

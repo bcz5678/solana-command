@@ -42,7 +42,8 @@ import {
     PackagePlus,
     Radio,
     MessageSquare,
-    Activity
+    Activity,
+    TrendingUp
 } from "lucide-react"
 import { RelayStatusIndicator } from "@/components/wss/relay-status-indicator"
 
@@ -85,6 +86,17 @@ export function AppSidebar() {
                   <Link href="/protected/wallet/explorer">
                     <List />
                     <span>Explorer</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  className="min-w-8 bg-transparent text-sidebar-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
+                  asChild
+                >
+                  <Link href="/protected/wallet/pnl">
+                    <TrendingUp />
+                    <span>PnL</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

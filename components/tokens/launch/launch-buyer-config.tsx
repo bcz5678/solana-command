@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo, Fragment } from 'react'
 import { LaunchType } from '@/components/tokens/launch/types'
 import { LaunchConfig } from '@/components/tokens/launch/launch-config-class';
-import { lamportsBNToSolDisplay, lamportsStringToBN } from '@/lib/lamports';
+import { lamportsBNToSolDisplay, lamportsStringToBN, solStringToLamports } from '@/lib/lamports';
+import { estimateDevBuyFee, computeMaxDevBuyLamports } from '@/lib/wallet/bonding-curve-funding';
 import { WalletRecord } from '@/lib/types/wallet';
 import BN from 'bn.js';
 
@@ -103,6 +104,42 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
         setBuyAmounts((prev) => ({ ...prev, [walletId]: newAmount }))
     }
 
+    // Fills a wallet's buy amount with the largest input its own balance can
+    // safely cover once pump.fun's protocol + creator fee is added on top —
+    // this is exactly the gap that made a too-tight dev buy revert the
+    // ENTIRE launch transaction (including the token creation earlier in the
+    // same tx) once the fee pushed the real cost past the wallet's balance.
+    // The underlying fee math prices against the curve's FRESH/initial
+    // state, which is exact for the dev wallet (always the curve's very
+    // first buy) but only an approximation for other bundle wallets, whose
+    // buys execute after the dev buy (and each other) has already moved the
+    // curve slightly — still meaningfully better than an unguarded input,
+    // just not curve-position-exact for anyone after the first buyer.
+    function setMaxBuy(wallet: WalletRecord, isCreator: boolean) {
+        if (!wallet.solana_balance_in_lamports) return
+        const maxLamports = computeMaxDevBuyLamports(wallet.solana_balance_in_lamports, { isCreator })
+        setBuyAmount(wallet.id, lamportsBNToSolDisplay(maxLamports))
+    }
+
+    function feeEstimateFor(walletId: string, isCreator: boolean) {
+        const raw = buyAmounts[walletId]
+        if (!raw) return null
+        let lamports: BN
+        try { lamports = solStringToLamports(raw) } catch { return null }
+        if (lamports.isZero()) return null
+        return estimateDevBuyFee(lamports, { isCreator })
+    }
+
+    // Same reserve computeMaxDevBuyLamports itself holds back — surfaced here
+    // as a live "this will fail" warning the moment the total exceeds what's
+    // actually available, instead of only finding out after submitting.
+    function exceedsBalance(estimate: ReturnType<typeof estimateDevBuyFee> | null, wallet: WalletRecord | null | undefined) {
+        return !!(estimate && wallet?.solana_balance_in_lamports && estimate.totalCostLamports.gt(wallet.solana_balance_in_lamports))
+    }
+
+    const devBuyFeeEstimate  = devWallet ? feeEstimateFor(devWallet.id, true) : null
+    const devBuyExceedsBalance = exceedsBalance(devBuyFeeEstimate, devWallet)
+
     function clearAll() {
         setBuyAmounts({})
         onBuyInputReset()
@@ -188,15 +225,39 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
                                 <td className="px-3 py-2.5 text-right text-muted-foreground">—</td>
                                 <td className="px-3 py-2.5 text-right text-muted-foreground">—</td>
                                 <td className="px-3 py-2.5 text-right">
-                                    <input
-                                        type="number"
-                                        min={0}
-                                        step={0.000000001}
-                                        placeholder="0.00"
-                                        value={devWallet.id ? (buyAmounts[devWallet.id] ?? '') : ''}
-                                        onChange={(e) => setBuyAmount(devWallet.id, e.target.value)}
-                                        className="w-24 rounded border border-input bg-transparent px-2 py-1 text-right text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                    />
+                                    <div className="flex flex-col items-end gap-1">
+                                        <span className="inline-flex items-center gap-1">
+                                            <input
+                                                type="number"
+                                                min={0}
+                                                step={0.000000001}
+                                                placeholder="0.00"
+                                                value={devWallet.id ? (buyAmounts[devWallet.id] ?? '') : ''}
+                                                onChange={(e) => setBuyAmount(devWallet.id, e.target.value)}
+                                                className="w-24 rounded border border-input bg-transparent px-2 py-1 text-right text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            />
+                                            {devWallet.solana_balance_in_lamports && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setMaxBuy(devWallet, true)}
+                                                    title="Fill with the largest buy this wallet's balance can cover, including pump.fun's fee"
+                                                    className="shrink-0 rounded border border-border px-1.5 py-1 text-[10px] font-medium text-muted-foreground hover:text-blue-500 hover:border-blue-500 transition-colors"
+                                                >
+                                                    Max
+                                                </button>
+                                            )}
+                                        </span>
+                                        {devBuyFeeEstimate && (
+                                            <span className={[
+                                                'text-[10px] whitespace-nowrap',
+                                                devBuyExceedsBalance ? 'text-destructive font-medium' : 'text-muted-foreground',
+                                            ].join(' ')}>
+                                                +{lamportsBNToSolDisplay(devBuyFeeEstimate.feeLamports)} fee ({(devBuyFeeEstimate.totalFeeBps / 100).toFixed(2)}%)
+                                                · total {lamportsBNToSolDisplay(devBuyFeeEstimate.totalCostLamports)} SOL
+                                                {devBuyExceedsBalance ? ' — exceeds balance' : ''}
+                                            </span>
+                                        )}
+                                    </div>
                                 </td>
                             </tr>
                         )}
@@ -215,6 +276,8 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
                                 {groupWallets.map((wallet) => {
                                     rowIndex++
                                     const n = rowIndex
+                                    const feeEstimate = feeEstimateFor(wallet.id, false)
+                                    const overBalance  = exceedsBalance(feeEstimate, wallet)
                                     return (
                                         <tr
                                             key={wallet.id}
@@ -234,15 +297,38 @@ export default function LaunchBuyerConfig({ launchConfig, onBuyInputChange, onBu
                                             <td className="px-3 py-2.5 text-right text-muted-foreground text-xs">—</td>
                                             <td className="px-3 py-2.5 text-right text-muted-foreground text-xs">—</td>
                                             <td className="px-3 py-2.5 text-right">
-                                                <input
-                                                    type="number"
-                                                    min={0}
-                                                    step={0.000000001}
-                                                    placeholder="0.00"
-                                                    value={buyAmounts[wallet.id] ?? ''}
-                                                    onChange={(e) => setBuyAmount(wallet.id, e.target.value)}
-                                                    className="w-24 rounded border border-input bg-transparent px-2 py-1 text-right text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                                />
+                                                <div className="flex flex-col items-end gap-1">
+                                                    <span className="inline-flex items-center gap-1">
+                                                        <input
+                                                            type="number"
+                                                            min={0}
+                                                            step={0.000000001}
+                                                            placeholder="0.00"
+                                                            value={buyAmounts[wallet.id] ?? ''}
+                                                            onChange={(e) => setBuyAmount(wallet.id, e.target.value)}
+                                                            className="w-24 rounded border border-input bg-transparent px-2 py-1 text-right text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                        />
+                                                        {wallet.solana_balance_in_lamports && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setMaxBuy(wallet, false)}
+                                                                title="Fill with the largest buy this wallet's balance can cover, including pump.fun's fee (approximate — priced against a fresh curve, not this wallet's actual position in the bundle)"
+                                                                className="shrink-0 rounded border border-border px-1.5 py-1 text-[10px] font-medium text-muted-foreground hover:text-blue-500 hover:border-blue-500 transition-colors"
+                                                            >
+                                                                Max
+                                                            </button>
+                                                        )}
+                                                    </span>
+                                                    {feeEstimate && (
+                                                        <span className={[
+                                                            'text-[10px] whitespace-nowrap',
+                                                            overBalance ? 'text-destructive font-medium' : 'text-muted-foreground',
+                                                        ].join(' ')}>
+                                                            +{lamportsBNToSolDisplay(feeEstimate.feeLamports)} fee
+                                                            {overBalance ? ' — exceeds balance' : ''}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </td>
                                         </tr>
                                     )

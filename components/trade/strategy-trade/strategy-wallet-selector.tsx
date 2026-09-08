@@ -1,8 +1,24 @@
 'use client'
 
 import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
+import BN from 'bn.js'
 import { WalletRecord } from '@/lib/types/wallet'
 import { lamportsBNToSolDisplay, lamportsStringToBN } from '@/lib/lamports'
+
+// Reserve for Max — double the caller's own TX_FEE_BUFFER (10_000), not
+// just matching it. Matching it exactly leaves zero margin: the caller's
+// own pre-flight check does required = Math.ceil(buyLamports*(1+slippage))
+// + TX_FEE_BUFFER, and a zero-margin buy amount makes required land exactly
+// on the wallet's balance — any float rounding noise then tips `required`
+// one lamport over, failing the check for almost every wallet. The extra
+// 10_000 lamports of pure headroom absorbs that with room to spare.
+const MAX_RESERVE_LAMPORTS = new BN(20_000)
+// Scales slippage (a fraction like 0.05) into an integer numerator/denominator
+// pair so the whole Max calculation stays in BN/integer lamport arithmetic —
+// lamportsBNToSolNumber is documented "never for arithmetic" for exactly
+// this reason: float SOL math re-introduces the same boundary problem the
+// reserve above is trying to eliminate.
+const SLIPPAGE_SCALE = 1_000_000
 
 type WalletTypeRow = { id: string; name: string }
 
@@ -23,6 +39,8 @@ type Props = {
     errorIds?: Set<string>
     tradeType?: 'buy' | 'sell'
     tokenMint?: string
+    /** Used only to size the "Max" button's buy amount so it clears the caller's own slippage + fee check. */
+    slippage?: number
     onBalancesLoaded?: (balances: Record<string, string>, decimals: number) => void
     hideSupplyColumn?:      boolean
     hideTradeAmountColumn?: boolean
@@ -54,6 +72,7 @@ export default function StrategyWalletSelector({
     errorIds,
     tradeType = 'buy',
     tokenMint,
+    slippage,
     onBalancesLoaded,
     hideSupplyColumn      = false,
     hideTradeAmountColumn = false,
@@ -219,6 +238,32 @@ export default function StrategyWalletSelector({
         if (!controlledTradeAmounts) setLocalTradeAmounts((prev) => ({ ...prev, [walletId]: amount }))
     }
 
+    // Fills the buy amount with as much of the wallet's SOL as its own
+    // slippage + fee buffer will actually allow — not the literal full
+    // balance, which would always fail the caller's own pre-flight check
+    // (spending 100% leaves nothing for slippage or the tx fee).
+    function setMaxTradeAmount(wallet: WalletRecord) {
+        const balance = wallet.solana_balance_in_lamports
+        if (!balance) return
+        const afterReserve = balance.sub(MAX_RESERVE_LAMPORTS)
+        if (afterReserve.lten(0)) { setTradeAmount(wallet.id, '0'); return }
+
+        const slippageScaled = new BN(Math.max(0, Math.round((slippage ?? 0) * SLIPPAGE_SCALE)))
+        const denom = new BN(SLIPPAGE_SCALE).add(slippageScaled)   // SLIPPAGE_SCALE * (1 + slippage)
+        // Floor division (BN.div truncates) — the result can only ever need
+        // slightly LESS than what was reserved, never more, so it always
+        // clears the caller's own ceil()-rounded check with room to spare.
+        const maxLamports = afterReserve.mul(new BN(SLIPPAGE_SCALE)).div(denom)
+        setTradeAmount(wallet.id, lamportsBNToSolDisplay(maxLamports))
+    }
+
+    // Same as setMaxTradeAmount, applied to every wallet in a group at once —
+    // doesn't touch selection, matching the per-row Max button's own
+    // behavior (amount and selection are independent).
+    function setMaxTradeAmountForGroup(groupWallets: WalletRecord[]) {
+        groupWallets.forEach((w) => { if (w.solana_balance_in_lamports) setMaxTradeAmount(w) })
+    }
+
     function clearTradeAmounts() {
         setLocalTradeAmounts({})
         onTradeAmountReset()
@@ -247,6 +292,16 @@ export default function StrategyWalletSelector({
                         <span className="normal-case tracking-normal font-normal opacity-60">
                             ({group.wallets.length})
                         </span>
+                        {tradeType === 'buy' && (
+                            <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); setMaxTradeAmountForGroup(group.wallets) }}
+                                title="Fill every wallet in this group with its full SOL balance, minus slippage + fee buffer"
+                                className="ml-auto shrink-0 normal-case tracking-normal font-medium rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-blue-500 hover:border-blue-500 transition-colors"
+                            >
+                                Max group
+                            </button>
+                        )}
                     </span>
                 </td>
                 <td className="px-3 py-2 text-right">
@@ -308,15 +363,27 @@ export default function StrategyWalletSelector({
                 {!hideSupplyColumn && <td className="px-3 py-2.5 text-right text-muted-foreground text-xs">—</td>}
                 {!hideTradeAmountColumn && (
                     <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                        <input
-                            type="number"
-                            min={0}
-                            step={0.000000001}
-                            placeholder="0.00"
-                            value={tradeAmounts[wallet.id] ?? ''}
-                            onChange={(e) => setTradeAmount(wallet.id, e.target.value)}
-                            className="w-24 rounded border border-input bg-transparent px-2 py-1 text-right text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        />
+                        <span className="inline-flex items-center gap-1">
+                            <input
+                                type="number"
+                                min={0}
+                                step={0.000000001}
+                                placeholder="0.00"
+                                value={tradeAmounts[wallet.id] ?? ''}
+                                onChange={(e) => setTradeAmount(wallet.id, e.target.value)}
+                                className="w-24 rounded border border-input bg-transparent px-2 py-1 text-right text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            />
+                            {tradeType === 'buy' && wallet.solana_balance_in_lamports && (
+                                <button
+                                    type="button"
+                                    onClick={() => setMaxTradeAmount(wallet)}
+                                    title="Fill with this wallet's full SOL balance, minus slippage + fee buffer"
+                                    className="shrink-0 rounded border border-border px-1.5 py-1 text-[10px] font-medium text-muted-foreground hover:text-blue-500 hover:border-blue-500 transition-colors"
+                                >
+                                    Max
+                                </button>
+                            )}
+                        </span>
                     </td>
                 )}
                 <td className="px-3 py-2.5 text-right">
@@ -400,6 +467,15 @@ export default function StrategyWalletSelector({
                                 <th className="px-3 py-2.5 text-right">
                                     <div className="flex items-center justify-end gap-2">
                                         {tradeType === 'sell' ? 'Token to Trade' : 'SOL to Trade'}
+                                        {tradeType === 'buy' && (
+                                            <button
+                                                onClick={() => setMaxTradeAmountForGroup(visibleWallets)}
+                                                title="Fill every visible wallet with its full SOL balance, minus slippage + fee buffer"
+                                                className="normal-case tracking-normal font-normal text-[10px] border border-border rounded px-1.5 py-0.5 text-muted-foreground hover:text-blue-500 hover:border-blue-500 transition-colors"
+                                            >
+                                                Max all
+                                            </button>
+                                        )}
                                         <button
                                             onClick={clearTradeAmounts}
                                             className="normal-case tracking-normal font-normal text-[10px] border border-border rounded px-1.5 py-0.5 text-muted-foreground hover:text-destructive hover:border-destructive transition-colors"
@@ -443,7 +519,19 @@ export default function StrategyWalletSelector({
                                 {ungrouped.length > 0 && walletGroups.length > 0 && (
                                     <tr className="border-b bg-muted/30">
                                         <td colSpan={fullRowColSpan} className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">
-                                            Ungrouped
+                                            <span className="flex items-center gap-2">
+                                                Ungrouped
+                                                {tradeType === 'buy' && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setMaxTradeAmountForGroup(ungrouped)}
+                                                        title="Fill every ungrouped wallet with its full SOL balance, minus slippage + fee buffer"
+                                                        className="ml-auto shrink-0 normal-case tracking-normal font-medium rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-blue-500 hover:border-blue-500 transition-colors"
+                                                    >
+                                                        Max group
+                                                    </button>
+                                                )}
+                                            </span>
                                         </td>
                                     </tr>
                                 )}
