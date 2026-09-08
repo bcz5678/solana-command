@@ -14,7 +14,14 @@ export const dynamic    = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function POST(request: Request) {
-    let body: { walletId: string; mintAddress: string; solAmountLamports: string; slippage: number; dryRun?: boolean; autoComment?: AutoCommentOptions }
+    let body: {
+        walletId: string; mintAddress: string; solAmountLamports: string; slippage: number
+        dryRun?: boolean; autoComment?: AutoCommentOptions
+        /** Submit this wallet's buy as its own solo Jito bundle (MEV protection) instead of a plain send. */
+        useJito?: boolean
+        /** Jito tip in lamports — required when useJito is true. */
+        jitoTipLamports?: string
+    }
     try {
         body = await request.json()
     } catch {
@@ -24,9 +31,15 @@ export async function POST(request: Request) {
         })
     }
 
-    const { walletId, mintAddress, solAmountLamports, slippage, dryRun, autoComment } = body
+    const { walletId, mintAddress, solAmountLamports, slippage, dryRun, autoComment, useJito, jitoTipLamports } = body
     if (!walletId || !mintAddress || !solAmountLamports) {
         return new Response(JSON.stringify({ error: 'walletId, mintAddress, and solAmountLamports are required.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+        })
+    }
+    if (useJito && !jitoTipLamports) {
+        return new Response(JSON.stringify({ error: 'jitoTipLamports is required when useJito is true.' }), {
             status: 400,
             headers: { 'Content-Type': 'application/json' },
         })
@@ -40,7 +53,9 @@ export async function POST(request: Request) {
         const mint       = new PublicKey(mintAddress)
         const solAmount  = new BN(solAmountLamports)
 
-        const result = await executor.buy(mint, solAmount, slippage)
+        const result = useJito
+            ? await executor.buyViaJito(mint, solAmount, slippage, Number(jitoTipLamports))
+            : await executor.buy(mint, solAmount, slippage)
 
         // ── Log trade (dry runs never touch the chain — skip logging those) ──
         if (!dryRun) {

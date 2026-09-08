@@ -131,6 +131,48 @@ export interface BundleResult {
     signerAddresses: string[];
 }
 
+// ─── Transient-failure retry ──────────────────────────────────────────────────
+//
+// getTipAccount()/simulateBundle()/sendBundle() were each a single unretried
+// .send() call — any transient network hiccup on the Lil Jito RPC surface
+// (confirmed live 2026-09-07: every bundle-sell attempt in a ~1hr window
+// failed with a bare undici "fetch failed" while the SAME endpoint's regular
+// Connection-based calls — getLatestBlockhash, sendTransaction, etc., used by
+// every non-bundle trade route — kept succeeding throughout) turned into an
+// immediate, total failure with nothing to retry it. Same isProxyNetworkError
+// classification comment-bot.ts already uses for its proxy calls: this is
+// specifically a dead/failed connection attempt, not an application-level
+// rejection (bad params, insufficient funds, etc.) — those still throw
+// immediately, unretried, since a fresh attempt can't fix a real rejection.
+const JITO_RPC_MAX_ATTEMPTS = 3;
+
+function isNetworkFetchFailure(err: unknown): boolean {
+    return err instanceof TypeError && err.message === 'fetch failed';
+}
+
+async function withJitoRpcRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
+    for (let attempt = 1; attempt <= JITO_RPC_MAX_ATTEMPTS; attempt++) {
+        try {
+            return await fn();
+        } catch (err) {
+            if (!isNetworkFetchFailure(err)) throw err;
+            if (attempt === JITO_RPC_MAX_ATTEMPTS) {
+                // Wrap with which call this was — the bare error is just
+                // "fetch failed" with no indication of where, which is exactly
+                // what made the 2026-09-07 incident hard to diagnose from
+                // trade_logs alone (every failed row said the same generic
+                // "fetch failed" regardless of which of ~10 network calls in
+                // the route actually died).
+                throw new Error(`${label}: fetch failed (after ${JITO_RPC_MAX_ATTEMPTS} attempts)`);
+            }
+            console.warn(`[QuicknodeJitoExecutor] ${label}: network fetch failed (attempt ${attempt}/${JITO_RPC_MAX_ATTEMPTS}), retrying…`);
+            await new Promise((r) => setTimeout(r, 300 + Math.random() * 500));
+        }
+    }
+    // Unreachable — the loop above always returns or throws.
+    throw new Error(`withJitoRpcRetry: exhausted attempts for ${label}`);
+}
+
 // ─── Internal RPC factory ────────────────────────────────────────────────────
 
 function createLilJitRpc(endpoint: string): Rpc<LilJitAddon> {
@@ -210,7 +252,7 @@ export class QuicknodeJitoExecutor {
      * their own transactions (e.g. packed multi-wallet bundles via sendPrebuiltBundle).
      */
     async getTipAccount(): Promise<Address> {
-        const tipAccounts = await this.lilJitRpc.getTipAccounts().send();
+        const tipAccounts = await withJitoRpcRetry('getTipAccounts', () => this.lilJitRpc.getTipAccounts().send());
         if (tipAccounts.length === 0) throw new Error('Lil Jito returned no tip accounts');
         return tipAccounts[Math.floor(Math.random() * tipAccounts.length)];
     }
@@ -230,7 +272,7 @@ export class QuicknodeJitoExecutor {
         if (encodedTransactions.length > 5) throw new Error('Jito bundles support at most 5 transactions');
 
         console.log(`[QuicknodeJitoExecutor] simulating prebuilt bundle (${encodedTransactions.length} txs)`);
-        const simulation = await this.lilJitRpc.simulateBundle([encodedTransactions]).send();
+        const simulation = await withJitoRpcRetry('simulateBundle', () => this.lilJitRpc.simulateBundle([encodedTransactions]).send());
         this.validateSimulation(simulation);
         console.log(`[QuicknodeJitoExecutor] simulation succeeded`);
 
@@ -238,7 +280,11 @@ export class QuicknodeJitoExecutor {
             return { bundleId: '', simulated: true, signerAddresses };
         }
 
-        const bundleId = await this.lilJitRpc.sendBundle(encodedTransactions).send();
+        // Safe to retry on a bare network failure — these transactions are
+        // already signed against a fixed blockhash, so resubmitting the exact
+        // same bundle after a dropped response (not a dropped submission) is
+        // just a duplicate of the same signatures, not a double-spend.
+        const bundleId = await withJitoRpcRetry('sendBundle', () => this.lilJitRpc.sendBundle(encodedTransactions).send());
         console.log(`[QuicknodeJitoExecutor] bundle submitted: ${bundleId}`);
 
         await this.pollBundleStatus(bundleId);

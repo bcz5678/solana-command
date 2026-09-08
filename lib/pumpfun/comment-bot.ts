@@ -30,31 +30,48 @@
 //      reply.nonAuthorVerdict — replying to your own callout stays eligible
 //      even after your position has closed, unlike posting a new one).
 //
-// Every request to pump.fun (login + the actual post) is routed through
-// PUMPFUN_COMMENT_PROXY — a rotating residential proxy, so different wallets'
-// callouts don't all originate from this server's own IP. Required, not
-// best-effort: a missing env var fails the call rather than silently posting
-// direct. login and its paired post/reply/lookup share ONE ProxyAgent (one
-// exit IP) per wallet action — the auth cookie is tied to the login's
-// apparent identity, so switching IPs mid-flow would look more suspicious,
-// not less. Separate top-level calls (different wallets, or the same wallet
-// again later) each get a fresh ProxyAgent, which is what actually rotates
-// the IP — the gateway assigns a new exit per connection.
+// Every request to pump.fun (login + the actual post) is routed through a
+// proxy, so different wallets' callouts don't all originate from this
+// server's own IP. Required, not best-effort: no proxy available fails the
+// call rather than silently posting direct. login and its paired post/reply/
+// lookup share ONE dispatcher (one exit IP) per wallet action — the auth
+// cookie is tied to the login's apparent identity, so switching IPs mid-flow
+// would look more suspicious, not less. Separate top-level calls (different
+// wallets, or the same wallet again later) each get the NEXT pool entry,
+// which is what actually rotates the IP.
+//
+// Primary source is lib/proxies.txt (gitignored, real credentials) via
+// lib/pumpfun/proxy-pool.ts — a rotating pool of IPRoyal sticky sessions,
+// swapped in 2026-09-08 after ProxyCheap's single rotating gateway
+// (PUMPFUN_COMMENT_PROXY, still supported as a fallback if the pool file
+// isn't provisioned in a given environment) was confirmed hitting Cloudflare's
+// interstitial on pump.fun roughly half the time in a live test, vs. 19/20
+// clean for IPRoyal in the same test.
 
 import { Keypair } from '@solana/web3.js'
 import nacl from 'tweetnacl'
 import bs58 from 'bs58'
 import { fetch as proxyFetch, ProxyAgent, type Dispatcher, type Response as ProxyFetchResponse } from 'undici'
 import { getWalletKeypairById } from '@/lib/vault/get-wallet-by-id'
+import { getNextProxyUrl } from '@/lib/pumpfun/proxy-pool'
 
 const PUMPFUN_API = 'https://frontend-api-v3.pump.fun'
 
 function getProxyDispatcher(): Dispatcher {
-  const proxyUrl = process.env.PUMPFUN_COMMENT_PROXY
-  if (!proxyUrl) {
-    throw new Error('PUMPFUN_COMMENT_PROXY is not set — refusing to post pump.fun comments without proxying through it')
+  try {
+    return new ProxyAgent(getNextProxyUrl())
+  } catch (poolErr) {
+    // lib/proxies.txt missing/empty in this environment — fall back to the
+    // single ProxyCheap gateway rather than hard-failing every comment.
+    const fallbackUrl = process.env.PUMPFUN_COMMENT_PROXY
+    if (!fallbackUrl) {
+      throw new Error(
+        `No proxy available for pump.fun comments — proxy pool: ${(poolErr as Error).message}; ` +
+        `PUMPFUN_COMMENT_PROXY fallback is also not set`
+      )
+    }
+    return new ProxyAgent(fallbackUrl)
   }
-  return new ProxyAgent(proxyUrl)
 }
 
 function wait(ms: number) {

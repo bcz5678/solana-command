@@ -64,6 +64,32 @@ export class Executor {
       : this.genericSwap.buy(resolved, solAmount, slippage);
   }
 
+  /**
+   * Same as buy(), but submitted as its own solo Jito bundle for MEV
+   * protection — bonding-curve mints only (no Jito wiring exists yet for the
+   * generic/Jupiter swap path, and a graduated mint doesn't have the same
+   * front-running exposure this exists to address). Errors clearly rather
+   * than silently falling back to a plain send if the curve's graduated.
+   */
+  async buyViaJito(mint: PublicKey, solAmount: BN, slippage: number | undefined, tipLamports: number): Promise<ExecuteResult> {
+    let resolved: PublicKey;
+    try {
+      resolved = await resolveTradeableMint(this.connection, mint);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      return { success: false, error, solAmount, tokenAmount: ZERO, tokensRemaining: ZERO, price: 0 };
+    }
+
+    if (!(await this.pumpfun.isBondingCurveActive(resolved))) {
+      return {
+        success: false,
+        error: 'MEV-protected (Jito) buy is only available for an active bonding curve — this mint has graduated',
+        solAmount, tokenAmount: ZERO, tokensRemaining: ZERO, price: 0,
+      };
+    }
+    return this.pumpfun.buyViaJito(resolved, solAmount, slippage, tipLamports);
+  }
+
   /** Sell `mint` — bonding curve if active, otherwise a generic (Jupiter) swap. */
   async sell(mint: PublicKey, tokenAmount?: BN, slippage?: number): Promise<ExecuteResult> {
     let resolved: PublicKey;

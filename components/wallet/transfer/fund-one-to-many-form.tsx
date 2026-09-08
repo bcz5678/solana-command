@@ -333,6 +333,36 @@ export default function FundOneToManyForm() {
         setTransfersDone(true)
     }
 
+    // Re-fires ONE receiver's transfer in place — same route, a single-item
+    // receivers array. Keyed by walletId so it can't disturb any other
+    // row's status, including another retry running concurrently.
+    async function retryReceiver(walletId: string) {
+        if (!activeTransfer) return
+        const receiver = activeTransfer.receivers.find((r) => r.walletId === walletId)
+        if (!receiver) return
+        setReceiverStatuses((prev) => ({ ...prev, [walletId]: 'loading' }))
+
+        let success = false
+        try {
+            const res = await fetch('/api/wallet/transfer/fund', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    senderWalletId: activeTransfer.senderWalletId,
+                    receivers: [{ walletId: receiver.walletId, publicKey: receiver.publicKey, amountSOL: parseFloat(receiver.amount) }],
+                }),
+            })
+            if (res.ok) {
+                const { results } = await res.json()
+                success = results?.[0]?.success ?? false
+            }
+        } catch {
+            success = false
+        }
+
+        setReceiverStatuses((prev) => ({ ...prev, [walletId]: success ? 'success' : 'error' }))
+    }
+
     function copyKey(e: React.MouseEvent, key: string, id: string) {
         e.stopPropagation()
         navigator.clipboard.writeText(key)
@@ -749,6 +779,16 @@ export default function FundOneToManyForm() {
                                     </div>
 
                                     <span className="text-xs font-semibold tabular-nums shrink-0">{r.amount} SOL</span>
+                                    {status === 'error' && (
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-6 shrink-0 px-2 text-[10px]"
+                                            onClick={() => retryReceiver(r.walletId)}
+                                        >
+                                            Retry
+                                        </Button>
+                                    )}
                                 </div>
                             )
                         })}
@@ -757,7 +797,7 @@ export default function FundOneToManyForm() {
                     {transfersDone && (() => {
                         const total   = activeTransfer?.receivers.length ?? 0
                         const success = Object.values(receiverStatuses).filter((s) => s === 'success').length
-                        const failed  = total - success
+                        const failed  = Object.values(receiverStatuses).filter((s) => s === 'error').length
                         return (
                             <>
                                 <div className={[
@@ -768,7 +808,7 @@ export default function FundOneToManyForm() {
                                 ].join(' ')}>
                                     {failed === 0
                                         ? `All ${success} transfer${success !== 1 ? 's' : ''} submitted successfully.`
-                                        : `${success} succeeded, ${failed} failed. Check wallet balances and retry.`}
+                                        : `${success} succeeded, ${failed} failed — retry the failed ones above or close to finish.`}
                                 </div>
                                 <DialogFooter>
                                     <Button variant="default" onClick={resetAfterTransfer}>Done</Button>

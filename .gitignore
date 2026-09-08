@@ -33,6 +33,9 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# proxy credentials (raw host:port:user:pass pool)
+lib/proxies.txt
+
 # vercel
 .vercel
 

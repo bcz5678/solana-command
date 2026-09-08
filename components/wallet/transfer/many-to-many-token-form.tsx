@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/dialog'
 import { Plus, X, Copy } from 'lucide-react'
 import TokenPicker, { type TokenPickerValue } from './token-picker'
+import TransferProgressDialog from './transfer-progress-dialog'
 
 function maskPubKey(key: string) {
     return `${key.slice(0, 7)}....${key.slice(-7)}`
@@ -253,6 +254,40 @@ export default function ManyToManyTokenForm() {
         setTransfersDone(true)
     }
 
+    // Re-fires ONE transfer in place — same route, a single-item transfers
+    // array. edgeStatuses is updated by index so this can't disturb any
+    // other row's status, including another retry running concurrently.
+    async function retryEdge(index: number) {
+        if (!activeEdges) return
+        const edge = activeEdges[index]
+        setEdgeStatuses((prev) => prev.map((s, i) => (i === index ? 'loading' : s)))
+
+        let success = false
+        try {
+            const res = await fetch('/api/wallet/transfer/token/many-to-many', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({
+                    mintAddress: token.mintAddress,
+                    transfers: [{
+                        fromWalletId: edge.fromWalletId,
+                        toWalletId:   edge.toWalletId,
+                        toAddress:    edge.toAddress,
+                        amount:       parseFloat(edge.amount),
+                    }],
+                }),
+            })
+            if (res.ok) {
+                const { results } = await res.json()
+                success = results?.[0]?.success ?? false
+            }
+        } catch {
+            success = false
+        }
+
+        setEdgeStatuses((prev) => prev.map((s, i) => (i === index ? (success ? 'success' : 'error') : s)))
+    }
+
     if (loading) return <p className="text-sm text-muted-foreground py-4">Loading wallets…</p>
 
     return (
@@ -465,68 +500,16 @@ export default function ManyToManyTokenForm() {
             </Dialog>
 
             {/* Progress dialog */}
-            <Dialog open={showProgress} onOpenChange={(open) => { if (!open && transfersDone) resetAfterTransfer() }}>
-                <DialogContent className="max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>{transfersDone ? 'Transfers Complete' : 'Transferring…'}</DialogTitle>
-                        <DialogDescription>{activeEdges?.length ?? 0} transfer{(activeEdges?.length ?? 0) !== 1 ? 's' : ''}</DialogDescription>
-                    </DialogHeader>
-
-                    <div className="flex max-h-80 flex-col divide-y overflow-y-auto">
-                        {activeEdges?.map((e, i) => {
-                            const status = edgeStatuses[i] ?? 'pending'
-                            return (
-                                <div key={i} className="flex items-center gap-3 py-3">
-                                    <div className="size-5 shrink-0 flex items-center justify-center">
-                                        {status === 'pending' && <span className="size-2 rounded-full bg-muted-foreground/30" />}
-                                        {status === 'loading' && <span className="size-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />}
-                                        {status === 'success' && (
-                                            <svg className="size-4 text-green-500" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                                            </svg>
-                                        )}
-                                        {status === 'error' && (
-                                            <svg className="size-4 text-destructive" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                                            </svg>
-                                        )}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-xs font-mono truncate text-foreground">
-                                            {e.fromLabel} → {e.toLabel ?? maskPubKey(e.toAddress)}
-                                        </p>
-                                        {status === 'error' && <p className="text-[10px] text-destructive mt-0.5">Transfer failed</p>}
-                                    </div>
-                                    <span className="text-xs font-semibold tabular-nums shrink-0">{e.amount} {symbolLabel}</span>
-                                </div>
-                            )
-                        })}
-                    </div>
-
-                    {transfersDone && (() => {
-                        const total   = activeEdges?.length ?? 0
-                        const success = edgeStatuses.filter((s) => s === 'success').length
-                        const failed  = total - success
-                        return (
-                            <>
-                                <div className={[
-                                    'rounded-md px-4 py-3 text-sm',
-                                    failed === 0
-                                        ? 'bg-green-500/10 text-green-700 dark:text-green-400'
-                                        : 'bg-destructive/10 text-destructive',
-                                ].join(' ')}>
-                                    {failed === 0
-                                        ? `All ${success} transfer${success !== 1 ? 's' : ''} submitted successfully.`
-                                        : `${success} succeeded, ${failed} failed. Check wallet balances and retry.`}
-                                </div>
-                                <DialogFooter>
-                                    <Button variant="default" onClick={resetAfterTransfer}>Done</Button>
-                                </DialogFooter>
-                            </>
-                        )
-                    })()}
-                </DialogContent>
-            </Dialog>
+            <TransferProgressDialog
+                open={showProgress}
+                onOpenChange={(open) => { if (!open && transfersDone) resetAfterTransfer() }}
+                edges={(activeEdges ?? []).map((e, i) => ({ key: i, fromLabel: e.fromLabel, toLabel: e.toLabel, toAddress: e.toAddress, amount: e.amount }))}
+                statuses={edgeStatuses}
+                symbolLabel={symbolLabel}
+                done={transfersDone}
+                onRetry={retryEdge}
+                onDone={resetAfterTransfer}
+            />
         </>
     )
 }

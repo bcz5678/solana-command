@@ -1,5 +1,7 @@
-import { Connection, Keypair, TransactionInstruction, PublicKey } from '@solana/web3.js';
+import { Connection, Keypair, TransactionInstruction, TransactionMessage, VersionedTransaction, SystemProgram, PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
+import bs58 from 'bs58';
+import type { Base64EncodedWireTransaction } from '@solana/kit';
 import {
   PUMP_SDK,
   OnlinePumpSdk,
@@ -11,6 +13,7 @@ import { sendWithRetry, signInstructions } from '@/lib/trade/send-transaction';
 import { resolveTokenProgram, getTokenBalance, getSolBalance } from '@/lib/trade/wallet-balance';
 import { isBondingCurveActive } from '@/lib/trade/bonding-curve';
 import { ExecuteResult } from '@/lib/trade/types';
+import { QuicknodeJitoExecutor } from '@/lib/jito/clients/quicknode-jito-executor';
 
 const ZERO = new BN(0);
 
@@ -51,57 +54,70 @@ export class PumpfunExecutor {
     return this.wallet.publicKey;
   }
 
+  /** Shared by buy() and buyViaJito() — resolves fresh curve state and builds
+   *  the raw buyInstructions() call. Pulled out so both send paths price
+   *  against the same up-to-the-moment reserves instead of duplicating this. */
+  private async buildBuyInstructions(
+    mint: PublicKey,
+    solAmount: BN,
+    slip: number,
+  ): Promise<{ instructions: TransactionInstruction[]; tokenAmount: BN; price: number }> {
+    const tokenProgram = await resolveTokenProgram(this.connection, mint);
+
+    const [buyState, global, feeConfig] = await Promise.all([
+      this.onlineSdk.fetchBuyState(mint, this.wallet.publicKey),
+      this.onlineSdk.fetchGlobal(),
+      this.onlineSdk.fetchFeeConfig(),
+    ]);
+
+    const { bondingCurveAccountInfo, bondingCurve, associatedUserAccountInfo } = buyState;
+
+    if (bondingCurve.complete) {
+      throw new Error('Bonding curve has graduated — route this buy through the generic swap executor');
+    }
+
+    const tokenAmount = getBuyTokenAmountFromSolAmount({
+      global,
+      feeConfig,
+      mintSupply: bondingCurve.tokenTotalSupply,
+      bondingCurve,
+      amount: solAmount,   // lamports
+    });
+
+    if (tokenAmount.isZero()) throw new Error('Zero token output');
+
+    const price = solAmount.toNumber() / tokenAmount.toNumber();
+
+    const instructions = await PUMP_SDK.buyInstructions({
+      global,
+      bondingCurveAccountInfo,
+      bondingCurve,
+      associatedUserAccountInfo,
+      mint,
+      user: this.wallet.publicKey,
+      amount: tokenAmount,    // raw token units
+      solAmount,              // lamports
+      slippage: slip * 100,   // SDK expects percent (5 = 5%), not decimal (0.05)
+      tokenProgram,
+    });
+
+    return { instructions, tokenAmount, price };
+  }
+
   /** Buy tokens on the bonding curve. Throws if the curve has graduated. */
   async buy(mint: PublicKey, solAmount: BN, slippage?: number): Promise<ExecuteResult> {
     const slip = slippage ?? this.defaultSlippage;
+    let tokenAmount = ZERO;
+    let price = 0;
     try {
-      const tokenProgram = await resolveTokenProgram(this.connection, mint);
-
-      let tokenAmount = ZERO;
-      let price = 0;
-
-      const buildInstructions = async (): Promise<TransactionInstruction[]> => {
-        const [buyState, global, feeConfig] = await Promise.all([
-          this.onlineSdk.fetchBuyState(mint, this.wallet.publicKey),
-          this.onlineSdk.fetchGlobal(),
-          this.onlineSdk.fetchFeeConfig(),
-        ]);
-
-        const { bondingCurveAccountInfo, bondingCurve, associatedUserAccountInfo } = buyState;
-
-        if (bondingCurve.complete) {
-          throw new Error('Bonding curve has graduated — route this buy through the generic swap executor');
-        }
-
-        tokenAmount = getBuyTokenAmountFromSolAmount({
-          global,
-          feeConfig,
-          mintSupply: bondingCurve.tokenTotalSupply,
-          bondingCurve,
-          amount: solAmount,   // lamports
-        });
-
-        if (tokenAmount.isZero()) throw new Error('Zero token output');
-
-        price = solAmount.toNumber() / tokenAmount.toNumber();
-
-        return PUMP_SDK.buyInstructions({
-          global,
-          bondingCurveAccountInfo,
-          bondingCurve,
-          associatedUserAccountInfo,
-          mint,
-          user: this.wallet.publicKey,
-          amount: tokenAmount,    // raw token units
-          solAmount,              // lamports
-          slippage: slip * 100,   // SDK expects percent (5 = 5%), not decimal (0.05)
-          tokenProgram,
-        });
-      };
-
       const signature = await sendWithRetry(
         this.connection,
-        async () => signInstructions(this.connection, this.wallet, await buildInstructions()),
+        async () => {
+          const built = await this.buildBuyInstructions(mint, solAmount, slip);
+          tokenAmount = built.tokenAmount;
+          price = built.price;
+          return signInstructions(this.connection, this.wallet, built.instructions);
+        },
         this.maxRetries,
         this.dryRun,
       );
@@ -110,6 +126,63 @@ export class PumpfunExecutor {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.log(`BUY FAILED ${mint.toBase58().slice(0, 8)}…: ${msg}`);
+      return { success: false, error: msg, solAmount, tokenAmount: ZERO, tokensRemaining: ZERO, price: 0 };
+    }
+  }
+
+  /**
+   * Same buy, submitted as a solo Jito bundle (one transaction, its own tip)
+   * instead of a plain sendTransaction. Bypasses the point where a sandwich
+   * bot could see this wallet's transaction and react before it lands —
+   * relevant for any sizable buy, not just at launch. Deliberately still one
+   * wallet per bundle: bundling MULTIPLE wallets together is what actually
+   * produces the "bundled wallets" signature screeners flag — a solo bundle,
+   * staggered in time from the rest of the run like every other trade here,
+   * doesn't create that co-occurrence signature at all.
+   */
+  async buyViaJito(mint: PublicKey, solAmount: BN, slippage: number | undefined, tipLamports: number): Promise<ExecuteResult> {
+    const slip = slippage ?? this.defaultSlippage;
+    try {
+      const { instructions, tokenAmount, price } = await this.buildBuyInstructions(mint, solAmount, slip);
+
+      const jitoExecutor = await QuicknodeJitoExecutor.create({
+        endpoint:     process.env.SOLANA_RPC_URL!,
+        tipLamports,
+        simulateOnly: this.dryRun,
+      });
+
+      const [{ blockhash }, tipAccount] = await Promise.all([
+        this.connection.getLatestBlockhash('confirmed'),
+        jitoExecutor.getTipAccount(),
+      ]);
+
+      const finalIxs = [
+        ...instructions,
+        SystemProgram.transfer({
+          fromPubkey: this.wallet.publicKey,
+          toPubkey:   new PublicKey(tipAccount as string),
+          lamports:   tipLamports,
+        }),
+      ];
+
+      const message = new TransactionMessage({
+        payerKey:        this.wallet.publicKey,
+        recentBlockhash: blockhash,
+        instructions:    finalIxs,
+      }).compileToV0Message();
+
+      const tx = new VersionedTransaction(message);
+      tx.sign([this.wallet]);
+
+      const encoded = Buffer.from(tx.serialize()).toString('base64') as Base64EncodedWireTransaction;
+      const signature = bs58.encode(tx.signatures[0]);
+
+      const result = await jitoExecutor.sendPrebuiltBundle([encoded], [this.wallet.publicKey.toBase58()]);
+      console.log(`BUY (Jito) ${mint.toBase58().slice(0, 8)}… | ${(solAmount.toNumber() / 1e9).toFixed(4)} SOL → ${tokenAmount.toString()} tokens | sig=${signature.slice(0, 16)}… bundle=${result.bundleId || '(simulated)'}`);
+      return { success: true, signature, solAmount, tokenAmount, tokensRemaining: ZERO, price };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`BUY (Jito) FAILED ${mint.toBase58().slice(0, 8)}…: ${msg}`);
       return { success: false, error: msg, solAmount, tokenAmount: ZERO, tokensRemaining: ZERO, price: 0 };
     }
   }

@@ -150,6 +150,16 @@ export default function StaggeredBuyWizard() {
     const [haltWindowSec, setHaltWindowSec]     = useState('10')
     const [haltAlert, setHaltAlert]             = useState<string | null>(null)
 
+    // MEV protection — submits each wallet's OWN buy as its own solo Jito
+    // bundle (its own tip, its own transaction) instead of a plain
+    // sendTransaction, so nothing can see it and react before it lands.
+    // Deliberately still one wallet per bundle: bundling MULTIPLE wallets
+    // together is what actually produces the "bundled wallets" signature
+    // screeners flag — a solo bundle, staggered in time like every other
+    // trade in this run, doesn't create that co-occurrence signature.
+    const [useJitoBuy, setUseJitoBuy] = useState(false)
+    const [jitoTipSol, setJitoTipSol] = useState('0.0005')
+
     // Test mode — every trade call gets dryRun:true, same convention as
     // Launch Builder's testMode. The route still does everything except
     // broadcast: real bonding-curve reads, real quote math, a real signed
@@ -606,6 +616,10 @@ export default function StaggeredBuyWizard() {
                         solAmountLamports: lamports,
                         slippage: slippageToUse,
                         dryRun: testMode,
+                        ...(useJitoBuy ? {
+                            useJito: true,
+                            jitoTipLamports: Math.round((parseFloat(jitoTipSol) || 0) * 1_000_000_000).toString(),
+                        } : {}),
                         ...(autoCommentEnabled ? {
                             autoComment: {
                                 enabled:     true,
@@ -732,6 +746,10 @@ export default function StaggeredBuyWizard() {
                             solAmountLamports: lamports,
                             slippage: slippageRef.current,
                             dryRun: testMode,
+                            ...(useJitoBuy ? {
+                                useJito: true,
+                                jitoTipLamports: Math.round((parseFloat(jitoTipSol) || 0) * 1_000_000_000).toString(),
+                            } : {}),
                             ...(autoCommentEnabled ? {
                                 autoComment: {
                                     enabled:     true,
@@ -1262,6 +1280,41 @@ export default function StaggeredBuyWizard() {
                                 </div>
                             )}
                         </div>
+
+                        {/* MEV Protection (Jito) — buy-side only */}
+                        {tradeType === 'buy' && (
+                            <div className="flex flex-col gap-1.5">
+                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">MEV Protection (Jito)</span>
+                                <label className="flex items-center gap-2 cursor-pointer select-none h-9">
+                                    <input
+                                        type="checkbox"
+                                        checked={useJitoBuy}
+                                        onChange={(e) => setUseJitoBuy(e.target.checked)}
+                                        className="size-4 rounded border border-input accent-blue-500"
+                                    />
+                                    <span className="text-xs font-medium text-muted-foreground">Enable</span>
+                                </label>
+                                {useJitoBuy && (
+                                    <div className="flex flex-col gap-1.5">
+                                        <div className="flex items-center gap-2 rounded-lg border border-input bg-transparent px-3 h-9 w-fit focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30">
+                                            <input
+                                                type="number" min={0} step={0.0001} placeholder="0.0005"
+                                                value={jitoTipSol}
+                                                onChange={(e) => setJitoTipSol(e.target.value)}
+                                                className="w-24 bg-transparent text-xs outline-none placeholder:text-muted-foreground [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                            />
+                                            <span className="text-xs text-muted-foreground shrink-0">SOL tip per wallet</span>
+                                        </div>
+                                        <p className="text-[10px] text-muted-foreground max-w-md">
+                                            Each wallet&apos;s buy submits as its own solo Jito bundle instead of a plain send — bypasses the
+                                            point where a sandwich bot could see it and react before it lands. Adds the tip above on top of
+                                            every buy. Still one wallet per bundle, staggered in time like the rest of the run — this doesn&apos;t
+                                            create the multi-wallet &quot;bundled&quot; signature screeners look for.
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
 
                         {/* Wallet selector */}
                         <StrategyWalletSelector
