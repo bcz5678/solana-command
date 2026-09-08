@@ -17,6 +17,44 @@ import BankPicker from '@/components/tokens/comment-bank/bank-picker'
 
 type TokenOption = { value: string; label: string; token: TokenMint }
 
+// Same multiplier as SPECIFIC_BANK_WEIGHT in lib/pumpfun/comment-scheduler.ts —
+// keep in sync so a manual batch here weights token-specific vs generic the
+// same way the durable scheduler does.
+const SPECIFIC_BANK_WEIGHT = 3
+
+type WeightedBankEntry = CommentBankEntry & { isSpecific: boolean }
+
+function entryWeight(entry: WeightedBankEntry): number {
+  return (entry.isSpecific ? SPECIFIC_BANK_WEIGHT : 1) / (entry.used_count + 1)
+}
+
+/**
+ * Weighted-random draw without replacement from `pool` for `count` picks —
+ * mirrors claim_comment_bank_entry()'s weighting (less-used entries favored,
+ * token-specific banks weighted above generic) so consecutive wallets in one
+ * batch don't get a deterministic walk that exhausts one bank before the
+ * other. Wraps back to the full pool once exhausted, same as the old
+ * modulo-cycling fallback for when there are fewer entries than wallets.
+ */
+function weightedAssign(pool: WeightedBankEntry[], count: number): WeightedBankEntry[] {
+  const picks: WeightedBankEntry[] = []
+  let remaining = [...pool]
+  for (let i = 0; i < count; i++) {
+    if (remaining.length === 0) remaining = [...pool]
+    const weights = remaining.map(entryWeight)
+    const total = weights.reduce((a, b) => a + b, 0)
+    let r = Math.random() * total
+    let idx = remaining.length - 1
+    for (let j = 0; j < remaining.length; j++) {
+      r -= weights[j]
+      if (r <= 0) { idx = j; break }
+    }
+    picks.push(remaining[idx])
+    remaining.splice(idx, 1)
+  }
+  return picks
+}
+
 type RowStatus = 'pending' | 'running' | 'posted' | 'failed'
 
 interface CommentRow {
@@ -63,7 +101,7 @@ export default function CommentBotPage() {
 
   // Which bank(s) to pull FROM when running — least-used-first across their union.
   const [selectedBankIds, setSelectedBankIds] = useState<Set<string>>(new Set())
-  const [bankEntries, setBankEntries]         = useState<CommentBankEntry[]>([])
+  const [bankEntries, setBankEntries]         = useState<WeightedBankEntry[]>([])
   const [bankEntriesLoading, setBankEntriesLoading] = useState(false)
 
   // Which single bank to import new pasted lines INTO — separate from the pull-from set above.
@@ -93,31 +131,35 @@ export default function CommentBotPage() {
   const [replySending, setReplySending]           = useState(false)
   const [replyResult, setReplyResult]             = useState<{ success: boolean; message: string } | null>(null)
 
-  // Merges entries across every selected bank and sorts least-used-first —
-  // mirrors claim_comment_bank_entry()'s ordering so manual "Start" here
-  // behaves the same as the durable scheduler's pick.
+  // Merges entries across every selected bank and tags each with whether its
+  // bank is token-specific — mirrors claim_comment_bank_entry()'s weighting
+  // (see comment_banks.sql) so manual "Start" here intersperses specific vs
+  // generic the same way the durable scheduler does, instead of a
+  // deterministic least-used walk that exhausts one bank before the other.
   function refreshBankEntries(bankIds: Set<string>) {
     if (bankIds.size === 0) {
       setBankEntries([])
       return Promise.resolve()
     }
     setBankEntriesLoading(true)
-    return Promise.all(
-      [...bankIds].map((id) =>
-        fetch(`/api/comment-bank?bankId=${encodeURIComponent(id)}`)
-          .then((r) => (r.ok ? r.json() : null))
-          .then((data) => (data?.entries ?? []) as CommentBankEntry[])
-          .catch(() => [] as CommentBankEntry[]),
+    const banksQs = mintValid ? `?mintAddress=${encodeURIComponent(mintAddress)}` : ''
+    return Promise.all([
+      Promise.all(
+        [...bankIds].map((id) =>
+          fetch(`/api/comment-bank?bankId=${encodeURIComponent(id)}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data) => (data?.entries ?? []) as CommentBankEntry[])
+            .catch(() => [] as CommentBankEntry[]),
+        ),
       ),
-    )
-      .then((lists) => {
-        const merged = lists.flat().sort((a, b) => {
-          if (a.used_count !== b.used_count) return a.used_count - b.used_count
-          const aLast = a.last_used_at ? new Date(a.last_used_at).getTime() : -Infinity
-          const bLast = b.last_used_at ? new Date(b.last_used_at).getTime() : -Infinity
-          if (aLast !== bLast) return aLast - bLast
-          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-        })
+      fetch(`/api/comment-banks${banksQs}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => (data?.banks ?? []) as CommentBank[])
+        .catch(() => [] as CommentBank[]),
+    ])
+      .then(([lists, banks]) => {
+        const specificBankIds = new Set(banks.filter((b) => b.mint_address).map((b) => b.id))
+        const merged = lists.flat().map((e) => ({ ...e, isSpecific: specificBankIds.has(e.bank_id) }))
         setBankEntries(merged)
       })
       .finally(() => setBankEntriesLoading(false))
@@ -333,10 +375,10 @@ export default function CommentBotPage() {
 
     if (commentSource === 'bank') {
       if (bankEntries.length === 0) return
-      // Bank is already ordered least-used-first by the API, so a straight
-      // walk (cycling if fewer entries than wallets) naturally spreads usage.
+      // Weighted-random, no-repeat-until-exhausted draw — see weightedAssign.
+      const picks = weightedAssign(bankEntries, selected.length)
       initialRows = selected.map((w, i) => {
-        const entry = bankEntries[i % bankEntries.length]
+        const entry = picks[i]
         return {
           walletId:      w.id,
           walletLabel:   w.label ?? maskPubKey(w.public_key),

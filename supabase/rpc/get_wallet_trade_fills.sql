@@ -18,7 +18,12 @@
 -- rebuy lot, each at its own real cost, not one blended average.
 --
 -- Run this in the Supabase SQL editor (Studio) to create/update. Not wired
--- into `supabase db push` — this repo has no migrations directory.
+-- into `supabase db push` — this repo has no migrations directory. Depends
+-- on pnl_baseline.sql already being applied (private.pnl_baseline).
+--
+-- Also respects each wallet owner's pnl_baseline.since (the panel's manual
+-- "reset" control) — fills before it are excluded so a FIFO walk over the
+-- remainder starts clean, same reasoning as get_wallet_pnl_summary.
 
 DROP FUNCTION IF EXISTS public.get_wallet_open_positions(uuid);
 
@@ -50,11 +55,13 @@ BEGIN
       FROM private.trade_logs tl
       JOIN private.wallets w ON w.id = tl.wallet_id
       LEFT JOIN private.token_mints tm ON tm.mint_public_key = tl.to_address
+      LEFT JOIN private.pnl_baseline pb ON pb.user_id = w.user_id
       WHERE (target_user_id IS NULL OR w.user_id = target_user_id)
         AND tl.side IN ('BUY', 'SELL')
         AND tl.status = 'confirmed'
         AND tl.quantity   IS NOT NULL
         AND tl.amount_sol IS NOT NULL
+        AND tl.executed_at >= COALESCE(pb.since, '-infinity'::timestamptz)
       ORDER BY tl.wallet_id, tl.to_address, tl.executed_at ASC;
 
   ELSIF auth.uid() IS NOT NULL THEN
@@ -65,11 +72,13 @@ BEGIN
       FROM private.trade_logs tl
       JOIN private.wallets w ON w.id = tl.wallet_id
       LEFT JOIN private.token_mints tm ON tm.mint_public_key = tl.to_address
+      LEFT JOIN private.pnl_baseline pb ON pb.user_id = w.user_id
       WHERE w.user_id = auth.uid()   -- hard-scoped, not overridable
         AND tl.side IN ('BUY', 'SELL')
         AND tl.status = 'confirmed'
         AND tl.quantity   IS NOT NULL
         AND tl.amount_sol IS NOT NULL
+        AND tl.executed_at >= COALESCE(pb.since, '-infinity'::timestamptz)
       ORDER BY tl.wallet_id, tl.to_address, tl.executed_at ASC;
 
   ELSE

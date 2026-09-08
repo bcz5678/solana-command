@@ -2,14 +2,18 @@
 -- single flat per-user bank from comment_bank.sql with real bank entities
 -- you can create/rename/delete, each either generic (usable on any token)
 -- or scoped to one specific mint. A trade's auto-comment config selects one
--- OR MORE banks; at fire time the scheduler picks the least-used entry
--- across the UNION of the selected banks, so a fresh token-specific bank
--- naturally gets used before dipping into a well-worn generic one.
+-- OR MORE banks; at fire time the scheduler weighted-randomly picks an entry
+-- across the UNION of the selected banks, favoring less-used entries and
+-- weighting token-specific banks above generic ones, so the two intersperse
+-- instead of the specific bank being fully exhausted before generic starts.
 --
 -- Depends on comment_bank.sql and comment_schedule.sql already being applied
 -- — this file ALTERs both of those tables. Run this in the Supabase SQL
 -- editor (Studio) after those two. Not wired into `supabase db push` — this
 -- repo has no migrations directory, schema changes are applied by hand.
+--
+-- Selection is weighted-random, not strict least-used-first — see
+-- claim_comment_bank_entry() below for why.
 
 -- ── Schema: private.comment_banks (the bank entities) ────────────
 CREATE TABLE IF NOT EXISTS private.comment_banks (
@@ -310,16 +314,29 @@ REVOKE ALL    ON FUNCTION public.get_comment_bank(uuid,boolean,integer) FROM PUB
 GRANT EXECUTE ON FUNCTION public.get_comment_bank(uuid,boolean,integer) TO authenticated;
 
 
--- ── claim_comment_bank_entry(): now scoped to a SET of banks ──────
--- Least-used-first across the union of p_bank_ids — this is what makes
--- "generic + token-specific" blend naturally: a fresh token-specific bank's
--- entries (used_count 0) get exhausted before the scheduler dips into a
--- well-worn generic bank, with no special-casing needed here.
+-- ── claim_comment_bank_entry(): weighted-random across a SET of banks ─
+-- Previously strict least-used-first across the union of p_bank_ids — fully
+-- deterministic, so a fresh token-specific bank's entries (used_count 0)
+-- always got exhausted before a well-worn generic bank was ever touched, and
+-- ties broke the same way every time. That's an easy pattern to notice
+-- across a run's worth of callouts.
+--
+-- Now weighted-random: each active candidate gets weight
+-- (specific ? p_specific_weight : 1) / (used_count + 1) — the used_count
+-- term still biases toward less-used entries (so nothing gets worn out) but
+-- no longer forces a strict order, and the specific-bank multiplier makes
+-- token-specific entries win more often than generic ones without ever
+-- excluding generic outright, so the two intersperse instead of one
+-- exhausting before the other starts. Selection uses the standard
+-- Efraimidis–Spirakis trick for single-draw weighted sampling: each
+-- candidate gets key = -ln(random())/weight (Exponential(weight)-distributed),
+-- and picking the smallest key gives exactly P(pick i) = weight_i / sum(weights).
 DROP FUNCTION IF EXISTS public.claim_comment_bank_entry(uuid);
 DROP FUNCTION IF EXISTS public.claim_comment_bank_entry(uuid[]);
 
 CREATE OR REPLACE FUNCTION public.claim_comment_bank_entry(
-  p_bank_ids uuid[]
+  p_bank_ids        uuid[],
+  p_specific_weight numeric DEFAULT 3
 )
 RETURNS TABLE (id uuid, text text)
 LANGUAGE plpgsql
@@ -335,9 +352,14 @@ BEGIN
     UPDATE private.comment_bank cb
     SET used_count = cb.used_count + 1, last_used_at = now()
     WHERE cb.id = (
-      SELECT c.id FROM private.comment_bank c
+      SELECT c.id
+      FROM private.comment_bank c
+      JOIN private.comment_banks cbk ON cbk.id = c.bank_id
       WHERE c.bank_id = ANY(p_bank_ids) AND c.is_active
-      ORDER BY c.used_count ASC, c.last_used_at ASC NULLS FIRST, c.created_at ASC
+      ORDER BY -ln(random()) / (
+        (CASE WHEN cbk.mint_address IS NOT NULL THEN p_specific_weight ELSE 1 END)
+        / (c.used_count + 1)::numeric
+      ) ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     )
@@ -345,9 +367,9 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.claim_comment_bank_entry(uuid[]) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.claim_comment_bank_entry(uuid[]) FROM authenticated;
-REVOKE ALL ON FUNCTION public.claim_comment_bank_entry(uuid[]) FROM anon;
+REVOKE ALL ON FUNCTION public.claim_comment_bank_entry(uuid[],numeric) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.claim_comment_bank_entry(uuid[],numeric) FROM authenticated;
+REVOKE ALL ON FUNCTION public.claim_comment_bank_entry(uuid[],numeric) FROM anon;
 
 
 -- ── enqueue_comment_schedule(): now carries bank_ids ──────────────

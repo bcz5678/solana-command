@@ -27,6 +27,10 @@ const CLAIM_BATCH_SIZE         = 10
 // Small stagger between posts within one tick so a burst of due comments
 // doesn't fire all at once — same reasoning as human-volume's inter-buy jitter.
 const INTER_POST_JITTER_MS = { min: 1_000, max: 4_000 }
+// How much more likely a token-specific bank's entries are to win the
+// weighted-random claim vs a generic bank's, before the used_count bias —
+// see claim_comment_bank_entry() in supabase/rpc/comment_banks.sql.
+const SPECIFIC_BANK_WEIGHT = 3
 
 interface ClaimedRow {
   id:           string
@@ -130,7 +134,7 @@ class CommentScheduler {
       }
 
       const { data: bankEntry, error: bankErr } = await admin
-        .rpc('claim_comment_bank_entry', { p_bank_ids: bank_ids })
+        .rpc('claim_comment_bank_entry', { p_bank_ids: bank_ids, p_specific_weight: SPECIFIC_BANK_WEIGHT })
         .maybeSingle()
 
       if (bankErr || !bankEntry) {

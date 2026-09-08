@@ -127,10 +127,12 @@ export async function GET(req: NextRequest) {
     { data: walletResults, error: walletsError },
     { data: pnlResults, error: pnlError },
     { data: fillResults, error: fillsError },
+    { data: baselineResult, error: baselineError },
   ] = await Promise.all([
     supabase.rpc('get_wallets', { target_user_id: targetUserId, p_active_only: true }),
     supabase.rpc('get_wallet_pnl_summary', { target_user_id: targetUserId }),
     supabase.rpc('get_wallet_trade_fills', { target_user_id: targetUserId }),
+    supabase.rpc('get_pnl_baseline', { target_user_id: targetUserId }),
   ])
 
   if (walletsError) {
@@ -144,6 +146,10 @@ export async function GET(req: NextRequest) {
   if (fillsError) {
     // Non-fatal — realized PnL still renders fine without the unrealized column.
     console.error('[wallet/pnl] get_wallet_trade_fills error:', fillsError.message)
+  }
+  if (baselineError) {
+    // Non-fatal — just means the panel shows full history instead of "since <date>".
+    console.error('[wallet/pnl] get_pnl_baseline error:', baselineError.message)
   }
 
   const wallets = (walletResults ?? []) as WalletRecord[]
@@ -233,7 +239,8 @@ export async function GET(req: NextRequest) {
   })
 
   return Response.json({
-    wallets:    rows,
-    fetchedAt:  new Date().toISOString(),
+    wallets:        rows,
+    fetchedAt:      new Date().toISOString(),
+    baselineSince:  (baselineResult as string | null) ?? null,
   })
 }

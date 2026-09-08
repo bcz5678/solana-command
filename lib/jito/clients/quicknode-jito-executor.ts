@@ -9,13 +9,11 @@
 
 import {
     Rpc,
-    createDefaultRpcTransport,
     createRpc,
     createJsonRpcApi,
     Address,
-    mainnet,
     Base58EncodedBytes,
-    createSolanaRpc,
+    createSolanaRpcFromTransport,
     createKeyPairSignerFromBytes,
     createTransactionMessage,
     setTransactionMessageFeePayerSigner,
@@ -29,6 +27,7 @@ import {
     type Instruction,
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
+import { request as undiciRequest } from "undici";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -150,22 +149,35 @@ function isNetworkFetchFailure(err: unknown): boolean {
     return err instanceof TypeError && err.message === 'fetch failed';
 }
 
+// undici's fetch() throws `TypeError('fetch failed', { cause })` where `cause`
+// is the actual underlying error (a SocketError/ConnectTimeoutError, or a
+// plain Node errno error like ECONNRESET/ETIMEDOUT/ENOTFOUND) — but the outer
+// message is always the same generic "fetch failed" regardless of which of
+// those it was. That's exactly what made the 2026-09-07 incident (and every
+// attempt since) impossible to diagnose from trade_logs alone: every failed
+// row says the same generic string no matter the real cause. Surface the
+// cause explicitly instead of discarding it.
+function describeFetchFailureCause(err: unknown): string {
+    const cause = err instanceof Error ? err.cause : undefined;
+    if (cause == null) return 'no cause reported';
+    if (cause instanceof Error) {
+        const code = (cause as NodeJS.ErrnoException).code;
+        return code ? `${code}: ${cause.message}` : `${cause.name}: ${cause.message}`;
+    }
+    return String(cause);
+}
+
 async function withJitoRpcRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
     for (let attempt = 1; attempt <= JITO_RPC_MAX_ATTEMPTS; attempt++) {
         try {
             return await fn();
         } catch (err) {
             if (!isNetworkFetchFailure(err)) throw err;
+            const causeDesc = describeFetchFailureCause(err);
             if (attempt === JITO_RPC_MAX_ATTEMPTS) {
-                // Wrap with which call this was — the bare error is just
-                // "fetch failed" with no indication of where, which is exactly
-                // what made the 2026-09-07 incident hard to diagnose from
-                // trade_logs alone (every failed row said the same generic
-                // "fetch failed" regardless of which of ~10 network calls in
-                // the route actually died).
-                throw new Error(`${label}: fetch failed (after ${JITO_RPC_MAX_ATTEMPTS} attempts)`);
+                throw new Error(`${label}: fetch failed (after ${JITO_RPC_MAX_ATTEMPTS} attempts) — ${causeDesc}`, { cause: err });
             }
-            console.warn(`[QuicknodeJitoExecutor] ${label}: network fetch failed (attempt ${attempt}/${JITO_RPC_MAX_ATTEMPTS}), retrying…`);
+            console.warn(`[QuicknodeJitoExecutor] ${label}: network fetch failed (attempt ${attempt}/${JITO_RPC_MAX_ATTEMPTS}) — ${causeDesc}, retrying…`);
             await new Promise((r) => setTimeout(r, 300 + Math.random() * 500));
         }
     }
@@ -174,19 +186,59 @@ async function withJitoRpcRetry<T>(label: string, fn: () => Promise<T>): Promise
 }
 
 // ─── Internal RPC factory ────────────────────────────────────────────────────
+//
+// Root cause of the bare "fetch failed" / "UND_ERR_INVALID_ARG: invalid
+// content-length header" seen live (see withJitoRpcRetry's cause-surfacing
+// below, which is what made this diagnosable instead of just "fetch failed"):
+// this project's Next.js version (16.2.4) globally monkey-patches `fetch()`
+// inside every route handler for its own Data Cache / request-memoization
+// layer (next/dist/server/lib/patch-fetch.js), reconstructing `init` — body,
+// headers — before handing off to the real fetch. Confirmed by a direct A/B
+// test against a live route handler: the exact same getTipAccounts call
+// failed 8/8 through @solana/kit's default transport (which calls the
+// globally-patched `fetch`) and succeeded 8/8 using undici's own `request()`
+// — a lower-level API Next's patch never touches (it only wraps
+// `globalThis.fetch`, not the userland `undici` package). A standalone
+// script outside the Next.js request-handler runtime never reproduced the
+// bug at all, which is what pointed at the patched-fetch layer as the actual
+// cause rather than network flakiness — two earlier network-layer theories
+// (an idle-keepalive race, then rapid-fire connection throttling) were each
+// tested and ruled out before this one.
+function createUnpatchedFetchTransport(endpoint: string) {
+    return async function transport<TResponse>({
+        payload,
+        signal,
+    }: {
+        payload: unknown;
+        signal?: AbortSignal;
+    }): Promise<TResponse> {
+        const body = JSON.stringify(payload);
+        const { statusCode, body: responseBody } = await undiciRequest(endpoint, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body,
+            signal,
+        });
+        const text = await responseBody.text();
+        if (statusCode < 200 || statusCode >= 300) {
+            throw new Error(`HTTP ${statusCode}: ${text}`);
+        }
+        return JSON.parse(text) as TResponse;
+    };
+}
 
 function createLilJitRpc(endpoint: string): Rpc<LilJitAddon> {
     const api = createJsonRpcApi<LilJitAddon>({
         responseTransformer: (response: unknown) => (response as { result: unknown }).result,
     });
-    const transport = createDefaultRpcTransport({ url: mainnet(endpoint) });
+    const transport = createUnpatchedFetchTransport(endpoint);
     return createRpc({ api, transport });
 }
 
 // ─── QuicknodeJitoExecutor ───────────────────────────────────────────────────
 
 export class QuicknodeJitoExecutor {
-    private readonly solanaRpc: ReturnType<typeof createSolanaRpc>;
+    private readonly solanaRpc: ReturnType<typeof createSolanaRpcFromTransport>;
     private readonly lilJitRpc: Rpc<LilJitAddon>;
     private readonly signer: TransactionPartialSigner | null;
     private readonly tipLamports: number;
@@ -197,7 +249,7 @@ export class QuicknodeJitoExecutor {
     private readonly optimisticOnInvalid: boolean;
 
     private constructor(
-        solanaRpc: ReturnType<typeof createSolanaRpc>,
+        solanaRpc: ReturnType<typeof createSolanaRpcFromTransport>,
         lilJitRpc: Rpc<LilJitAddon>,
         signer: TransactionPartialSigner | null,
         tipLamports: number,
@@ -233,7 +285,7 @@ export class QuicknodeJitoExecutor {
         }
 
         return new QuicknodeJitoExecutor(
-            createSolanaRpc(config.endpoint),
+            createSolanaRpcFromTransport(createUnpatchedFetchTransport(config.endpoint)),
             createLilJitRpc(config.endpoint),
             signer,
             Math.max(config.tipLamports ?? 10_000, 1_000),

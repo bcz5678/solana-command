@@ -74,6 +74,15 @@ export default function WalletPnlPanel() {
   const [isLoading, setIsLoading]     = useState(true)
   const [error, setError]             = useState<string | null>(null)
 
+  // The panel is computed purely from trade_logs (BUY/SELL) — it has no idea
+  // about wallet-to-wallet token transfers, so old muddied history can make
+  // it report a loss that never happened. baselineSince is the manual "only
+  // count PnL from here on" line the user can draw; null means full history.
+  const [baselineSince, setBaselineSince]     = useState<string | null>(null)
+  const [baselineBusy, setBaselineBusy]       = useState(false)
+  const [showCustomStart, setShowCustomStart] = useState(false)
+  const [customStartInput, setCustomStartInput] = useState('')
+
   // walletId -> { value, expiresAt } — drives the brief flash highlight when
   // a wallet's total PnL changes between polls. Keyed off the poll's OWN
   // numbers (not livePriceByMint below) — a live price can tick several
@@ -129,12 +138,53 @@ export default function WalletPnlPanel() {
 
       setRows(nextRows)
       setFetchedAt(data.fetchedAt ?? new Date().toISOString())
+      setBaselineSince(data.baselineSince ?? null)
       setError(null)
     } catch (err) {
       console.error('[wallet-pnl-panel] refresh failed:', err)
       setError('Failed to load wallet PnL')
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  async function resetBaseline(since?: string) {
+    setBaselineBusy(true)
+    try {
+      const res = await fetch('/api/wallet/pnl/baseline', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(since ? { since } : {}),
+      })
+      if (!res.ok) {
+        const result = await res.json().catch(() => ({}))
+        throw new Error(result.error ?? `HTTP ${res.status}`)
+      }
+      setShowCustomStart(false)
+      setCustomStartInput('')
+      await refresh()
+    } catch (err) {
+      console.error('[wallet-pnl-panel] resetBaseline failed:', err)
+      setError(err instanceof Error ? err.message : 'Failed to reset PnL')
+    } finally {
+      setBaselineBusy(false)
+    }
+  }
+
+  async function clearBaseline() {
+    setBaselineBusy(true)
+    try {
+      const res = await fetch('/api/wallet/pnl/baseline', { method: 'DELETE' })
+      if (!res.ok) {
+        const result = await res.json().catch(() => ({}))
+        throw new Error(result.error ?? `HTTP ${res.status}`)
+      }
+      await refresh()
+    } catch (err) {
+      console.error('[wallet-pnl-panel] clearBaseline failed:', err)
+      setError(err instanceof Error ? err.message : 'Failed to clear PnL start point')
+    } finally {
+      setBaselineBusy(false)
     }
   }
 
@@ -271,10 +321,66 @@ export default function WalletPnlPanel() {
         </div>
       </div>
 
+      {/* Baseline / reset controls */}
+      <div className="flex flex-wrap items-center gap-2 -mt-1">
+        <span className="text-xs text-muted-foreground">
+          {baselineSince
+            ? <>Showing PnL since <span className="font-medium text-foreground">{new Date(baselineSince).toLocaleString()}</span></>
+            : 'Showing full history'}
+        </span>
+        <button
+          type="button"
+          disabled={baselineBusy}
+          onClick={() => resetBaseline()}
+          className="rounded-md border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:border-foreground/30 hover:text-foreground transition-colors disabled:opacity-40"
+          title="Only count trades from this moment forward — use this if old history (e.g. tokens moved between wallets) is skewing the numbers above."
+        >
+          {baselineBusy ? 'Working…' : 'Reset PnL (start from now)'}
+        </button>
+        <button
+          type="button"
+          disabled={baselineBusy}
+          onClick={() => setShowCustomStart((v) => !v)}
+          className="rounded-md border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:border-foreground/30 hover:text-foreground transition-colors disabled:opacity-40"
+        >
+          Set start point…
+        </button>
+        {baselineSince && (
+          <button
+            type="button"
+            disabled={baselineBusy}
+            onClick={clearBaseline}
+            className="rounded-md border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:border-foreground/30 hover:text-foreground transition-colors disabled:opacity-40"
+          >
+            Show full history
+          </button>
+        )}
+        {showCustomStart && (
+          <>
+            <input
+              type="datetime-local"
+              value={customStartInput}
+              onChange={(e) => setCustomStartInput(e.target.value)}
+              className="h-7 rounded-md border border-input bg-transparent px-2 text-[11px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            <button
+              type="button"
+              disabled={baselineBusy || !customStartInput}
+              onClick={() => resetBaseline(new Date(customStartInput).toISOString())}
+              className="rounded-md border border-blue-500/60 bg-blue-500/10 px-2 py-0.5 text-[11px] text-blue-500 hover:bg-blue-500/20 transition-colors disabled:opacity-40"
+            >
+              Apply
+            </button>
+          </>
+        )}
+      </div>
+
       <p className="text-[11px] text-muted-foreground -mt-2">
         Realized = confirmed SOL received from sells minus confirmed SOL spent on buys. Unrealized marks every
         still-open position (bought, not yet sold) to its current live price via the relay, using average-cost
-        basis. {anyUnknownPrice && 'Some open positions show "—" — the relay couldn\'t price that mint right now, so they\'re excluded from Unrealized until it can.'}
+        basis. This panel doesn&apos;t track wallet-to-wallet token transfers, so a position moved off a wallet
+        without selling can misprice that wallet&apos;s Unrealized — use &quot;Reset PnL&quot; above if old history
+        is skewing the totals. {anyUnknownPrice && 'Some open positions show "—" — the relay couldn\'t price that mint right now, so they\'re excluded from Unrealized until it can.'}
       </p>
 
       {/* Table */}

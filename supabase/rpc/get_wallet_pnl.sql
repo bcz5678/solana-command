@@ -6,13 +6,19 @@
 -- by wallet_id instead of collapsed into one row, for the Wallet PnL panel.
 --
 -- Run this in the Supabase SQL editor (Studio) to create/update. Not wired
--- into `supabase db push` — this repo has no migrations directory.
+-- into `supabase db push` — this repo has no migrations directory. Depends
+-- on pnl_baseline.sql already being applied (private.pnl_baseline).
 --
 -- net_sol here is REALIZED PnL only (confirmed SELL amount_sol minus
 -- confirmed BUY amount_sol) — it does not mark open token positions to
 -- market. A wallet still holding tokens it bought but hasn't sold will show
 -- net_sol as negative (or less positive) than its true position value until
 -- it sells, same as get_trade_stats().
+--
+-- Trades before each wallet owner's pnl_baseline.since (see pnl_baseline.sql)
+-- are excluded — that's the panel's manual "reset" control for muddied old
+-- history (e.g. token transfers this system doesn't track), not a real data
+-- filter, so a wallet with no baseline row counts its full history as before.
 
 CREATE OR REPLACE FUNCTION public.get_wallet_pnl_summary(
   target_user_id uuid DEFAULT NULL
@@ -47,7 +53,9 @@ BEGIN
         MAX(tl.executed_at)
       FROM private.trade_logs tl
       JOIN private.wallets w ON w.id = tl.wallet_id
+      LEFT JOIN private.pnl_baseline pb ON pb.user_id = w.user_id
       WHERE (target_user_id IS NULL OR w.user_id = target_user_id)
+        AND tl.executed_at >= COALESCE(pb.since, '-infinity'::timestamptz)
       GROUP BY tl.wallet_id;
 
   ELSIF auth.uid() IS NOT NULL THEN
@@ -64,7 +72,9 @@ BEGIN
         MAX(tl.executed_at)
       FROM private.trade_logs tl
       JOIN private.wallets w ON w.id = tl.wallet_id
+      LEFT JOIN private.pnl_baseline pb ON pb.user_id = w.user_id
       WHERE w.user_id = auth.uid()   -- hard-scoped, not overridable
+        AND tl.executed_at >= COALESCE(pb.since, '-infinity'::timestamptz)
       GROUP BY tl.wallet_id;
 
   ELSE
