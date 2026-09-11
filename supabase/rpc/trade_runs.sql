@@ -30,9 +30,20 @@ CREATE TABLE IF NOT EXISTS private.trade_runs (
   control       text NOT NULL DEFAULT 'none'
                   CHECK (control IN ('none','pause_requested','resume_requested','cancel_requested')),
   total_steps   integer,
+  -- The full run plan as it was at kickoff (schedule, amounts, slippage,
+  -- jito/auto-comment/auto-halt settings, ...) — surface-specific shape, not
+  -- enforced here. Written once by create_trade_run and never overwritten,
+  -- so a resumed run always re-filters against the true original plan no
+  -- matter how many times it's been picked back up. NULL for any run
+  -- created before this column existed, and for surfaces that don't
+  -- populate it (only staggered_buy/staggered_sell do, currently) — both
+  -- cases simply mean "not resumable."
+  params        jsonb,
   created_at    timestamptz NOT NULL DEFAULT now(),
   updated_at    timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE private.trade_runs ADD COLUMN IF NOT EXISTS params jsonb;
 
 -- Control Center's list view + the "stalled — no update in >60s" check.
 CREATE INDEX IF NOT EXISTS idx_trade_runs_status_updated
@@ -68,12 +79,14 @@ CREATE INDEX IF NOT EXISTS idx_trade_run_steps_run
 
 -- ── create_trade_run(): called at the start of a run ─────────────────
 DROP FUNCTION IF EXISTS public.create_trade_run(text,text,text,integer);
+DROP FUNCTION IF EXISTS public.create_trade_run(text,text,text,integer,jsonb);
 
 CREATE OR REPLACE FUNCTION public.create_trade_run(
   p_surface      text,
   p_mint_address text,
   p_label        text,
-  p_total_steps  integer
+  p_total_steps  integer,
+  p_params       jsonb DEFAULT NULL
 )
 RETURNS uuid
 LANGUAGE plpgsql
@@ -87,16 +100,16 @@ BEGIN
     RAISE EXCEPTION 'Unauthorized: requires an authenticated session';
   END IF;
 
-  INSERT INTO private.trade_runs (user_id, surface, mint_address, label, total_steps)
-  VALUES (auth.uid(), p_surface, p_mint_address, p_label, p_total_steps)
+  INSERT INTO private.trade_runs (user_id, surface, mint_address, label, total_steps, params)
+  VALUES (auth.uid(), p_surface, p_mint_address, p_label, p_total_steps, p_params)
   RETURNING id INTO v_id;
 
   RETURN v_id;
 END;
 $$;
 
-REVOKE ALL    ON FUNCTION public.create_trade_run(text,text,text,integer) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.create_trade_run(text,text,text,integer) TO authenticated;
+REVOKE ALL    ON FUNCTION public.create_trade_run(text,text,text,integer,jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.create_trade_run(text,text,text,integer,jsonb) TO authenticated;
 
 
 -- ── upsert_trade_run_step(): one call per step transition ────────────
@@ -331,3 +344,35 @@ $$;
 
 REVOKE ALL    ON FUNCTION public.get_trade_run_steps(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_trade_run_steps(uuid) TO authenticated;
+
+
+-- ── get_trade_run_params(): the saved run plan, fetched once at actual
+-- resume time — deliberately NOT part of get_trade_run, which is polled
+-- every few seconds for a run's whole lifetime just to read `.control`;
+-- shipping the full schedule/amounts blob on every one of those polls
+-- would be pure waste ─────────────────────────────────────────────────
+DROP FUNCTION IF EXISTS public.get_trade_run_params(uuid);
+
+CREATE OR REPLACE FUNCTION public.get_trade_run_params(
+  p_run_id uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+STABLE
+SET search_path = private, public
+AS $$
+DECLARE
+  v_params jsonb;
+BEGIN
+  SELECT r.params INTO v_params
+  FROM private.trade_runs r
+  WHERE r.id = p_run_id
+    AND (public.is_super_admin() OR r.user_id = auth.uid());
+
+  RETURN v_params;
+END;
+$$;
+
+REVOKE ALL    ON FUNCTION public.get_trade_run_params(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_trade_run_params(uuid) TO authenticated;

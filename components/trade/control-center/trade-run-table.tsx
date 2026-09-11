@@ -170,7 +170,12 @@ export default function TradeRunTable() {
                 </thead>
                 <tbody className="divide-y divide-border">
                     {runs.map((run) => {
-                        const stale = run.status === 'running' && (Date.now() - new Date(run.updated_at).getTime()) > STALE_MS
+                        // A paused run with a dead tab is just as stuck as a
+                        // running one — nothing is left to poll `control` and
+                        // act on a resume_requested write, so it needs the
+                        // same "likely lost its tab" treatment.
+                        const stale = (run.status === 'running' || run.status === 'paused')
+                            && (Date.now() - new Date(run.updated_at).getTime()) > STALE_MS
                         const expanded = expandedId === run.id
                         const canPause = PAUSABLE.includes(run.surface)
                         const canCancel = CANCELLABLE.includes(run.surface) && (run.status === 'running' || run.status === 'paused')
@@ -207,15 +212,28 @@ export default function TradeRunTable() {
                                     <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                                         <div className="flex items-center justify-end gap-1.5">
                                             {stale ? (
-                                                <button
-                                                    type="button"
-                                                    disabled={busy}
-                                                    onClick={() => markStopped(run.id)}
-                                                    title="Bookkeeping only — this doesn't stop anything still running, the tab is already gone"
-                                                    className="px-2 py-1 rounded border border-border text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
-                                                >
-                                                    Mark as stopped
-                                                </button>
+                                                <>
+                                                    {canPause && (
+                                                        <a
+                                                            href={`/protected/trade/strategy-trade?resume=${run.id}`}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            title="Opens a new tab, reconstructs this run's saved plan, and skips wallets already confirmed successful"
+                                                            className="px-2 py-1 rounded border border-blue-500/60 bg-blue-500/10 text-[10px] text-blue-500 hover:bg-blue-500/20 transition-colors"
+                                                        >
+                                                            Resume in new tab
+                                                        </a>
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        disabled={busy}
+                                                        onClick={() => markStopped(run.id)}
+                                                        title="Bookkeeping only — this doesn't stop anything still running, the tab is already gone"
+                                                        className="px-2 py-1 rounded border border-border text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
+                                                    >
+                                                        Mark as stopped
+                                                    </button>
+                                                </>
                                             ) : (
                                                 <>
                                                     {canPause && run.status === 'running' && (

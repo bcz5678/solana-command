@@ -35,6 +35,7 @@ interface CreateBody {
   mintAddress?: string | null
   label?:       string | null
   totalSteps?:  number | null
+  params?:      Record<string, unknown> | null
 }
 
 export async function POST(req: NextRequest) {
@@ -61,6 +62,7 @@ export async function POST(req: NextRequest) {
     p_mint_address: body.mintAddress ?? null,
     p_label:        body.label ?? null,
     p_total_steps:  body.totalSteps ?? null,
+    p_params:       body.params ?? null,
   })
 
   if (error) {

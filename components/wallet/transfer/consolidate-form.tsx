@@ -555,7 +555,7 @@ export default function ConsolidateForm() {
                                 </span>
                             </div>
 
-                            <div className="border-t pt-3 flex flex-col gap-2">
+                            <div className="border-t pt-3 flex max-h-80 flex-col gap-2 overflow-y-auto">
                                 {pending.senders.map(s => (
                                     <div key={s.walletId} className="flex justify-between">
                                         <span className="font-mono text-muted-foreground">
@@ -598,7 +598,7 @@ export default function ConsolidateForm() {
                         </DialogDescription>
                     </DialogHeader>
 
-                    <div className="flex flex-col divide-y">
+                    <div className="flex max-h-80 flex-col divide-y overflow-y-auto">
                         {activeTransfer?.senders.map(s => {
                             const status = senderStatuses[s.walletId] ?? 'pending'
                             return (

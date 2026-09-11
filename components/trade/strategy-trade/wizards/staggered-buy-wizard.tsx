@@ -15,7 +15,8 @@ import LaunchTradeFeedPanel from '@/components/tokens/launch/launch-trade-feed-p
 import { useRelayEvent } from '@/hooks/use-relay-event'
 import type { TokenTransactionEvent } from '@/lib/wss/types'
 import { isKnownPumpfunSystemWallet } from '@/lib/pumpfun/known-system-wallets'
-import { createTradeRun, upsertTradeRunStep, getTradeRun, requestTradeRunControl, finishTradeRun } from '@/lib/trade/trade-run-client'
+import { createTradeRun, upsertTradeRunStep, getTradeRun, getTradeRunParams, getTradeRunSteps, requestTradeRunControl, finishTradeRun } from '@/lib/trade/trade-run-client'
+import type { StaggeredRunParams } from '@/lib/types/trade-run'
 
 type TradeType  = 'buy' | 'sell'
 type ExecPhase  = 'idle' | 'running' | 'paused' | 'done' | 'cancelled'
@@ -115,7 +116,7 @@ function countdownSleep(
     })
 }
 
-export default function StaggeredBuyWizard() {
+export default function StaggeredBuyWizard({ resumeRunId }: { resumeRunId?: string }) {
     const [step, setStep]                       = useState(0)
     const [tradeType, setTradeType]             = useState<TradeType>('buy')
     const [selectedWallets, setSelectedWallets] = useState<Set<string>>(new Set())
@@ -353,6 +354,77 @@ export default function StaggeredBuyWizard() {
         return () => clearInterval(id)
     }, [execPhase])
 
+    // Reconstructs a lost run's parameters from the DB (see the `params`
+    // column added to trade_runs and get_trade_run_params()) so a dead tab
+    // doesn't mean rebuilding the whole run by hand. Only fires once
+    // wallets have loaded — tradeAmounts/schedule reference wallet ids the
+    // Execute step's own render needs resolved against `wallets`.
+    const [resumeStatus, setResumeStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(resumeRunId ? 'loading' : 'idle')
+    const [resumeError, setResumeError]   = useState<string | null>(null)
+    const [resumeBanner, setResumeBanner] = useState<{ completed: number; total: number } | null>(null)
+    const resumeAttemptedRef = useRef(false)
+
+    useEffect(() => {
+        if (!resumeRunId || resumeAttemptedRef.current || wallets.length === 0) return
+        resumeAttemptedRef.current = true
+
+        ;(async () => {
+            const [run, params, steps] = await Promise.all([
+                getTradeRun(resumeRunId),
+                getTradeRunParams(resumeRunId),
+                getTradeRunSteps(resumeRunId),
+            ])
+
+            if (!run || !params) {
+                setResumeStatus('error')
+                setResumeError('Could not load this run to resume — it may have been deleted, or it predates saved run parameters.')
+                return
+            }
+
+            const p = params as unknown as StaggeredRunParams
+
+            setTradeType(p.tradeType)
+            setTokenMint(p.tokenMint)
+            setTokenResolved(true)
+            setTokenName(p.tokenName)
+            setTokenSymbol(p.tokenSymbol)
+            setTokenDecimals(p.tokenDecimals)
+            setSelectedWallets(new Set(p.schedule.map((e) => e.walletId)))
+            setTradeAmounts(p.tradeAmounts)
+            setSlippage(p.slippage)
+            setSellPct(p.sellPct)
+            setUseJitoBuy(p.useJitoBuy)
+            setJitoTipSol(p.jitoTipSol)
+            setAutoCommentEnabled(p.autoCommentEnabled)
+            setAutoCommentDelayMinSec(p.autoCommentDelayMinSec)
+            setAutoCommentDelayMaxSec(p.autoCommentDelayMaxSec)
+            setAutoCommentProbabilityPct(p.autoCommentProbabilityPct)
+            setAutoCommentBankIds(new Set(p.autoCommentBankIds))
+            setAutoHaltEnabled(p.autoHaltEnabled)
+            setHaltThreshold(p.haltThreshold)
+            setHaltWindowSec(p.haltWindowSec)
+            setTestMode(p.testMode)
+
+            // Only a confirmed 'success' counts as already done — a step
+            // left 'error'/'cancelled'/'running' is ambiguous about whether
+            // the trade actually landed (e.g. the response never made it
+            // back before the tab died), so it's retried rather than
+            // silently skipped. That can double-fire an already-landed
+            // trade for that one wallet; the safer of two bad options.
+            const successIds = new Set(
+                steps.filter((s) => s.status === 'success').map((s) => s.step_key)
+            )
+            const remaining = p.schedule.filter((e) => !successIds.has(e.walletId))
+
+            setSchedule(remaining)
+            setExecState(remaining.map((e) => ({ walletId: e.walletId, status: 'pending' as const })))
+            runIdRef.current = resumeRunId
+            setResumeBanner({ completed: successIds.size, total: p.schedule.length })
+            setResumeStatus('ready')
+            setStep(3)
+        })()
+    }, [resumeRunId, wallets])
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     function validDelayRange(): { minMs: number; maxMs: number } | null {
@@ -385,6 +457,34 @@ export default function StaggeredBuyWizard() {
                 ? Math.round(Math.random() * (delay.maxMs - delay.minMs) + delay.minMs)
                 : 0,
         }))
+    }
+
+    // The full run plan, captured once when a brand-new run kicks off (see
+    // the `!runIdRef.current` guard in executeAll()) and saved to
+    // trade_runs.params — what a resumed tab reconstructs its state from.
+    function buildRunParams(): StaggeredRunParams {
+        return {
+            tradeType,
+            tokenMint,
+            tokenName,
+            tokenSymbol,
+            tokenDecimals,
+            schedule,
+            tradeAmounts,
+            slippage,
+            sellPct,
+            useJitoBuy,
+            jitoTipSol,
+            autoCommentEnabled,
+            autoCommentDelayMinSec,
+            autoCommentDelayMaxSec,
+            autoCommentProbabilityPct,
+            autoCommentBankIds: [...autoCommentBankIds],
+            autoHaltEnabled,
+            haltThreshold,
+            haltWindowSec,
+            testMode,
+        }
     }
 
     // ── amount helpers ────────────────────────────────────────────────────────
@@ -681,12 +781,21 @@ export default function StaggeredBuyWizard() {
         setFlushSellSelectedIds(new Set())
         setFlushRebuySelectedIds(new Set())
 
-        runIdRef.current = await createTradeRun(
-            tradeType === 'buy' ? 'staggered_buy' : 'staggered_sell',
-            tokenMint,
-            tokenSymbol || tokenName || null,
-            schedule.length,
-        )
+        // Skipped when resuming — runIdRef.current is already set to the
+        // existing run's id (see the resume effect above), and reusing it
+        // is what keeps the Control Center showing one continuous run
+        // instead of a duplicate. params.schedule on that row stays the
+        // pristine original plan forever, since this only ever runs once
+        // per row.
+        if (!runIdRef.current) {
+            runIdRef.current = await createTradeRun(
+                tradeType === 'buy' ? 'staggered_buy' : 'staggered_sell',
+                tokenMint,
+                tokenSymbol || tokenName || null,
+                schedule.length,
+                buildRunParams() as unknown as Record<string, unknown>,
+            )
+        }
 
         // Build this run's own wallet-pubkey set so the relay-event handler
         // can tell "one of ours" from "foreign" — deliberately narrower than
@@ -970,6 +1079,14 @@ export default function StaggeredBuyWizard() {
             <p className="text-xs text-muted-foreground">
                 Spread {tradeType === 'buy' ? 'buys' : 'sells'} across wallets with randomized delays between each trade to simulate organic human behavior.
             </p>
+
+            {resumeStatus === 'error' && (
+                <div className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive">
+                    <span className="inline-block size-2 rounded-full bg-destructive shrink-0" />
+                    {resumeError}
+                </div>
+            )}
+
             <WizardShell
                 steps={steps}
                 current={step}
@@ -1565,6 +1682,13 @@ export default function StaggeredBuyWizard() {
                 {/* ── Step 3: Execute ─────────────────────────────────────── */}
                 {step === 3 && (
                     <div className="flex flex-col gap-4">
+
+                        {resumeBanner && (
+                            <div className="flex items-center gap-2 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-2 text-xs font-medium text-blue-600 dark:text-blue-400">
+                                <span className="inline-block size-2 rounded-full bg-blue-500 shrink-0" />
+                                Resuming — {resumeBanner.completed} of {resumeBanner.total} steps already completed, {resumeBanner.total - resumeBanner.completed} remaining. Review the plan below, then Start Execution to continue.
+                            </div>
+                        )}
 
                         {testMode && (
                             <div className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-600 dark:text-amber-400">

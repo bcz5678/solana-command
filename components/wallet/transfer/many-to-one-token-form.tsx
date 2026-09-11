@@ -234,16 +234,34 @@ export default function ManyToOneTokenForm() {
 
     // Fills every currently-SELECTED sender's amount with its own full
     // balance — not just the visible/filtered set, so toggling a type filter
-    // afterward doesn't silently drop an amount someone already set.
+    // afterward doesn't silently drop an amount someone already set. Wallets
+    // that don't actually hold the token (balance 0 or not yet loaded) are
+    // deselected instead of getting a "0" written in — a 0 there used to
+    // still get submitted and trip handleSubmit's "> 0" guard, blocking the
+    // whole batch over wallets that had nothing to send in the first place.
     function setMaxForAllSelected() {
+        const emptyIds = [...selectedSenders].filter((id) => {
+            const balance = tokenBalances[id]
+            return balance == null || balance <= 0
+        })
+
         setSenderAmounts((prev) => {
             const next = { ...prev }
             for (const id of selectedSenders) {
                 const balance = tokenBalances[id]
-                if (balance != null) next[id] = String(balance)
+                if (balance != null && balance > 0) next[id] = String(balance)
             }
+            for (const id of emptyIds) delete next[id]
             return next
         })
+
+        if (emptyIds.length > 0) {
+            setSelectedSenders((prev) => {
+                const next = new Set(prev)
+                emptyIds.forEach((id) => next.delete(id))
+                return next
+            })
+        }
     }
 
     function handleSubmit() {

@@ -24,6 +24,17 @@
 -- Also respects each wallet owner's pnl_baseline.since (the panel's manual
 -- "reset" control) — fills before it are excluded so a FIFO walk over the
 -- remainder starts clean, same reasoning as get_wallet_pnl_summary.
+--
+-- decimals must stay COALESCE(tm.decimals, 6::smallint), not COALESCE(tm.decimals, 6)
+-- — token_mints.decimals is smallint, but a bare integer literal like 6 is
+-- typed int4, and COALESCE(smallint, int4) resolves to int4. That silently
+-- widened this one column past what RETURNS TABLE declared, so every call
+-- failed at runtime with "structure of query does not match function result
+-- type" — caught as non-fatal in app/api/wallet/pnl/route.ts, so the API
+-- degraded to zero fills/zero open positions instead of erroring visibly:
+-- Unrealized always showed nothing, and Realized (a raw net-cash-flow
+-- number, not true PnL — see get_wallet_pnl_summary's own note) was left
+-- unoffset, reading as a real loss on every wallet still holding tokens.
 
 DROP FUNCTION IF EXISTS public.get_wallet_open_positions(uuid);
 
@@ -51,7 +62,7 @@ BEGIN
     RETURN QUERY
       SELECT
         tl.wallet_id, tl.to_address, tm.token_symbol, tm.token_name,
-        COALESCE(tm.decimals, 6), tl.side, tl.quantity, tl.amount_sol, tl.executed_at
+        COALESCE(tm.decimals, 6::smallint), tl.side, tl.quantity, tl.amount_sol, tl.executed_at
       FROM private.trade_logs tl
       JOIN private.wallets w ON w.id = tl.wallet_id
       LEFT JOIN private.token_mints tm ON tm.mint_public_key = tl.to_address
@@ -68,7 +79,7 @@ BEGIN
     RETURN QUERY
       SELECT
         tl.wallet_id, tl.to_address, tm.token_symbol, tm.token_name,
-        COALESCE(tm.decimals, 6), tl.side, tl.quantity, tl.amount_sol, tl.executed_at
+        COALESCE(tm.decimals, 6::smallint), tl.side, tl.quantity, tl.amount_sol, tl.executed_at
       FROM private.trade_logs tl
       JOIN private.wallets w ON w.id = tl.wallet_id
       LEFT JOIN private.token_mints tm ON tm.mint_public_key = tl.to_address

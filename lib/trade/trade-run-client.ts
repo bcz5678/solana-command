@@ -14,16 +14,31 @@ export async function createTradeRun(
   mintAddress: string | null,
   label:       string | null,
   totalSteps:  number | null,
+  params?:     Record<string, unknown> | null,
 ): Promise<string | null> {
   try {
     const res = await fetch('/api/trade-runs', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ surface, mintAddress, label, totalSteps }),
+      body:    JSON.stringify({ surface, mintAddress, label, totalSteps, params: params ?? null }),
     })
     if (!res.ok) return null
     const data = await res.json()
     return data.runId ?? null
+  } catch {
+    return null
+  }
+}
+
+// The saved run plan, fetched once at actual resume time — deliberately a
+// separate call from getTradeRun(), which is polled every few seconds for a
+// run's whole lifetime just to read `.control`.
+export async function getTradeRunParams(runId: string): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await fetch(`/api/trade-runs/${runId}/params`)
+    if (!res.ok) return null
+    const data = await res.json()
+    return (data.params as Record<string, unknown>) ?? null
   } catch {
     return null
   }

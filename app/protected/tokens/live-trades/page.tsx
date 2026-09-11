@@ -50,9 +50,15 @@ export default function LiveTradesPage() {
     const [showFeed, setShowFeed] = useState(false)
 
     useEffect(() => {
-        fetch('/api/token-mint/explorer?status=launched&limit=1000')
+        // status=all, not 'launched' — a token's mint address is assigned
+        // the moment it's built (still at 'draft'), well before the actual
+        // on-chain launch, so pre-launch tokens are worth listing here too:
+        // set the panel up pointed at the right mint ahead of time and it's
+        // already watching the instant real trades start landing. Only
+        // 'failed' is excluded — a dead mint with nothing to watch.
+        fetch('/api/token-mint/explorer?status=all&limit=1000')
             .then((r) => r.json())
-            .then((data) => setTokens(data.tokens ?? []))
+            .then((data) => setTokens((data.tokens ?? []).filter((t: TokenMint) => t.launch_status !== 'failed')))
             .catch(() => {})
             .finally(() => setTokensLoading(false))
 
@@ -90,6 +96,12 @@ export default function LiveTradesPage() {
         setPreviewLoading(true)
         setPreviewError('')
         setPreview(null)
+        // Set regardless of whether the on-chain lookup below succeeds — a
+        // pre-launch token has no bonding curve yet (that's the whole point
+        // of on-chain 404ing here), but its mint is already known, so the
+        // dbToken lookup keyed on this still needs to resolve to drive the
+        // pre-launch fallback panel below.
+        setActiveMint(mint)
         // Auto-show, matching the Launch Builder's version of this same panel
         // (which mounts automatically, not behind a click) — the feed's own
         // refresh mechanism is identical either way (pure WSS push, see
@@ -106,10 +118,8 @@ export default function LiveTradesPage() {
             }
             const { body: { preview: raw } } = await res.json()
             setPreview(parsePreview(raw))
-            setActiveMint(mint)
         } catch (err) {
             setPreviewError(err instanceof Error ? err.message : 'Failed to load token')
-            setActiveMint('')
         } finally {
             setPreviewLoading(false)
         }
@@ -151,7 +161,7 @@ export default function LiveTradesPage() {
                             : 'border-border text-muted-foreground hover:border-blue-400 hover:text-foreground',
                     ].join(' ')}
                 >
-                    Select launched token
+                    Select token
                 </button>
                 <button
                     onClick={() => setMode('paste')}
@@ -174,11 +184,12 @@ export default function LiveTradesPage() {
                     className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
                     <option value="">
-                        {tokensLoading ? 'Loading tokens…' : `Select a launched token (${tokens.length})`}
+                        {tokensLoading ? 'Loading tokens…' : `Select a token (${tokens.length})`}
                     </option>
                     {tokens.map((t) => (
                         <option key={t.id} value={t.mint_public_key}>
                             {t.token_symbol} — {t.token_name} ({maskPubKey(t.mint_public_key)})
+                            {t.launch_status !== 'launched' ? ` · ${t.launch_status}` : ''}
                         </option>
                     ))}
                 </select>
@@ -202,8 +213,59 @@ export default function LiveTradesPage() {
                 <p className="text-sm text-muted-foreground">Loading token info…</p>
             )}
 
-            {previewError && (
+            {previewError && !dbToken && (
                 <p className="text-sm text-destructive">{previewError}</p>
+            )}
+
+            {/* Pre-launch fallback — the on-chain lookup above 404s until the
+                token actually launches (no bonding curve exists yet), but for
+                one of ours we already know its name/symbol/mint from the DB.
+                Lets the panel be set up and watching ahead of time instead of
+                waiting until after launch to even select the token. */}
+            {!preview && !previewLoading && dbToken && (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 flex flex-col gap-4">
+                    <div className="flex items-center gap-3.5">
+                        {dbToken.logo_url ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                                src={dbToken.logo_url}
+                                alt={dbToken.token_name}
+                                className="size-12 shrink-0 rounded-lg object-cover"
+                            />
+                        ) : (
+                            <div className="size-12 shrink-0 rounded-lg bg-muted flex items-center justify-center font-mono text-xs font-bold text-muted-foreground">
+                                {dbToken.token_symbol?.slice(0, 2).toUpperCase()}
+                            </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-semibold text-foreground truncate">{dbToken.token_name}</span>
+                                <span className="font-mono text-xs text-muted-foreground">${dbToken.token_symbol}</span>
+                                <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-amber-500/15 text-amber-600 capitalize">
+                                    {dbToken.launch_status}
+                                </span>
+                            </div>
+                            <p className="font-mono text-xs text-muted-foreground truncate">{dbToken.mint_public_key}</p>
+                        </div>
+                        <Button onClick={() => setShowFeed((v) => !v)}>
+                            {showFeed ? 'Hide' : 'Watch'} Live Trades
+                        </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                        Not live on pump.fun yet — trades will start appearing below the moment it launches.
+                    </p>
+                    {devWallet && (
+                        <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 px-3 py-2 flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Dev Wallet</p>
+                                <p className="font-mono text-xs truncate">{devWallet.label ?? maskPubKey(devWallet.public_key)}</p>
+                            </div>
+                            <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-blue-500/20 text-blue-500">
+                                OURS
+                            </span>
+                        </div>
+                    )}
+                </div>
             )}
 
             {preview && !previewLoading && (
@@ -297,10 +359,10 @@ export default function LiveTradesPage() {
                 </div>
             )}
 
-            {showFeed && preview && (
+            {showFeed && (preview || dbToken) && (
                 <LaunchTradeFeedPanel
-                    mintAddress={mintStr}
-                    tokenSymbol={preview.symbol}
+                    mintAddress={preview?.mint.toBase58() ?? dbToken?.mint_public_key ?? activeMint}
+                    tokenSymbol={preview?.symbol ?? dbToken?.token_symbol}
                     ourWallets={ourWallets}
                     ourWalletLabels={ourWalletLabels}
                 />

@@ -22,9 +22,17 @@ export function TokenMintInput({ onTokenChange }: Props) {
     useEffect(() => { callbackRef.current = onTokenChange })
 
     useEffect(() => {
-        fetch('/api/token-mint/explorer?status=launched')
+        // status=all, not 'launched' — a token's mint is assigned at build
+        // time (still at 'draft'), well before it actually launches on-chain,
+        // so a run can be set up and pointed at it ahead of time and fired
+        // the moment launch lands, instead of waiting on the DB status to
+        // flip before it's even selectable. Only 'failed' is excluded —
+        // there's nothing left to trade against a dead mint. Matching by
+        // mint address below (not a live on-chain lookup) is what makes this
+        // safe pre-launch: no bonding curve needs to exist yet.
+        fetch('/api/token-mint/explorer?status=all')
             .then(r => r.ok ? r.json() : null)
-            .then(d => { if (d) setOwnTokens(d.tokens ?? []) })
+            .then(d => { if (d) setOwnTokens((d.tokens ?? []).filter((t: TokenMint) => t.launch_status !== 'failed')) })
             .catch(() => {})
     }, [])
 
@@ -163,6 +171,11 @@ export function TokenMintInput({ onTokenChange }: Props) {
                                 <span className="truncate font-mono text-[10px] text-muted-foreground">{token.mint_public_key}</span>
                             </span>
                             <span className="ml-auto shrink-0 text-[10px] font-medium text-muted-foreground">{token.token_symbol}</span>
+                            {token.launch_status !== 'launched' && (
+                                <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium capitalize bg-amber-500/15 text-amber-600">
+                                    {token.launch_status}
+                                </span>
+                            )}
                         </button>
                     ))}
                 </div>

@@ -1,5 +1,10 @@
 // lib/pumpfun/comment-bot.ts
 //
+// The wallet-signature auth + proxy/Cloudflare-block plumbing this file
+// pioneered now lives in pumpfun-client.ts (extracted so profile-bot.ts, the
+// next pump.fun-writing feature, reuses the same proven flow instead of
+// re-deriving it) — this file just holds the Callout-specific endpoints.
+//
 // Phase 1: auth + posting core for the pump.fun comment bot. No proxy
 // rotation yet. CAPTCHA handling was deferred pending a live check — that
 // check is done: a probe against a throwaway wallet + non-existent mint
@@ -49,174 +54,18 @@
 // clean for IPRoyal in the same test.
 
 import { Keypair } from '@solana/web3.js'
-import nacl from 'tweetnacl'
-import bs58 from 'bs58'
-import { fetch as proxyFetch, ProxyAgent, type Dispatcher, type Response as ProxyFetchResponse } from 'undici'
 import { getWalletKeypairById } from '@/lib/vault/get-wallet-by-id'
-import { getNextProxyUrl } from '@/lib/pumpfun/proxy-pool'
-
-const PUMPFUN_API = 'https://frontend-api-v3.pump.fun'
-
-function getProxyDispatcher(): Dispatcher {
-  try {
-    return new ProxyAgent(getNextProxyUrl())
-  } catch (poolErr) {
-    // lib/proxies.txt missing/empty in this environment — fall back to the
-    // single ProxyCheap gateway rather than hard-failing every comment.
-    const fallbackUrl = process.env.PUMPFUN_COMMENT_PROXY
-    if (!fallbackUrl) {
-      throw new Error(
-        `No proxy available for pump.fun comments — proxy pool: ${(poolErr as Error).message}; ` +
-        `PUMPFUN_COMMENT_PROXY fallback is also not set`
-      )
-    }
-    return new ProxyAgent(fallbackUrl)
-  }
-}
-
-function wait(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-// Rotating residential proxies occasionally hand out a dead exit node — that
-// surfaces as fetch() itself throwing (undici's TypeError "fetch failed"),
-// distinct from pump.fun rejecting the request (login failure, EXISTING_
-// CALLOUT, INSUFFICIENT_BALANCE, ...), which the callers below turn into a
-// normal return value instead of a throw. Only the former is worth retrying —
-// retrying a real rejection would just burn attempts on something a new IP
-// can't fix.
-//
-// A THIRD case looks like a real rejection but isn't: Cloudflare (sitting in
-// front of pump.fun) occasionally edge-blocks a specific exit IP and serves
-// an HTML challenge/redirect page (to static.pump.fun/blocked) instead of
-// ever reaching pump.fun's app — confirmed live 2026-09-07, a 403 with that
-// exact HTML body while other wallets on the same proxy gateway succeeded
-// minutes earlier. That's an IP-reputation problem a fresh rotated exit is
-// likely to fix, so it's treated as retryable via CloudflareBlockError below
-// instead of the generic non-ok-response path.
-class CloudflareBlockError extends Error {
-  constructor(status: number, context: string) {
-    super(`pump.fun edge-blocked this proxy exit during ${context}: HTTP ${status} (Cloudflare challenge page, not pump.fun's API)`)
-    this.name = 'CloudflareBlockError'
-  }
-}
-
-function looksLikeCloudflareBlock(bodyText: string): boolean {
-  const t = bodyText.trimStart()
-  return t.startsWith('<!DOCTYPE') || t.startsWith('<html')
-    || bodyText.includes('static.pump.fun/blocked') || bodyText.includes('challenge-platform')
-}
-
-function isRetryableProxyFailure(err: unknown): boolean {
-  return err instanceof CloudflareBlockError
-    || (err instanceof TypeError && err.message === 'fetch failed')
-}
-
-/** Parses a JSON response body, but throws CloudflareBlockError first if the
- *  body is actually an HTML edge-block page — callers must not silently
- *  treat that as "pump.fun returned no useful JSON" and give up. */
-async function readJsonOrThrowIfBlocked(res: ProxyFetchResponse, context: string): Promise<any> {
-  const bodyText = await res.text().catch(() => '')
-  if (looksLikeCloudflareBlock(bodyText)) {
-    throw new CloudflareBlockError(res.status, context)
-  }
-  try {
-    return bodyText ? JSON.parse(bodyText) : null
-  } catch {
-    return null
-  }
-}
-
-const PROXY_MAX_ATTEMPTS = 3
-
-// Retries the whole login-through-action cycle with a FRESH ProxyAgent (new
-// exit IP), not just the one failed fetch — keeps login and its paired
-// action on the same identity for every attempt, not just the first.
-async function withProxyRetry<T>(fn: (dispatcher: Dispatcher) => Promise<T>): Promise<T> {
-  for (let attempt = 1; attempt <= PROXY_MAX_ATTEMPTS; attempt++) {
-    try {
-      return await fn(getProxyDispatcher())
-    } catch (err) {
-      if (!isRetryableProxyFailure(err) || attempt === PROXY_MAX_ATTEMPTS) throw err
-      const reason = err instanceof CloudflareBlockError ? 'Cloudflare edge-blocked this exit IP' : 'proxy connection failed'
-      console.warn(`[comment-bot] ${reason} (attempt ${attempt}/${PROXY_MAX_ATTEMPTS}), retrying with a new exit IP:`, (err as Error).message)
-      await wait(300 + Math.random() * 500)
-    }
-  }
-  // Unreachable — the loop above always returns or throws.
-  throw new Error('withProxyRetry: exhausted attempts')
-}
-
-// Static browser-mimicking headers — matches what every reference bot sends
-// on this flow. Not a real anti-detection measure by itself (see Phase 4).
-const BROWSER_HEADERS: Record<string, string> = {
-  'Accept':               '*/*',
-  'Content-Type':         'application/json',
-  'Origin':                'https://pump.fun',
-  'Referer':               'https://pump.fun/',
-  'User-Agent':            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-  'sec-ch-ua':             '"Chromium";v="125", "Not.A/Brand";v="24"',
-  'sec-ch-ua-mobile':      '?0',
-  'sec-ch-ua-platform':    '"Windows"',
-}
+import {
+  PUMPFUN_API, BROWSER_HEADERS, withProxyRetry, loginToPumpFun,
+  readJsonOrThrowIfBlocked, looksLikeCloudflareBlock, CloudflareBlockError,
+} from '@/lib/pumpfun/pumpfun-client'
+import { fetch as proxyFetch, type Dispatcher } from 'undici'
 
 export interface PostCommentResult {
   success: boolean
   status?: number
   error?:  string
   raw?:    unknown
-}
-
-function signLoginMessage(keypair: Keypair): { timestamp: string; signature: string } {
-  const timestamp = Date.now().toString()
-  const message   = new TextEncoder().encode(`Sign in to pump.fun: ${timestamp}`)
-  const signature = nacl.sign.detached(message, keypair.secretKey)
-  return { timestamp, signature: bs58.encode(signature) }
-}
-
-// Node's fetch (undici) exposes multi-value Set-Cookie via getSetCookie() —
-// headers.get('set-cookie') would comma-join multiple cookies into one
-// unparseable string, so prefer getSetCookie() when available.
-function extractAuthToken(res: ProxyFetchResponse): string | null {
-  const cookies = res.headers.getSetCookie()
-
-  for (const cookie of cookies) {
-    const match = cookie.match(/(?:^|;\s*)auth_token=([^;]+)/)
-    if (match) return match[1]
-  }
-  return null
-}
-
-async function loginToPumpFun(keypair: Keypair, dispatcher: Dispatcher): Promise<string> {
-  const { timestamp, signature } = signLoginMessage(keypair)
-
-  const res = await proxyFetch(`${PUMPFUN_API}/auth/login`, {
-    method:  'POST',
-    headers: BROWSER_HEADERS,
-    body:    JSON.stringify({
-      address:   keypair.publicKey.toBase58(),
-      signature,
-      timestamp,
-    }),
-    dispatcher,
-  })
-
-  if (!res.ok) {
-    const bodyText = await res.text().catch(() => '')
-    if (looksLikeCloudflareBlock(bodyText)) {
-      console.warn(`[comment-bot] login edge-blocked by Cloudflare: ${res.status}`)
-      throw new CloudflareBlockError(res.status, 'login')
-    }
-    console.error(`[comment-bot] login failed: ${res.status} ${bodyText}`)
-    throw new Error(`pump.fun login failed: ${res.status} ${bodyText}`)
-  }
-
-  const authToken = extractAuthToken(res)
-  if (!authToken) {
-    console.error('[comment-bot] login succeeded but response carried no auth_token cookie')
-    throw new Error('pump.fun login succeeded but returned no auth_token cookie')
-  }
-  return authToken
 }
 
 async function createCallout(authToken: string, mint: string, text: string, dispatcher: Dispatcher): Promise<PostCommentResult> {

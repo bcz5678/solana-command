@@ -13,8 +13,42 @@ export interface TradeRun {
   status:       TradeRunStatus
   control:      TradeRunControl
   total_steps:  number | null
+  // The saved run plan, if any — surface-specific shape (see
+  // StaggeredRunParams), NULL for runs predating this column and for
+  // surfaces that don't populate it yet. Never returned by get_trade_run(s)
+  // — fetched separately via getTradeRunParams() only when actually
+  // resuming, since it can be a sizeable JSON blob.
+  params:       Record<string, unknown> | null
   created_at:   string
   updated_at:   string
+}
+
+// The full reconstructable plan for a staggered_buy/staggered_sell run,
+// captured once at kickoff (see buildRunParams() in staggered-buy-wizard.tsx)
+// so a lost tab can be picked back up in a fresh one.
+export interface StaggeredRunParams {
+  tradeType:                    'buy' | 'sell'
+  tokenMint:                    string
+  tokenName:                    string
+  tokenSymbol:                  string
+  tokenDecimals:                number
+  // The full, original schedule — never trimmed. A resume filters this
+  // against trade_run_steps at read time rather than storing a mutated copy.
+  schedule:                     { walletId: string; delayMsAfter: number }[]
+  tradeAmounts:                 Record<string, string>
+  slippage:                     number
+  sellPct:                      string
+  useJitoBuy:                   boolean
+  jitoTipSol:                   string
+  autoCommentEnabled:           boolean
+  autoCommentDelayMinSec:       string
+  autoCommentDelayMaxSec:       string
+  autoCommentProbabilityPct:    string
+  autoCommentBankIds:           string[]
+  autoHaltEnabled:              boolean
+  haltThreshold:                string
+  haltWindowSec:                string
+  testMode:                     boolean
 }
 
 export interface TradeRunStep {

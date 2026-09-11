@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import BundleTradesWizard   from '@/components/trade/strategy-trade/wizards/bundle-trades-wizard'
 import StaggeredBuyWizard   from '@/components/trade/strategy-trade/wizards/staggered-buy-wizard'
 import HumanVolumeWizard  from '@/components/trade/strategy-trade/wizards/human-volume-wizard'
@@ -26,11 +26,24 @@ const wizards: Record<StrategyKey, React.ComponentType> = {
 }
 
 export default function StrategyTradePage() {
-    const [active, setActive] = useState<StrategyKey | null>(null)
+    const [active, setActive]         = useState<StrategyKey | null>(null)
+    const [resumeRunId, setResumeRunId] = useState<string | undefined>(undefined)
+
+    // One-shot read of ?resume=<runId>, e.g. from the Trade Control
+    // Center's "Resume in new tab" action on a stalled staggered run — a
+    // plain window.location read (not useSearchParams) since this page is
+    // fully client-rendered and the value never needs to react to later
+    // navigation within the tab.
+    useEffect(() => {
+        const id = new URLSearchParams(window.location.search).get('resume')
+        if (id) {
+            setResumeRunId(id)
+            setActive('staggered')
+        }
+    }, [])
 
     if (active) {
-        const Wizard = wizards[active]
-        const meta   = strategies.find(s => s.key === active)!
+        const meta = strategies.find(s => s.key === active)!
         return (
             <div className="flex flex-col gap-6 p-6 w-full min-h-0">
                 <div className="flex items-center gap-3">
@@ -44,7 +57,9 @@ export default function StrategyTradePage() {
                     <span className="text-muted-foreground/40">/</span>
                     <span className="text-sm font-semibold">{meta.label}</span>
                 </div>
-                <Wizard />
+                {active === 'staggered'
+                    ? <StaggeredBuyWizard resumeRunId={resumeRunId} />
+                    : (() => { const Wizard = wizards[active]; return <Wizard /> })()}
             </div>
         )
     }
